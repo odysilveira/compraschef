@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "compraschef",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": [
+        "/c",
+        "cd /d C:\\Users\\Ody\\ComprasChef && set PATH=C:\\Program Files\\nodejs;%PATH% && npm run dev -- --port 3010"
+      ],
+      "port": 3010
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-fundo text-texto;
+  }
+  body {
+    @apply font-sans antialiased;
+  }
+  h1 {
+    @apply text-[28px] font-bold;
+  }
+  h2 {
+    @apply text-[20px] font-semibold;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-card bg-superficie p-4 shadow-card;
+  }
+  .rotulo {
+    @apply text-[13px] font-medium uppercase tracking-wide text-slate-500;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-card px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primario {
+    @apply btn bg-primaria text-white hover:bg-primaria-escura;
+  }
+  .btn-secundario {
+    @apply btn border border-slate-300 bg-superficie text-texto hover:bg-slate-50;
+  }
+  .btn-perigo {
+    @apply btn bg-erro text-white hover:bg-red-700;
+  }
+  .btn-gigante {
+    @apply btn w-full bg-primaria py-6 text-xl text-white hover:bg-primaria-escura;
+  }
+  .campo {
+    @apply w-full rounded-card border border-slate-300 bg-superficie px-3 py-2.5 text-sm outline-none focus:border-primaria focus:ring-2 focus:ring-primaria/20;
+  }
+}

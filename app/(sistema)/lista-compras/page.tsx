@@ -1,0 +1,296 @@
+"use client";
+
+// Lista de Compras (requisitos 7–9): geração automática pelo estoque mínimo,
+// edição do rascunho e confirmação que dispara cotações por fornecedor.
+
+import { useState } from "react";
+import { Plus, Sparkles, Trash2 } from "lucide-react";
+import { Badge, Card, Tabela, TituloPagina, Vazio } from "@/components/ui";
+import {
+  estoqueAtual,
+  mutate,
+  nomePerfil,
+  nomeProduto,
+  produtosAbaixoDoMinimo,
+  siglaUnidadeUso,
+  uid,
+  useDB,
+} from "@/lib/data";
+import { usePapel } from "@/lib/roles";
+import { dataHoraBR, qtd } from "@/lib/format";
+import type { ListaItem, StatusLista } from "@/lib/types";
+
+const STATUS_LISTA: Record<StatusLista, { rotulo: string; cor: "verde" | "laranja" | "cinza" | "azul" }> = {
+  rascunho: { rotulo: "Rascunho", cor: "cinza" },
+  confirmada: { rotulo: "Confirmada", cor: "azul" },
+  em_cotacao: { rotulo: "Em cotação", cor: "laranja" },
+  finalizada: { rotulo: "Finalizada", cor: "verde" },
+};
+
+export default function ListaComprasPage() {
+  const db = useDB();
+  const { papel } = usePapel();
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  const listas = [...db.listas_compras].sort((a, b) => b.criada_em.localeCompare(a.criada_em));
+
+  function gerarListaAutomatica() {
+    const abaixo = produtosAbaixoDoMinimo(db);
+    if (abaixo.length === 0) {
+      setAviso("Nenhum produto abaixo do estoque mínimo agora — tudo em ordem!");
+      return;
+    }
+    mutate((d) => {
+      const listaId = uid("lista");
+      d.listas_compras.push({
+        id: listaId,
+        status: "rascunho",
+        gerada_automaticamente: true,
+        criada_por: `perfil-${papel}`,
+        criada_em: new Date().toISOString(),
+      });
+      for (const { produto, estoque } of abaixo) {
+        d.lista_itens.push({
+          id: uid("li"),
+          lista_id: listaId,
+          produto_id: produto.id,
+          quantidade: Math.max(1, Math.ceil(produto.estoque_minimo * 2 - estoque)),
+        });
+      }
+    });
+    setAviso(`Lista automática criada com ${abaixo.length} produto${abaixo.length === 1 ? "" : "s"} abaixo do mínimo.`);
+  }
+
+  function atualizarItem(itemId: string, mudancas: Partial<ListaItem>) {
+    mutate((d) => {
+      const item = d.lista_itens.find((i) => i.id === itemId);
+      if (item) Object.assign(item, mudancas);
+    });
+  }
+
+  function removerItem(itemId: string) {
+    mutate((d) => {
+      d.lista_itens = d.lista_itens.filter((i) => i.id !== itemId);
+    });
+  }
+
+  function adicionarItem(listaId: string, produtoId: string) {
+    if (!produtoId) return;
+    mutate((d) => {
+      d.lista_itens.push({ id: uid("li"), lista_id: listaId, produto_id: produtoId, quantidade: 1 });
+    });
+  }
+
+  function confirmarLista(listaId: string) {
+    const itens = db.lista_itens.filter((i) => i.lista_id === listaId);
+    const fornecedores = db.fornecedores.filter(
+      (f) =>
+        f.ativo &&
+        itens.some((i) =>
+          db.fornecedor_produtos.some((fp) => fp.fornecedor_id === f.id && fp.produto_id === i.produto_id)
+        )
+    );
+    const agora = new Date().toISOString();
+    const prazo = new Date();
+    prazo.setDate(prazo.getDate() + 2);
+    const prazoISO = prazo.toISOString();
+
+    mutate((d) => {
+      const lista = d.listas_compras.find((l) => l.id === listaId);
+      if (!lista) return;
+      if (fornecedores.length === 0) {
+        lista.status = "confirmada";
+        return;
+      }
+      lista.status = "em_cotacao";
+      for (const f of fornecedores) {
+        const cotacaoId = uid("cot");
+        d.cotacoes.push({
+          id: cotacaoId,
+          lista_id: listaId,
+          fornecedor_id: f.id,
+          token: uid("tok"),
+          status: "enviada",
+          prazo_resposta: prazoISO,
+          canal: "whatsapp",
+          enviada_em: agora,
+        });
+        for (const item of itens) {
+          const vende = d.fornecedor_produtos.some(
+            (fp) => fp.fornecedor_id === f.id && fp.produto_id === item.produto_id
+          );
+          if (vende) {
+            d.cotacao_itens.push({
+              id: uid("ci"),
+              cotacao_id: cotacaoId,
+              produto_id: item.produto_id,
+              quantidade: item.quantidade,
+              disponivel: true,
+            });
+          }
+        }
+      }
+    });
+
+    setAviso(
+      fornecedores.length === 0
+        ? "Lista confirmada, mas nenhum fornecedor cadastrado vende estes itens — nenhuma cotação foi criada."
+        : `Lista confirmada! Cotação enviada por WhatsApp para ${fornecedores.length} fornecedor${
+            fornecedores.length === 1 ? "" : "es"
+          } (simulado). Acompanhe na tela de Cotações.`
+    );
+  }
+
+  return (
+    <div>
+      <TituloPagina
+        titulo="Lista de Compras"
+        acao={
+          <button className="btn-primario" onClick={gerarListaAutomatica}>
+            <Sparkles className="h-4 w-4" /> Gerar lista automática
+          </button>
+        }
+      />
+
+      {aviso && (
+        <div className="mb-4 rounded-card bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
+          {aviso}
+        </div>
+      )}
+
+      {listas.length === 0 ? (
+        <Vazio mensagem="Nenhuma lista de compras ainda. Use o botão acima para gerar uma automaticamente." />
+      ) : (
+        <div className="space-y-4">
+          {listas.map((lista) => {
+            const itens = db.lista_itens.filter((i) => i.lista_id === lista.id);
+            const status = STATUS_LISTA[lista.status];
+            const rascunho = lista.status === "rascunho";
+            const disponiveis = db.produtos.filter(
+              (p) => p.ativo && !itens.some((i) => i.produto_id === p.id)
+            );
+            return (
+              <Card key={lista.id}>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2>Lista de {dataHoraBR(lista.criada_em)}</h2>
+                    <p className="text-xs text-slate-500">
+                      Criada por {nomePerfil(db, lista.criada_por)}
+                      {lista.gerada_automaticamente ? " · gerada automaticamente" : " · manual"} ·{" "}
+                      {itens.length} item{itens.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <Badge cor={status.cor}>{status.rotulo}</Badge>
+                </div>
+
+                {rascunho ? (
+                  <>
+                    {itens.length === 0 ? (
+                      <p className="py-3 text-sm text-slate-500">Lista vazia — adicione produtos abaixo.</p>
+                    ) : (
+                      <Tabela cabecalho={["Produto", "Quantidade", "Observação", ""]}>
+                        {itens.map((item) => {
+                          const sigla = siglaUnidadeUso(db, item.produto_id);
+                          const produto = db.produtos.find((p) => p.id === item.produto_id);
+                          return (
+                            <tr key={item.id}>
+                              <td className="px-3 py-2">
+                                <p className="font-medium">{nomeProduto(db, item.produto_id)}</p>
+                                {produto && (
+                                  <p className="text-xs text-slate-400">
+                                    estoque {qtd(estoqueAtual(db, produto.id), sigla)} · mín.{" "}
+                                    {qtd(produto.estoque_minimo, sigla)}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    className="campo !w-24 !py-1.5"
+                                    value={item.quantidade}
+                                    onChange={(e) =>
+                                      atualizarItem(item.id, {
+                                        quantidade: Math.max(1, Number(e.target.value) || 1),
+                                      })
+                                    }
+                                  />
+                                  <span className="text-xs text-slate-500">{sigla}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  className="campo min-w-[160px] !py-1.5"
+                                  placeholder="Ex.: peça limpa, sem cordão"
+                                  value={item.observacao ?? ""}
+                                  onChange={(e) =>
+                                    atualizarItem(item.id, { observacao: e.target.value || undefined })
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <button
+                                  className="rounded-full p-1.5 text-erro hover:bg-erro-clara"
+                                  onClick={() => removerItem(item.id)}
+                                  aria-label="Remover item"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </Tabela>
+                    )}
+
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Plus className="h-4 w-4 text-slate-400" />
+                        <select
+                          className="campo max-w-xs"
+                          value=""
+                          onChange={(e) => adicionarItem(lista.id, e.target.value)}
+                        >
+                          <option value="">Adicionar produto…</option>
+                          {disponiveis.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nome}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        className="btn-primario"
+                        disabled={itens.length === 0}
+                        onClick={() => confirmarLista(lista.id)}
+                      >
+                        Confirmar lista
+                      </button>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Ao confirmar, cada fornecedor que vende itens desta lista recebe uma cotação com link
+                      exclusivo (prazo de 2 dias).
+                    </p>
+                  </>
+                ) : (
+                  <ul className="space-y-1 text-sm">
+                    {itens.map((item) => (
+                      <li key={item.id} className="flex flex-wrap items-baseline gap-2">
+                        <span className="font-medium">{nomeProduto(db, item.produto_id)}</span>
+                        <span className="text-slate-500">
+                          {qtd(item.quantidade, siglaUnidadeUso(db, item.produto_id))}
+                        </span>
+                        {item.observacao && <span className="text-xs text-slate-400">({item.observacao})</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

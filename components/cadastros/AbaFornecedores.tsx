@@ -27,6 +27,8 @@ export function AbaFornecedores() {
   const [busca, setBusca] = useState("");
   const [form, setForm] = useState<Fornecedor | null>(null);
   const [produtoParaVincular, setProdutoParaVincular] = useState("");
+  // Produtos marcados durante um cadastro NOVO (gravados junto no Salvar)
+  const [produtosNovos, setProdutosNovos] = useState<string[]>([]);
 
   const lista = db.fornecedores
     .filter((f) => f.ativo)
@@ -45,10 +47,16 @@ export function AbaFornecedores() {
         const i = banco.fornecedores.findIndex((f) => f.id === form.id);
         if (i >= 0) banco.fornecedores[i] = form;
       } else {
-        banco.fornecedores.push({ ...form, id: uid("forn") });
+        const novoId = uid("forn");
+        banco.fornecedores.push({ ...form, id: novoId });
+        // Grava os produtos marcados durante o cadastro
+        for (const produtoId of produtosNovos) {
+          banco.fornecedor_produtos.push({ id: uid("fp"), fornecedor_id: novoId, produto_id: produtoId });
+        }
       }
     });
     setForm(null);
+    setProdutosNovos([]);
   }
 
   function excluir() {
@@ -62,17 +70,22 @@ export function AbaFornecedores() {
   }
 
   function vincularProduto() {
-    if (!form?.id || !produtoParaVincular) return;
-    const fornecedorId = form.id;
+    if (!form || !produtoParaVincular) return;
     const produtoId = produtoParaVincular;
-    mutate((banco) => {
-      const jaExiste = banco.fornecedor_produtos.some(
-        (fp) => fp.fornecedor_id === fornecedorId && fp.produto_id === produtoId
-      );
-      if (!jaExiste) {
-        banco.fornecedor_produtos.push({ id: uid("fp"), fornecedor_id: fornecedorId, produto_id: produtoId });
-      }
-    });
+    if (form.id) {
+      const fornecedorId = form.id;
+      mutate((banco) => {
+        const jaExiste = banco.fornecedor_produtos.some(
+          (fp) => fp.fornecedor_id === fornecedorId && fp.produto_id === produtoId
+        );
+        if (!jaExiste) {
+          banco.fornecedor_produtos.push({ id: uid("fp"), fornecedor_id: fornecedorId, produto_id: produtoId });
+        }
+      });
+    } else {
+      // Cadastro novo: guarda localmente até o Salvar
+      setProdutosNovos((atual) => (atual.includes(produtoId) ? atual : [...atual, produtoId]));
+    }
     setProdutoParaVincular("");
   }
 
@@ -88,9 +101,14 @@ export function AbaFornecedores() {
         .filter((fp) => fp.fornecedor_id === form.id)
         .sort((a, b) => nomeProduto(db, a.produto_id).localeCompare(nomeProduto(db, b.produto_id), "pt-BR"))
     : [];
-  const produtosDisponiveis = form?.id
+  const produtosDisponiveis = form
     ? db.produtos
-        .filter((p) => p.ativo && !vinculos.some((fp) => fp.produto_id === p.id))
+        .filter(
+          (p) =>
+            p.ativo &&
+            !vinculos.some((fp) => fp.produto_id === p.id) &&
+            !produtosNovos.includes(p.id)
+        )
         .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
     : [];
 
@@ -110,7 +128,13 @@ export function AbaFornecedores() {
 
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <BarraBusca valor={busca} onMudar={setBusca} placeholder="Buscar por nome, CNPJ, contato…" />
-        <button className="btn-primario mb-4" onClick={() => setForm(fornecedorVazio())}>
+        <button
+          className="btn-primario mb-4"
+          onClick={() => {
+            setProdutosNovos([]);
+            setForm(fornecedorVazio());
+          }}
+        >
           <Plus size={16} /> Novo fornecedor
         </button>
       </div>
@@ -175,7 +199,10 @@ export function AbaFornecedores() {
       <Modal
         aberto={form !== null}
         titulo={form?.id ? "Editar fornecedor" : "Novo fornecedor"}
-        onFechar={() => setForm(null)}
+        onFechar={() => {
+          setForm(null);
+          setProdutosNovos([]);
+        }}
       >
         {form && (
           <form onSubmit={salvar} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -291,14 +318,16 @@ export function AbaFornecedores() {
               </Campo>
             )}
 
-            {form.id ? (
-              <div className="rounded-card border border-stone-200 p-3 sm:col-span-2">
-                <h2 className="mb-1 text-base">O que este fornecedor vende</h2>
-                <p className="mb-2 text-xs text-stone-500">
-                  Usado para sugerir este fornecedor nas cotações. As respostas de cotação também alimentam esta
-                  lista sozinhas.
-                </p>
-                {vinculos.length === 0 ? (
+            <div className="rounded-card border border-stone-200 p-3 sm:col-span-2">
+              <h2 className="mb-1 text-base">O que este fornecedor vende</h2>
+              <p className="mb-2 text-xs text-stone-500">
+                Usado para sugerir este fornecedor nas cotações. As respostas de cotação também alimentam esta
+                lista sozinhas.
+                {!form.id && " Os produtos marcados serão gravados junto quando você salvar."}
+              </p>
+
+              {form.id ? (
+                vinculos.length === 0 ? (
                   <p className="mb-3 text-sm text-stone-500">Nenhum produto vinculado ainda.</p>
                 ) : (
                   <ul className="mb-3 divide-y divide-stone-100">
@@ -322,38 +351,54 @@ export function AbaFornecedores() {
                       </li>
                     ))}
                   </ul>
-                )}
-                {produtosDisponiveis.length > 0 && (
-                  <div className="flex gap-2">
-                    <select
-                      className="campo"
-                      value={produtoParaVincular}
-                      onChange={(e) => setProdutoParaVincular(e.target.value)}
-                    >
-                      <option value="">Adicionar produto…</option>
-                      {produtosDisponiveis.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.nome}
-                          {p.categoria ? ` (${p.categoria})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn-secundario shrink-0"
-                      disabled={!produtoParaVincular}
-                      onClick={vincularProduto}
-                    >
-                      <Link2 size={16} /> Vincular
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-stone-500 sm:col-span-2">
-                Salve o fornecedor para depois marcar os produtos que ele vende.
-              </p>
-            )}
+                )
+              ) : produtosNovos.length === 0 ? (
+                <p className="mb-3 text-sm text-stone-500">Nenhum produto marcado ainda.</p>
+              ) : (
+                <ul className="mb-3 divide-y divide-stone-100">
+                  {produtosNovos.map((produtoId) => (
+                    <li key={produtoId} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                      <span className="min-w-0 truncate font-medium">{nomeProduto(db, produtoId)}</span>
+                      <button
+                        type="button"
+                        className="rounded-full p-1 text-stone-400 hover:bg-erro-clara hover:text-erro"
+                        title="Remover produto"
+                        aria-label={`Remover ${nomeProduto(db, produtoId)}`}
+                        onClick={() => setProdutosNovos((atual) => atual.filter((id) => id !== produtoId))}
+                      >
+                        <X size={16} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {produtosDisponiveis.length > 0 && (
+                <div className="flex gap-2">
+                  <select
+                    className="campo"
+                    value={produtoParaVincular}
+                    onChange={(e) => setProdutoParaVincular(e.target.value)}
+                  >
+                    <option value="">Adicionar produto…</option>
+                    {produtosDisponiveis.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nome}
+                        {p.categoria ? ` (${p.categoria})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn-secundario shrink-0"
+                    disabled={!produtoParaVincular}
+                    onClick={vincularProduto}
+                  >
+                    <Link2 size={16} /> Vincular
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="sm:col-span-2">
               <RodapeFormulario onExcluir={form.id ? excluir : undefined} rotuloExcluir="Desativar" />

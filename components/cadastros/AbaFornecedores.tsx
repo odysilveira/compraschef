@@ -3,9 +3,11 @@
 // Aba Fornecedores — requisito 1.
 
 import { useState, type FormEvent } from "react";
-import { Building2, Pencil, Plus } from "lucide-react";
+import { Building2, Link2, Pencil, Plus, X } from "lucide-react";
 import { Badge, Campo, Modal, StatCard, Tabela, Vazio } from "@/components/ui";
-import { mutate, uid, useDB } from "@/lib/data";
+import { mutate, nomeProduto, uid, useDB } from "@/lib/data";
+import { podeVerValores, usePapel } from "@/lib/roles";
+import { moeda } from "@/lib/format";
 import type { Fornecedor } from "@/lib/types";
 import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
 
@@ -21,8 +23,10 @@ function fornecedorVazio(): Fornecedor {
 
 export function AbaFornecedores() {
   const db = useDB();
+  const { papel } = usePapel();
   const [busca, setBusca] = useState("");
   const [form, setForm] = useState<Fornecedor | null>(null);
+  const [produtoParaVincular, setProdutoParaVincular] = useState("");
 
   const lista = db.fornecedores
     .filter((f) => f.ativo)
@@ -56,6 +60,39 @@ export function AbaFornecedores() {
     });
     setForm(null);
   }
+
+  function vincularProduto() {
+    if (!form?.id || !produtoParaVincular) return;
+    const fornecedorId = form.id;
+    const produtoId = produtoParaVincular;
+    mutate((banco) => {
+      const jaExiste = banco.fornecedor_produtos.some(
+        (fp) => fp.fornecedor_id === fornecedorId && fp.produto_id === produtoId
+      );
+      if (!jaExiste) {
+        banco.fornecedor_produtos.push({ id: uid("fp"), fornecedor_id: fornecedorId, produto_id: produtoId });
+      }
+    });
+    setProdutoParaVincular("");
+  }
+
+  function desvincularProduto(fpId: string, nome: string) {
+    if (!window.confirm(`Remover "${nome}" da lista de produtos deste fornecedor?`)) return;
+    mutate((banco) => {
+      banco.fornecedor_produtos = banco.fornecedor_produtos.filter((fp) => fp.id !== fpId);
+    });
+  }
+
+  const vinculos = form?.id
+    ? db.fornecedor_produtos
+        .filter((fp) => fp.fornecedor_id === form.id)
+        .sort((a, b) => nomeProduto(db, a.produto_id).localeCompare(nomeProduto(db, b.produto_id), "pt-BR"))
+    : [];
+  const produtosDisponiveis = form?.id
+    ? db.produtos
+        .filter((p) => p.ativo && !vinculos.some((fp) => fp.produto_id === p.id))
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
+    : [];
 
   const total = db.fornecedores.length;
   const ativos = db.fornecedores.filter((f) => f.ativo).length;
@@ -253,6 +290,71 @@ export function AbaFornecedores() {
                 />
               </Campo>
             )}
+
+            {form.id ? (
+              <div className="rounded-card border border-stone-200 p-3 sm:col-span-2">
+                <h2 className="mb-1 text-base">O que este fornecedor vende</h2>
+                <p className="mb-2 text-xs text-stone-500">
+                  Usado para sugerir este fornecedor nas cotações. As respostas de cotação também alimentam esta
+                  lista sozinhas.
+                </p>
+                {vinculos.length === 0 ? (
+                  <p className="mb-3 text-sm text-stone-500">Nenhum produto vinculado ainda.</p>
+                ) : (
+                  <ul className="mb-3 divide-y divide-stone-100">
+                    {vinculos.map((fp) => (
+                      <li key={fp.id} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                        <span className="min-w-0 truncate font-medium">{nomeProduto(db, fp.produto_id)}</span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {podeVerValores(papel) && fp.ultimo_preco !== undefined && (
+                            <span className="text-xs text-stone-500">último preço {moeda(fp.ultimo_preco)}</span>
+                          )}
+                          <button
+                            type="button"
+                            className="rounded-full p-1 text-stone-400 hover:bg-erro-clara hover:text-erro"
+                            title="Remover produto"
+                            aria-label={`Remover ${nomeProduto(db, fp.produto_id)}`}
+                            onClick={() => desvincularProduto(fp.id, nomeProduto(db, fp.produto_id))}
+                          >
+                            <X size={16} />
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {produtosDisponiveis.length > 0 && (
+                  <div className="flex gap-2">
+                    <select
+                      className="campo"
+                      value={produtoParaVincular}
+                      onChange={(e) => setProdutoParaVincular(e.target.value)}
+                    >
+                      <option value="">Adicionar produto…</option>
+                      {produtosDisponiveis.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.nome}
+                          {p.categoria ? ` (${p.categoria})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn-secundario shrink-0"
+                      disabled={!produtoParaVincular}
+                      onClick={vincularProduto}
+                    >
+                      <Link2 size={16} /> Vincular
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-stone-500 sm:col-span-2">
+                Salve o fornecedor para depois marcar os produtos que ele vende.
+              </p>
+            )}
+
             <div className="sm:col-span-2">
               <RodapeFormulario onExcluir={form.id ? excluir : undefined} rotuloExcluir="Desativar" />
             </div>

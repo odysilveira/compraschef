@@ -4,8 +4,8 @@
 // edição do rascunho e confirmação que dispara cotações por fornecedor.
 
 import { useState } from "react";
-import { Plus, Sparkles, Trash2 } from "lucide-react";
-import { Badge, Card, Tabela, TituloPagina, Vazio } from "@/components/ui";
+import { Plus, Sparkles, Store, Trash2 } from "lucide-react";
+import { Badge, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
 import {
   estoqueAtual,
   mutate,
@@ -31,6 +31,8 @@ export default function ListaComprasPage() {
   const db = useDB();
   const { papel } = usePapel();
   const [aviso, setAviso] = useState<string | null>(null);
+  const [escolhendoLista, setEscolhendoLista] = useState<string | null>(null);
+  const [selecionados, setSelecionados] = useState<Record<string, boolean>>({});
 
   const listas = [...db.listas_compras].sort((a, b) => b.criada_em.localeCompare(a.criada_em));
 
@@ -81,15 +83,25 @@ export default function ListaComprasPage() {
     });
   }
 
-  function confirmarLista(listaId: string) {
+  // Quantos itens da lista cada fornecedor vende (pelo cadastro "quem vende o quê")
+  function itensQueVende(fornecedorId: string, itens: ListaItem[]): number {
+    return itens.filter((i) =>
+      db.fornecedor_produtos.some((fp) => fp.fornecedor_id === fornecedorId && fp.produto_id === i.produto_id)
+    ).length;
+  }
+
+  function abrirEscolhaFornecedores(listaId: string) {
     const itens = db.lista_itens.filter((i) => i.lista_id === listaId);
-    const fornecedores = db.fornecedores.filter(
-      (f) =>
-        f.ativo &&
-        itens.some((i) =>
-          db.fornecedor_produtos.some((fp) => fp.fornecedor_id === f.id && fp.produto_id === i.produto_id)
-        )
-    );
+    const iniciais: Record<string, boolean> = {};
+    for (const f of db.fornecedores.filter((x) => x.ativo)) {
+      iniciais[f.id] = itensQueVende(f.id, itens) > 0; // sugeridos já vêm marcados
+    }
+    setSelecionados(iniciais);
+    setEscolhendoLista(listaId);
+  }
+
+  function confirmarLista(listaId: string, fornecedorIds: string[]) {
+    const itens = db.lista_itens.filter((i) => i.lista_id === listaId);
     const agora = new Date().toISOString();
     const prazo = new Date();
     prazo.setDate(prazo.getDate() + 2);
@@ -98,45 +110,49 @@ export default function ListaComprasPage() {
     mutate((d) => {
       const lista = d.listas_compras.find((l) => l.id === listaId);
       if (!lista) return;
-      if (fornecedores.length === 0) {
+      if (fornecedorIds.length === 0) {
         lista.status = "confirmada";
         return;
       }
       lista.status = "em_cotacao";
-      for (const f of fornecedores) {
+      for (const fornecedorId of fornecedorIds) {
         const cotacaoId = uid("cot");
         d.cotacoes.push({
           id: cotacaoId,
           lista_id: listaId,
-          fornecedor_id: f.id,
+          fornecedor_id: fornecedorId,
           token: uid("tok"),
           status: "enviada",
           prazo_resposta: prazoISO,
           canal: "whatsapp",
           enviada_em: agora,
         });
-        for (const item of itens) {
-          const vende = d.fornecedor_produtos.some(
-            (fp) => fp.fornecedor_id === f.id && fp.produto_id === item.produto_id
-          );
-          if (vende) {
-            d.cotacao_itens.push({
-              id: uid("ci"),
-              cotacao_id: cotacaoId,
-              produto_id: item.produto_id,
-              quantidade: item.quantidade,
-              disponivel: true,
-            });
-          }
+        // Fornecedor sugerido: recebe só os itens que vende.
+        // Fornecedor incluído por você: recebe a lista completa (responde o que tiver).
+        const registrados = itens.filter((item) =>
+          d.fornecedor_produtos.some(
+            (fp) => fp.fornecedor_id === fornecedorId && fp.produto_id === item.produto_id
+          )
+        );
+        const itensDaCotacao = registrados.length > 0 ? registrados : itens;
+        for (const item of itensDaCotacao) {
+          d.cotacao_itens.push({
+            id: uid("ci"),
+            cotacao_id: cotacaoId,
+            produto_id: item.produto_id,
+            quantidade: item.quantidade,
+            disponivel: true,
+          });
         }
       }
     });
 
+    setEscolhendoLista(null);
     setAviso(
-      fornecedores.length === 0
-        ? "Lista confirmada, mas nenhum fornecedor cadastrado vende estes itens — nenhuma cotação foi criada."
-        : `Lista confirmada! Cotação enviada por WhatsApp para ${fornecedores.length} fornecedor${
-            fornecedores.length === 1 ? "" : "es"
+      fornecedorIds.length === 0
+        ? "Lista confirmada sem cotações — nenhum fornecedor foi selecionado."
+        : `Lista confirmada! Cotação enviada por WhatsApp para ${fornecedorIds.length} fornecedor${
+            fornecedorIds.length === 1 ? "" : "es"
           } (simulado). Acompanhe na tela de Cotações.`
     );
   }
@@ -177,7 +193,7 @@ export default function ListaComprasPage() {
                     <p className="text-xs text-slate-500">
                       Criada por {nomePerfil(db, lista.criada_por)}
                       {lista.gerada_automaticamente ? " · gerada automaticamente" : " · manual"} ·{" "}
-                      {itens.length} item{itens.length === 1 ? "" : "s"}
+                      {itens.length} {itens.length === 1 ? "item" : "itens"}
                     </p>
                   </div>
                   <Badge cor={status.cor}>{status.rotulo}</Badge>
@@ -263,14 +279,14 @@ export default function ListaComprasPage() {
                       <button
                         className="btn-primario"
                         disabled={itens.length === 0}
-                        onClick={() => confirmarLista(lista.id)}
+                        onClick={() => abrirEscolhaFornecedores(lista.id)}
                       >
                         Confirmar lista
                       </button>
                     </div>
                     <p className="mt-2 text-xs text-slate-500">
-                      Ao confirmar, cada fornecedor que vende itens desta lista recebe uma cotação com link
-                      exclusivo (prazo de 2 dias).
+                      Ao confirmar, você escolhe os fornecedores: os que vendem itens da lista já vêm sugeridos, e
+                      você pode incluir outros (prazo de resposta: 2 dias).
                     </p>
                   </>
                 ) : (
@@ -291,6 +307,88 @@ export default function ListaComprasPage() {
           })}
         </div>
       )}
+
+      <Modal
+        aberto={escolhendoLista !== null}
+        titulo="Quem vai cotar?"
+        onFechar={() => setEscolhendoLista(null)}
+      >
+        {escolhendoLista &&
+          (() => {
+            const itens = db.lista_itens.filter((i) => i.lista_id === escolhendoLista);
+            const ativos = db.fornecedores.filter((f) => f.ativo);
+            const sugeridos = ativos.filter((f) => itensQueVende(f.id, itens) > 0);
+            const outros = ativos.filter((f) => itensQueVende(f.id, itens) === 0);
+            const totalMarcados = ativos.filter((f) => selecionados[f.id]).length;
+
+            const LinhaFornecedor = ({ id, nome, detalhe }: { id: string; nome: string; detalhe: string }) => (
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-stone-50">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primaria"
+                  checked={selecionados[id] ?? false}
+                  onChange={(e) => setSelecionados((atual) => ({ ...atual, [id]: e.target.checked }))}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">{nome}</span>
+                  <span className="block text-xs text-stone-500">{detalhe}</span>
+                </span>
+              </label>
+            );
+
+            return (
+              <div className="space-y-4">
+                {sugeridos.length > 0 && (
+                  <div>
+                    <p className="rotulo mb-1 flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-primaria-escura" /> Sugeridos pelo sistema
+                    </p>
+                    {sugeridos.map((f) => {
+                      const n = itensQueVende(f.id, itens);
+                      return (
+                        <LinhaFornecedor
+                          key={f.id}
+                          id={f.id}
+                          nome={f.nome}
+                          detalhe={`vende ${n} de ${itens.length} ${itens.length === 1 ? "item" : "itens"} da lista`}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+
+                {outros.length > 0 && (
+                  <div>
+                    <p className="rotulo mb-1 flex items-center gap-1.5">
+                      <Store size={13} /> Outros fornecedores
+                    </p>
+                    {outros.map((f) => (
+                      <LinhaFornecedor
+                        key={f.id}
+                        id={f.id}
+                        nome={f.nome}
+                        detalhe="sem itens cadastrados — recebe a lista completa e responde o que tiver"
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  className="btn-primario w-full"
+                  disabled={totalMarcados === 0}
+                  onClick={() =>
+                    confirmarLista(
+                      escolhendoLista,
+                      ativos.filter((f) => selecionados[f.id]).map((f) => f.id)
+                    )
+                  }
+                >
+                  Enviar cotações ({totalMarcados})
+                </button>
+              </div>
+            );
+          })()}
+      </Modal>
     </div>
   );
 }

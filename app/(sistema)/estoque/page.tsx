@@ -88,6 +88,29 @@ function FormEncher({
     }
   }
 
+  // Regra da casa: o vencimento sugerido depende do destino do saco —
+  // freezer = 3 meses, geladeira = 5 dias (o produto dá a sugestão inicial).
+  function escolherLocal(id: string) {
+    setLocalId(id);
+    const local = db.locais.find((l) => l.id === id);
+    if (!local) return;
+    const base = envase || hoje();
+    const d = new Date(`${base}T12:00:00`);
+    if (local.tipo === "freezer") {
+      d.setDate(d.getDate() + 90);
+      setValidade(d.toISOString().slice(0, 10));
+    } else if (local.tipo === "geladeira") {
+      d.setDate(d.getDate() + 5);
+      setValidade(d.toISOString().slice(0, 10));
+    }
+  }
+
+  const categorias = new Map<string, typeof db.produtos>();
+  for (const p of db.produtos.filter((x) => x.ativo)) {
+    const cat = p.categoria ?? "outros";
+    categorias.set(cat, [...(categorias.get(cat) ?? []), p]);
+  }
+
   function salvar() {
     if (!produtoId || quantidade <= 0) return;
     const produto = db.produtos.find((p) => p.id === produtoId);
@@ -125,13 +148,15 @@ function FormEncher({
       <Campo rotulo="Produto">
         <select className="campo" value={produtoId} onChange={(e) => escolherProduto(e.target.value)}>
           <option value="">Escolha o produto…</option>
-          {db.produtos
-            .filter((p) => p.ativo)
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nome} {p.tipo === "produzido" ? "(produção própria)" : ""}
-              </option>
-            ))}
+          {Array.from(categorias.entries()).map(([categoria, produtos]) => (
+            <optgroup key={categoria} label={categoria}>
+              {produtos.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nome}
+                </option>
+              ))}
+            </optgroup>
+          ))}
         </select>
       </Campo>
       <Campo rotulo={`Quantidade${produtoId ? ` (${siglaUnidadeUso(db, produtoId)})` : ""}`}>
@@ -146,7 +171,7 @@ function FormEncher({
         </Campo>
       </div>
       <Campo rotulo="Local de armazenagem">
-        <select className="campo" value={localId} onChange={(e) => setLocalId(e.target.value)}>
+        <select className="campo" value={localId} onChange={(e) => escolherLocal(e.target.value)}>
           <option value="">Escolha o local…</option>
           {db.locais.map((l) => (
             <option key={l.id} value={l.id}>
@@ -155,6 +180,12 @@ function FormEncher({
           ))}
         </select>
       </Campo>
+      {localId && (
+        <p className="text-xs text-stone-500">
+          Vencimento sugerido pelo destino: freezer = 3 meses · geladeira = 5 dias. Ajuste a validade acima se
+          precisar.
+        </p>
+      )}
       <button className="btn-gigante" onClick={salvar} disabled={!produtoId || quantidade <= 0}>
         Salvar caixa cheia
       </button>

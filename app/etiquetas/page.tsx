@@ -2,58 +2,65 @@
 
 // Etiquetas de QR para as caixas físicas.
 // Página fora da moldura do sistema para imprimir limpo (Ctrl+P / botão Imprimir).
-// Fluxo: ajustar quantidades → "Gerar caixas e etiquetas" → as caixas são criadas
+// Fluxo: marcar o que imprimir → "Gerar caixas e etiquetas" → as caixas são criadas
 // no sistema (status vazia) e a folha de etiquetas aparece pronta para imprimir.
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowLeft, ChefHat, Printer, Snowflake, Refrigerator } from "lucide-react";
+import { ArrowLeft, Archive, ChefHat, Printer, Snowflake, Refrigerator } from "lucide-react";
 import { mutate, uid, useDB } from "@/lib/data";
+import { ITENS_ESTOQUE_SECO, MASSAS_GELADEIRA, SABORES_FREEZER } from "@/lib/data/catalogo";
+
+type LocalEtiqueta = "Freezer" | "Geladeira" | "Estoque seco";
 
 interface ItemCatalogo {
   nome: string;
-  local: "Freezer" | "Geladeira";
-  tamanho: "G" | "P" | "Único";
+  local: LocalEtiqueta;
+  tamanho: "G" | "P" | "";
 }
 
-const SABORES_FREEZER = [
-  "Camarão",
-  "Bolonhesa",
-  "4 Queijos",
-  "Parisiense",
-  "Presunto",
-  "Cheddar e bacon",
-  "Carne com cheddar e bacon",
-  "Funghi",
-  "Brócolis",
-  "Ragu de costela",
-  "Frango",
-  "Frango com requeijão",
+interface Secao {
+  titulo: string;
+  local: LocalEtiqueta;
+  itens: ItemCatalogo[];
+}
+
+const SECOES: Secao[] = [
+  {
+    titulo: "Freezer — porção G",
+    local: "Freezer",
+    itens: SABORES_FREEZER.map((nome): ItemCatalogo => ({ nome, local: "Freezer", tamanho: "G" })),
+  },
+  {
+    titulo: "Freezer — porção P",
+    local: "Freezer",
+    itens: SABORES_FREEZER.map((nome): ItemCatalogo => ({ nome, local: "Freezer", tamanho: "P" })),
+  },
+  {
+    titulo: "Geladeira — porção G",
+    local: "Geladeira",
+    itens: MASSAS_GELADEIRA.map((nome): ItemCatalogo => ({ nome, local: "Geladeira", tamanho: "G" })),
+  },
+  {
+    titulo: "Geladeira — porção P",
+    local: "Geladeira",
+    itens: MASSAS_GELADEIRA.map((nome): ItemCatalogo => ({ nome, local: "Geladeira", tamanho: "P" })),
+  },
+  {
+    titulo: "Estoque seco",
+    local: "Estoque seco",
+    itens: ITENS_ESTOQUE_SECO.map((nome): ItemCatalogo => ({ nome, local: "Estoque seco", tamanho: "" })),
+  },
 ];
 
-const SABORES_GELADEIRA = [
-  "Caracolino",
-  "Talharim",
-  "Talharim integral",
-  "Talharim proteico",
-  "Penne",
-  "Risotos",
-];
+const TODOS_ITENS: ItemCatalogo[] = SECOES.flatMap((s) => s.itens);
 
-const UNICOS_GELADEIRA = ["Creme culinário", "Molho de tomate"];
-
-const CATALOGO: ItemCatalogo[] = [
-  ...SABORES_FREEZER.flatMap((nome): ItemCatalogo[] => [
-    { nome, local: "Freezer", tamanho: "G" },
-    { nome, local: "Freezer", tamanho: "P" },
-  ]),
-  ...SABORES_GELADEIRA.flatMap((nome): ItemCatalogo[] => [
-    { nome, local: "Geladeira", tamanho: "G" },
-    { nome, local: "Geladeira", tamanho: "P" },
-  ]),
-  ...UNICOS_GELADEIRA.map((nome): ItemCatalogo => ({ nome, local: "Geladeira", tamanho: "Único" })),
-];
+function IconeLocal({ local, size = 12 }: { local: LocalEtiqueta; size?: number }) {
+  if (local === "Freezer") return <Snowflake size={size} className="text-blue-500" />;
+  if (local === "Geladeira") return <Refrigerator size={size} className="text-emerald-600" />;
+  return <Archive size={size} className="text-amber-600" />;
+}
 
 interface EtiquetaGerada extends ItemCatalogo {
   numero: number;
@@ -62,33 +69,32 @@ interface EtiquetaGerada extends ItemCatalogo {
 
 export default function EtiquetasPage() {
   const db = useDB();
-  const [qtds, setQtds] = useState<Record<string, number>>({});
+  const chave = (i: ItemCatalogo) => `${i.nome}|${i.tamanho}|${i.local}`;
+  const [marcados, setMarcados] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(TODOS_ITENS.map((i) => [`${i.nome}|${i.tamanho}|${i.local}`, true]))
+  );
   const [geradas, setGeradas] = useState<EtiquetaGerada[] | null>(null);
 
-  const chave = (i: ItemCatalogo) => `${i.nome}|${i.tamanho}`;
-  const qtdDe = (i: ItemCatalogo) => qtds[chave(i)] ?? 1;
+  const marcado = (i: ItemCatalogo) => marcados[chave(i)] ?? false;
+  const total = useMemo(() => TODOS_ITENS.filter((i) => marcados[chave(i)]).length, [marcados]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalEtiquetas = useMemo(
-    () => CATALOGO.reduce((soma, i) => soma + qtdDe(i), 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [qtds]
-  );
+  function alternarSecao(secao: Secao, valor: boolean) {
+    setMarcados((atual) => {
+      const novo = { ...atual };
+      for (const item of secao.itens) novo[chave(item)] = valor;
+      return novo;
+    });
+  }
 
   function gerar() {
-    const maiorNumero = db.caixas.reduce((m, c) => Math.max(m, c.numero), 0);
-    let proximo = maiorNumero + 1;
-    const novas: EtiquetaGerada[] = [];
+    const selecionados = TODOS_ITENS.filter((i) => marcado(i));
+    if (selecionados.length === 0) return;
 
-    for (const item of CATALOGO) {
-      for (let n = 0; n < qtdDe(item); n++) {
-        novas.push({
-          ...item,
-          numero: proximo,
-          qr: `CXCHEF-${String(proximo).padStart(3, "0")}`,
-        });
-        proximo++;
-      }
-    }
+    const maiorNumero = db.caixas.reduce((m, c) => Math.max(m, c.numero), 0);
+    const novas: EtiquetaGerada[] = selecionados.map((item, indice) => {
+      const numero = maiorNumero + 1 + indice;
+      return { ...item, numero, qr: `CXCHEF-${String(numero).padStart(3, "0")}` };
+    });
 
     mutate((banco) => {
       const agora = new Date().toISOString();
@@ -117,7 +123,7 @@ export default function EtiquetasPage() {
             </h1>
             <p className="text-sm text-stone-500">
               As caixas já foram criadas no sistema. Imprima, recorte nas linhas tracejadas e cole nas caixas
-              (papel adesivo ou fita larga transparente por cima).
+              (proteja com fita larga transparente por causa da umidade).
             </p>
           </div>
           <div className="flex gap-2">
@@ -141,10 +147,10 @@ export default function EtiquetasPage() {
                 <p className="text-2xl font-black leading-none">Nº {e.numero}</p>
                 <p className="mt-1 truncate text-sm font-semibold leading-tight">
                   {e.nome}
-                  {e.tamanho !== "Único" && ` — ${e.tamanho}`}
+                  {e.tamanho && ` — ${e.tamanho}`}
                 </p>
                 <p className="mt-0.5 flex items-center gap-1 text-xs text-stone-600">
-                  {e.local === "Freezer" ? <Snowflake size={12} /> : <Refrigerator size={12} />}
+                  <IconeLocal local={e.local} />
                   {e.local}
                 </p>
                 <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
@@ -159,24 +165,6 @@ export default function EtiquetasPage() {
   }
 
   // ---------- Tela de preparação ----------
-  const secoes: { titulo: string; icone: React.ReactNode; itens: ItemCatalogo[] }[] = [
-    {
-      titulo: "Freezer — porções G e P",
-      icone: <Snowflake size={18} className="text-blue-500" />,
-      itens: CATALOGO.filter((i) => i.local === "Freezer"),
-    },
-    {
-      titulo: "Geladeira — porções G e P",
-      icone: <Refrigerator size={18} className="text-emerald-600" />,
-      itens: CATALOGO.filter((i) => i.local === "Geladeira" && i.tamanho !== "Único"),
-    },
-    {
-      titulo: "Geladeira — tamanho único",
-      icone: <Refrigerator size={18} className="text-emerald-600" />,
-      itens: CATALOGO.filter((i) => i.tamanho === "Único"),
-    },
-  ];
-
   return (
     <div className="min-h-screen bg-fundo">
       <header className="flex items-center gap-3 border-b border-stone-200 bg-superficie px-4 py-3">
@@ -185,54 +173,67 @@ export default function EtiquetasPage() {
         </span>
         <div>
           <h1 className="text-lg font-bold leading-tight">Etiquetas das caixas</h1>
-          <p className="text-xs text-stone-500">QR fixo por caixa — o conteúdo o sistema acompanha pelas leituras</p>
+          <p className="text-xs text-stone-500">
+            Marque o que precisa imprimir — cada item marcado vira 1 caixa nova com QR
+          </p>
         </div>
       </header>
 
       <div className="mx-auto max-w-3xl p-4">
         <div className="card mb-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-stone-600">
-            Ajuste quantas caixas de cada tipo você tem. Total:{" "}
-            <strong className="text-texto">{totalEtiquetas} etiquetas</strong>
+            Selecionadas: <strong className="text-texto">{total} etiquetas</strong>
           </p>
-          <button className="btn-primario" onClick={gerar}>
+          <button className="btn-primario" onClick={gerar} disabled={total === 0}>
             Gerar caixas e etiquetas
           </button>
         </div>
 
-        {secoes.map((secao) => (
-          <div key={secao.titulo} className="card mb-4">
-            <h2 className="mb-3 flex items-center gap-2 text-base">
-              {secao.icone}
-              {secao.titulo}
-            </h2>
-            <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
-              {secao.itens.map((item) => (
-                <label key={chave(item)} className="flex items-center justify-between gap-2 py-1 text-sm">
-                  <span>
-                    {item.nome}
-                    {item.tamanho !== "Único" && (
-                      <span className="ml-1 rounded bg-stone-100 px-1.5 py-0.5 text-xs font-bold">{item.tamanho}</span>
-                    )}
-                  </span>
+        {SECOES.map((secao) => {
+          const todosMarcados = secao.itens.every((i) => marcado(i));
+          return (
+            <div key={secao.titulo} className="card mb-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-base">
+                  <IconeLocal local={secao.local} size={18} />
+                  {secao.titulo}
+                </h2>
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-stone-500">
                   <input
-                    type="number"
-                    min={0}
-                    max={30}
-                    className="w-16 rounded-lg border border-stone-300 px-2 py-1 text-center text-sm"
-                    value={qtdDe(item)}
-                    onChange={(e) =>
-                      setQtds((atual) => ({
-                        ...atual,
-                        [chave(item)]: Math.max(0, Math.min(30, Number(e.target.value) || 0)),
-                      }))
-                    }
+                    type="checkbox"
+                    className="h-4 w-4 accent-primaria"
+                    checked={todosMarcados}
+                    onChange={(e) => alternarSecao(secao, e.target.checked)}
                   />
+                  todos
                 </label>
-              ))}
+              </div>
+              <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+                {secao.itens.map((item) => (
+                  <label
+                    key={chave(item)}
+                    className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1.5 text-sm hover:bg-stone-50"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primaria"
+                      checked={marcado(item)}
+                      onChange={(e) => setMarcados((atual) => ({ ...atual, [chave(item)]: e.target.checked }))}
+                    />
+                    <span>
+                      {item.nome}
+                      {item.tamanho && (
+                        <span className="ml-1.5 rounded bg-stone-100 px-1.5 py-0.5 text-xs font-bold">
+                          {item.tamanho}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         <Link href="/cadastros" className="text-sm text-stone-500 underline">
           ← Voltar aos cadastros

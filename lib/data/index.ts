@@ -7,6 +7,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { Caixa, DB, Produto } from "@/lib/types";
 import { seedDB } from "./seed";
+import { LOCAL_ESTOQUE_SECO, produtosReais, UNIDADE_SACO } from "./catalogo";
 
 const STORAGE_KEY = "compraschef-db-v1";
 
@@ -26,13 +27,39 @@ function persist() {
   }
 }
 
+/** Acrescenta ao banco salvo itens novos do catálogo (idempotente — nada é sobrescrito). */
+function atualizarComNovidades(db: DB): boolean {
+  let mudou = false;
+  if (!db.unidades.some((u) => u.id === UNIDADE_SACO.id)) {
+    db.unidades.push({ ...UNIDADE_SACO });
+    mudou = true;
+  }
+  if (!db.locais.some((l) => l.id === LOCAL_ESTOQUE_SECO.id)) {
+    db.locais.push({ ...LOCAL_ESTOQUE_SECO });
+    mudou = true;
+  }
+  for (const produto of produtosReais()) {
+    if (!db.produtos.some((p) => p.id === produto.id)) {
+      db.produtos.push(produto);
+      mudou = true;
+    }
+  }
+  return mudou;
+}
+
 function ensureLoaded() {
   if (loaded || typeof window === "undefined") return;
   loaded = true;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      current = JSON.parse(raw) as DB;
+      const carregado = JSON.parse(raw) as DB;
+      if (atualizarComNovidades(carregado)) {
+        current = carregado;
+        persist();
+      } else {
+        current = carregado;
+      }
       emit();
     }
   } catch {

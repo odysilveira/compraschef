@@ -1,4 +1,5 @@
 import type { DB } from "@/lib/types";
+import { LOCAL_ESTOQUE_SECO, produtosReais, UNIDADE_SACO } from "./catalogo";
 
 // Datas relativas a "hoje" para a demonstração ficar sempre atual.
 // Horário fixado ao meio-dia para servidor e navegador gerarem o MESMO valor
@@ -33,6 +34,7 @@ export const seedDB: DB = {
     { id: "un-un", nome: "unidade", sigla: "un" },
     { id: "un-cx", nome: "caixa", sigla: "cx" },
     { id: "un-fd", nome: "fardo", sigla: "fd" },
+    UNIDADE_SACO,
   ],
 
   fornecedores: [
@@ -117,6 +119,8 @@ export const seedDB: DB = {
     { id: "prod-bolonhesa", codigo_externo: "P901", nome: "Molho bolonhesa", categoria: "produção", tipo: "produzido", unidade_uso_id: "un-kg", fator_conversao: 1, estoque_minimo: 6, validade_padrao_dias: 5, ativo: true },
     { id: "prod-massa", codigo_externo: "P902", nome: "Massa fresca", categoria: "produção", tipo: "produzido", unidade_uso_id: "un-kg", fator_conversao: 1, estoque_minimo: 8, validade_padrao_dias: 3, ativo: true },
     { id: "prod-risoto-base", codigo_externo: "P903", nome: "Base de risoto de funghi", categoria: "produção", tipo: "produzido", unidade_uso_id: "un-kg", fator_conversao: 1, estoque_minimo: 4, validade_padrao_dias: 4, ativo: true },
+    // Porcionamentos reais da cozinha (freezer/geladeira G e P + estoque seco)
+    ...produtosReais(),
   ],
 
   fornecedor_produtos: [
@@ -141,6 +145,7 @@ export const seedDB: DB = {
     { id: "loc-geladeira1", nome: "Geladeira 1", tipo: "geladeira" },
     { id: "loc-prateleira", nome: "Prateleira seca", tipo: "prateleira" },
     { id: "loc-despensa", nome: "Despensa", tipo: "despensa" },
+    LOCAL_ESTOQUE_SECO,
   ],
 
   caixas: [

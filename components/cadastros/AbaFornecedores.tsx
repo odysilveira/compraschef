@@ -3,8 +3,8 @@
 // Aba Fornecedores — requisito 1.
 
 import { useState, type FormEvent } from "react";
-import { Plus } from "lucide-react";
-import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
+import { Building2, Pencil, Plus } from "lucide-react";
+import { Badge, Campo, Modal, StatCard, Tabela, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import type { Fornecedor } from "@/lib/types";
 import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
@@ -57,8 +57,20 @@ export function AbaFornecedores() {
     setForm(null);
   }
 
+  const total = db.fornecedores.length;
+  const ativos = db.fornecedores.filter((f) => f.ativo).length;
+  const semWhatsapp = db.fornecedores.filter((f) => f.ativo && !f.whatsapp).length;
+  const porBoleto = db.fornecedores.filter((f) => f.ativo && f.forma_pagamento === "boleto").length;
+
   return (
     <div>
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard rotulo="Total" valor={total} cor="cinza" />
+        <StatCard rotulo="Ativos" valor={ativos} subtexto={`${total - ativos} inativo${total - ativos === 1 ? "" : "s"}`} cor="verde" />
+        <StatCard rotulo="Pagam por boleto" valor={porBoleto} subtexto="atenção às datas" cor="laranja" />
+        <StatCard rotulo="Sem WhatsApp" valor={semWhatsapp} subtexto="cadastro incompleto" cor="amarelo" />
+      </div>
+
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <BarraBusca valor={busca} onMudar={setBusca} placeholder="Buscar por nome, CNPJ, contato…" />
         <button className="btn-primario mb-4" onClick={() => setForm(fornecedorVazio())}>
@@ -70,16 +82,26 @@ export function AbaFornecedores() {
         <Vazio mensagem="Nenhum fornecedor encontrado." />
       ) : (
         <div className="card p-0 sm:p-2">
-          <Tabela cabecalho={["Nome", "CNPJ", "WhatsApp", "Forma de pagamento", "Prazo de entrega"]}>
+          <Tabela cabecalho={["Fornecedor", "CNPJ", "WhatsApp", "Forma de pagamento", "Prazo de entrega", "Status", ""]}>
             {lista.map((f) => (
               <tr
                 key={f.id}
-                className="cursor-pointer transition-colors hover:bg-slate-50"
+                className="cursor-pointer transition-colors hover:bg-stone-50"
                 onClick={() => setForm({ ...f })}
               >
-                <td className="px-3 py-2.5 font-medium">{f.nome}</td>
-                <td className="whitespace-nowrap px-3 py-2.5">{f.cnpj}</td>
-                <td className="whitespace-nowrap px-3 py-2.5">{f.whatsapp ?? "—"}</td>
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primaria-clara text-primaria-escura">
+                      <Building2 size={15} />
+                    </span>
+                    <span>
+                      <span className="block font-medium">{f.nome}</span>
+                      {f.contato_nome && <span className="block text-xs text-stone-500">{f.contato_nome}</span>}
+                    </span>
+                  </div>
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 tabular-nums text-stone-600">{f.cnpj}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-stone-600">{f.whatsapp ?? "—"}</td>
                 <td className="px-3 py-2.5">
                   {f.forma_pagamento === "boleto" ? (
                     <Badge cor="azul">Boleto{f.prazo_boleto_dias ? ` · ${f.prazo_boleto_dias} dias` : ""}</Badge>
@@ -87,10 +109,25 @@ export function AbaFornecedores() {
                     <Badge cor="verde">Pix</Badge>
                   )}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2.5">
+                <td className="whitespace-nowrap px-3 py-2.5 text-stone-600">
                   {f.prazo_entrega_dias !== undefined
                     ? `${f.prazo_entrega_dias} dia${f.prazo_entrega_dias === 1 ? "" : "s"}`
                     : "—"}
+                </td>
+                <td className="px-3 py-2.5">
+                  <Badge cor="verde">Ativo</Badge>
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  <button
+                    className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-texto"
+                    aria-label={`Editar ${f.nome}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setForm({ ...f });
+                    }}
+                  >
+                    <Pencil size={15} />
+                  </button>
                 </td>
               </tr>
             ))}

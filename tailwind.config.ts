@@ -9,14 +9,15 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Paleta alinhada ao ERP parceiro (EASE EAT): âmbar como cor de ação
         primaria: {
-          DEFAULT: "#15803D",
-          escura: "#166534",
-          clara: "#DCFCE7",
+          DEFAULT: "#F59E0B",
+          escura: "#D97706",
+          clara: "#FEF3C7",
         },
-        fundo: "#F8FAFC",
+        fundo: "#F7F6F3",
         superficie: "#FFFFFF",
-        texto: "#0F172A",
+        texto: "#1C1917",
         destaque: {
           DEFAULT: "#EA580C",
           clara: "#FFEDD5",

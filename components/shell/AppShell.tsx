@@ -1,8 +1,11 @@
 "use client";
 
+// Moldura do app no estilo do ERP parceiro (EASE EAT): menu lateral branco com
+// seções agrupadas, busca no topo, usuário no rodapé e barra superior fina.
+
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   FileSpreadsheet,
@@ -16,8 +19,12 @@ import {
   Menu,
   X,
   ChefHat,
+  ChevronLeft,
+  ChevronRight,
+  Search,
 } from "lucide-react";
 import { PapelProvider, usePapel, podeVerValores, ROTULO_PAPEL } from "@/lib/roles";
+import { useDB } from "@/lib/data";
 import type { Papel } from "@/lib/types";
 
 interface ItemMenu {
@@ -27,63 +34,168 @@ interface ItemMenu {
   precisaVerValores?: boolean;
 }
 
-const MENU: ItemMenu[] = [
-  { href: "/", rotulo: "Painel", icone: LayoutDashboard },
-  { href: "/lista-compras", rotulo: "Lista de compras", icone: FileSpreadsheet },
-  { href: "/cotacoes", rotulo: "Cotações", icone: MessagesSquare, precisaVerValores: true },
-  { href: "/pedidos", rotulo: "Pedidos", icone: ShoppingCart },
-  { href: "/recebimento", rotulo: "Recebimento", icone: PackageCheck },
-  { href: "/estoque", rotulo: "Estoque", icone: Boxes },
-  { href: "/financeiro", rotulo: "Financeiro", icone: Wallet, precisaVerValores: true },
-  { href: "/relatorios", rotulo: "Relatórios", icone: BarChart3, precisaVerValores: true },
-  { href: "/cadastros", rotulo: "Cadastros", icone: FolderCog },
+interface SecaoMenu {
+  titulo: string;
+  itens: ItemMenu[];
+}
+
+const MENU: SecaoMenu[] = [
+  {
+    titulo: "Operação",
+    itens: [
+      { href: "/", rotulo: "Painel", icone: LayoutDashboard },
+      { href: "/recebimento", rotulo: "Recebimento", icone: PackageCheck },
+      { href: "/estoque", rotulo: "Estoque", icone: Boxes },
+    ],
+  },
+  {
+    titulo: "Suprimentos",
+    itens: [
+      { href: "/lista-compras", rotulo: "Lista de compras", icone: FileSpreadsheet },
+      { href: "/cotacoes", rotulo: "Cotações", icone: MessagesSquare, precisaVerValores: true },
+      { href: "/pedidos", rotulo: "Pedidos", icone: ShoppingCart },
+    ],
+  },
+  {
+    titulo: "Financeiro",
+    itens: [
+      { href: "/financeiro", rotulo: "Boletos e contas", icone: Wallet, precisaVerValores: true },
+      { href: "/relatorios", rotulo: "Relatórios", icone: BarChart3, precisaVerValores: true },
+    ],
+  },
+  {
+    titulo: "Sistema",
+    itens: [{ href: "/cadastros", rotulo: "Cadastros", icone: FolderCog }],
+  },
 ];
 
-function SeletorPapel() {
-  const { papel, setPapel } = usePapel();
+function MarcaComprasChef() {
   return (
-    <label className="flex items-center gap-2 text-sm">
-      <span className="hidden text-slate-500 sm:inline">Entrando como:</span>
-      <select
-        value={papel}
-        onChange={(e) => setPapel(e.target.value as Papel)}
-        className="rounded-card border border-slate-300 bg-superficie px-2 py-1.5 text-sm font-medium"
-      >
-        {(Object.keys(ROTULO_PAPEL) as Papel[]).map((p) => (
-          <option key={p} value={p}>
-            {ROTULO_PAPEL[p]}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Link href="/" className="flex items-center gap-2.5 px-1">
+      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primaria text-white">
+        <ChefHat size={20} />
+      </span>
+      <span className="leading-tight">
+        <span className="block text-[15px] font-bold">
+          Compras<span className="text-primaria-escura">Chef</span>
+        </span>
+        <span className="block text-[11px] text-stone-500">Compras &amp; Estoque</span>
+      </span>
+    </Link>
+  );
+}
+
+function RodapeUsuario() {
+  const { papel, setPapel } = usePapel();
+  const db = useDB();
+  const perfil = db.perfis.find((p) => p.papel === papel);
+  const nome = perfil?.nome ?? "—";
+
+  return (
+    <div className="border-t border-stone-200 p-3">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primaria-clara text-sm font-bold text-primaria-escura">
+          {nome.charAt(0).toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">{nome}</p>
+          <select
+            value={papel}
+            onChange={(e) => setPapel(e.target.value as Papel)}
+            className="mt-0.5 w-full cursor-pointer rounded border-0 bg-transparent p-0 text-xs text-stone-500 focus:ring-0"
+            aria-label="Entrando como"
+          >
+            {(Object.keys(ROTULO_PAPEL) as Papel[]).map((p) => (
+              <option key={p} value={p}>
+                {ROTULO_PAPEL[p]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
   );
 }
 
 function Navegacao({ aoNavegar }: { aoNavegar?: () => void }) {
   const pathname = usePathname();
   const { papel } = usePapel();
-  const itens = MENU.filter((i) => !i.precisaVerValores || podeVerValores(papel));
+  const [busca, setBusca] = useState("");
+
+  const secoes = MENU.map((secao) => ({
+    ...secao,
+    itens: secao.itens
+      .filter((i) => !i.precisaVerValores || podeVerValores(papel))
+      .filter((i) => i.rotulo.toLowerCase().includes(busca.trim().toLowerCase())),
+  })).filter((secao) => secao.itens.length > 0);
 
   return (
-    <nav className="flex flex-col gap-1 p-3">
-      {itens.map((item) => {
-        const ativo = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-        const Icone = item.icone;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={aoNavegar}
-            className={`flex items-center gap-3 rounded-card px-3 py-2.5 text-sm font-medium transition-colors ${
-              ativo ? "bg-primaria text-white" : "text-slate-600 hover:bg-slate-100"
-            }`}
-          >
-            <Icone size={18} />
-            {item.rotulo}
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative px-3 pb-1 pt-3">
+        <Search size={14} className="pointer-events-none absolute left-6 top-1/2 mt-1 -translate-y-1/2 text-stone-400" />
+        <input
+          type="search"
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          placeholder="Buscar…"
+          className="w-full rounded-lg border border-stone-200 bg-stone-50 py-1.5 pl-8 pr-2 text-sm outline-none focus:border-primaria focus:bg-white"
+        />
+      </div>
+      <nav className="flex-1 overflow-y-auto px-3 py-2">
+        {secoes.map((secao) => (
+          <div key={secao.titulo} className="mb-3">
+            <p className="rotulo px-2 pb-1 pt-2">{secao.titulo}</p>
+            {secao.itens.map((item) => {
+              const ativo = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const Icone = item.icone;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={aoNavegar}
+                  className={`mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
+                    ativo
+                      ? "bg-primaria-clara font-semibold text-primaria-escura"
+                      : "font-medium text-stone-600 hover:bg-stone-100"
+                  }`}
+                >
+                  <Icone size={17} className={ativo ? "text-primaria-escura" : "text-stone-400"} />
+                  <span className="flex-1">{item.rotulo}</span>
+                  {ativo && <ChevronRight size={15} />}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+      <RodapeUsuario />
+    </div>
+  );
+}
+
+function BarraSuperior({ onAbrirMenu }: { onAbrirMenu: () => void }) {
+  const router = useRouter();
+  return (
+    <header className="sticky top-0 z-40 flex items-center gap-2 border-b border-stone-200 bg-superficie px-3 py-2">
+      <button
+        className="rounded-lg p-2 hover:bg-stone-100 lg:hidden"
+        onClick={onAbrirMenu}
+        aria-label="Abrir menu"
+      >
+        <Menu size={20} />
+      </button>
+      <button
+        className="hidden rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 lg:block"
+        onClick={() => router.back()}
+        aria-label="Voltar"
+      >
+        <ChevronLeft size={18} />
+      </button>
+      <span className="flex items-center gap-1.5 rounded-lg bg-stone-900 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white">
+        <ChefHat size={13} />
+        ComprasChef
+      </span>
+    </header>
   );
 }
 
@@ -91,55 +203,37 @@ function Moldura({ children }: { children: React.ReactNode }) {
   const [menuAberto, setMenuAberto] = useState(false);
 
   return (
-    <div className="min-h-screen">
-      {/* Topo */}
-      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-slate-200 bg-superficie px-4 py-3">
-        <div className="flex items-center gap-3">
-          <button
-            className="rounded-card p-2 hover:bg-slate-100 lg:hidden"
-            onClick={() => setMenuAberto(true)}
-            aria-label="Abrir menu"
-          >
-            <Menu size={22} />
-          </button>
-          <Link href="/" className="flex items-center gap-2">
-            <ChefHat size={26} className="text-primaria" />
-            <span className="text-lg font-bold">
-              Compras<span className="text-primaria">Chef</span>
-            </span>
-          </Link>
+    <div className="flex min-h-screen">
+      {/* Menu lateral fixo (desktop) */}
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-stone-200 bg-superficie lg:flex">
+        <div className="border-b border-stone-200 px-3 py-3">
+          <MarcaComprasChef />
         </div>
-        <SeletorPapel />
-      </header>
+        <Navegacao />
+      </aside>
 
-      <div className="flex">
-        {/* Menu lateral fixo (desktop) */}
-        <aside className="sticky top-[57px] hidden h-[calc(100vh-57px)] w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-superficie lg:block">
-          <Navegacao />
-        </aside>
-
-        {/* Menu lateral deslizante (celular/tablet) */}
-        {menuAberto && (
-          <div className="fixed inset-0 z-50 lg:hidden" onClick={() => setMenuAberto(false)}>
-            <div className="absolute inset-0 bg-black/40" />
-            <div
-              className="absolute left-0 top-0 h-full w-64 bg-superficie shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-                <span className="text-lg font-bold">
-                  Compras<span className="text-primaria">Chef</span>
-                </span>
-                <button onClick={() => setMenuAberto(false)} className="rounded-card p-2 hover:bg-slate-100" aria-label="Fechar menu">
-                  <X size={20} />
-                </button>
-              </div>
-              <Navegacao aoNavegar={() => setMenuAberto(false)} />
+      {/* Menu lateral deslizante (celular/tablet) */}
+      {menuAberto && (
+        <div className="fixed inset-0 z-50 lg:hidden" onClick={() => setMenuAberto(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="absolute left-0 top-0 flex h-full w-72 flex-col bg-superficie shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-stone-200 px-3 py-3">
+              <MarcaComprasChef />
+              <button onClick={() => setMenuAberto(false)} className="rounded-lg p-2 hover:bg-stone-100" aria-label="Fechar menu">
+                <X size={20} />
+              </button>
             </div>
+            <Navegacao aoNavegar={() => setMenuAberto(false)} />
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Conteúdo */}
+      {/* Conteúdo */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <BarraSuperior onAbrirMenu={() => setMenuAberto(true)} />
         <main className="min-w-0 flex-1 p-4 lg:p-6">{children}</main>
       </div>
     </div>

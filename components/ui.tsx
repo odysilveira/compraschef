@@ -9,11 +9,53 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
   return <div className={`card ${className}`}>{children}</div>;
 }
 
-export function TituloPagina({ titulo, acao }: { titulo: string; acao?: ReactNode }) {
+export function TituloPagina({
+  titulo,
+  subtitulo,
+  acao,
+}: {
+  titulo: string;
+  subtitulo?: string;
+  acao?: ReactNode;
+}) {
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <h1>{titulo}</h1>
+      <div>
+        <h1>{titulo}</h1>
+        {subtitulo && <p className="mt-0.5 text-sm text-stone-500">{subtitulo}</p>}
+      </div>
       {acao}
+    </div>
+  );
+}
+
+type CorStat = "verde" | "laranja" | "vermelho" | "cinza" | "amarelo";
+
+const BORDA_STAT: Record<CorStat, string> = {
+  verde: "border-l-emerald-500",
+  laranja: "border-l-amber-500",
+  vermelho: "border-l-red-500",
+  cinza: "border-l-stone-300",
+  amarelo: "border-l-yellow-400",
+};
+
+/** Cartão de resumo no topo das telas (estilo do ERP parceiro): rótulo, número grande e subtexto. */
+export function StatCard({
+  rotulo,
+  valor,
+  subtexto,
+  cor = "cinza",
+}: {
+  rotulo: string;
+  valor: ReactNode;
+  subtexto?: string;
+  cor?: CorStat;
+}) {
+  return (
+    <div className={`card border-l-4 py-3 ${BORDA_STAT[cor]}`}>
+      <p className="rotulo">{rotulo}</p>
+      <p className="mt-1 text-2xl font-bold leading-none">{valor}</p>
+      {subtexto && <p className="mt-1 text-xs text-stone-500">{subtexto}</p>}
     </div>
   );
 }

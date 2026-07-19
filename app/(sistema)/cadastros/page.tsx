@@ -25,15 +25,18 @@ export default function CadastrosPage() {
 
   return (
     <div>
-      <TituloPagina titulo="Cadastros" />
+      <TituloPagina
+        titulo="Cadastros"
+        subtitulo="Fornecedores, produtos, unidades, locais e caixas — a base de tudo"
+      />
 
-      <div className="mb-5 flex gap-1 overflow-x-auto rounded-card bg-slate-100 p-1">
+      <div className="mb-5 flex gap-1 overflow-x-auto rounded-card bg-stone-100 p-1">
         {ABAS.map((a) => (
           <button
             key={a.id}
             onClick={() => setAba(a.id)}
             className={`whitespace-nowrap rounded-card px-4 py-2 text-sm font-semibold transition-colors ${
-              aba === a.id ? "bg-primaria text-white shadow-card" : "text-slate-600 hover:bg-white"
+              aba === a.id ? "bg-superficie text-primaria-escura shadow-card" : "text-stone-600 hover:bg-white"
             }`}
           >
             {a.rotulo}

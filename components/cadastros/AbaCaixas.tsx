@@ -74,9 +74,14 @@ export function AbaCaixas() {
     <div>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <BarraBusca valor={busca} onMudar={setBusca} placeholder="Buscar por número, QR, produto…" />
-        <button className="btn-primario mb-4" onClick={() => setForm(novaCaixa())}>
-          <Plus size={16} /> Nova caixa
-        </button>
+        <div className="mb-4 flex gap-2">
+          <a href="/etiquetas" target="_blank" rel="noopener" className="btn-secundario">
+            <QrCode size={16} /> Imprimir etiquetas
+          </a>
+          <button className="btn-primario" onClick={() => setForm(novaCaixa())}>
+            <Plus size={16} /> Nova caixa
+          </button>
+        </div>
       </div>
 
       {lista.length === 0 ? (

@@ -11,6 +11,7 @@ import {
   Camera,
   CircleCheck,
   PackageCheck,
+  PackagePlus,
   ReceiptText,
   TriangleAlert,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import ReceberPorNota from "@/components/operacao/ReceberPorNota";
+import ReceberAvulso from "@/components/operacao/ReceberAvulso";
 import {
   estoqueAtual,
   mutate,
@@ -89,6 +91,7 @@ export default function RecebimentoPage() {
 
   const [pedidoId, setPedidoId] = useState<string | null>(null);
   const [modoNota, setModoNota] = useState(false);
+  const [modoAvulso, setModoAvulso] = useState(false);
   const [conferencia, setConferencia] = useState<Record<string, ConferenciaItem>>({});
   const [destaqueItem, setDestaqueItem] = useState<string | null>(null);
   const [avisoScanner, setAvisoScanner] = useState<string | null>(null);
@@ -253,6 +256,7 @@ export default function RecebimentoPage() {
   function recomecar() {
     setPedidoId(null);
     setModoNota(false);
+    setModoAvulso(false);
     setConferencia({});
     setResultado(null);
     setDestaqueItem(null);
@@ -323,23 +327,62 @@ export default function RecebimentoPage() {
     );
   }
 
+  // ---------- Modo avulso (QR da nota ou sem nota) ----------
+  if (modoAvulso) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <TituloPagina titulo="Recebimento sem XML" />
+        <ReceberAvulso
+          db={db}
+          usuarioId={usuarioId}
+          verValores={verValores}
+          onVoltar={() => setModoAvulso(false)}
+          aoFinalizar={(r) =>
+            setResultado({
+              status: r.status,
+              temNota: r.boletos > 0,
+              boletosLiberados: r.boletosLiberados,
+              mensagemExtra: `Entrada de ${r.fornecedorNome} registrada${
+                r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""
+              }.`,
+            })
+          }
+        />
+      </div>
+    );
+  }
+
   // ---------- Passo 1: escolher pedido ----------
   if (!pedido) {
     return (
       <div className="space-y-4">
         <TituloPagina titulo="Recebimento" />
-        <button
-          className="card flex w-full items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara"
-          onClick={() => setModoNota(true)}
-        >
-          <ReceiptText size={32} className="shrink-0 text-primaria" />
-          <span>
-            <span className="block text-lg font-bold">Ler nota fiscal (XML)</span>
-            <span className="block text-sm text-slate-600">
-              Importe o XML da NF-e e confirme os itens um a um — mesmo sem pedido no sistema.
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            className="card flex items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara"
+            onClick={() => setModoNota(true)}
+          >
+            <ReceiptText size={32} className="shrink-0 text-primaria" />
+            <span>
+              <span className="block text-lg font-bold">Ler nota fiscal (XML)</span>
+              <span className="block text-sm text-slate-600">
+                Importe o XML da NF-e e confirme os itens um a um.
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+          <button
+            className="card flex items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara"
+            onClick={() => setModoAvulso(true)}
+          >
+            <PackagePlus size={32} className="shrink-0 text-primaria" />
+            <span>
+              <span className="block text-lg font-bold">Receber sem XML</span>
+              <span className="block text-sm text-slate-600">
+                Leia o QR da nota impressa ou preencha os itens à mão (hortifrúti, feira).
+              </span>
+            </span>
+          </button>
+        </div>
         <p className="text-sm text-slate-600">Ou toque no pedido que chegou para começar a conferência.</p>
         {pedidosParaReceber.length === 0 ? (
           <Vazio mensagem="Nenhum pedido aguardando entrega no momento." />

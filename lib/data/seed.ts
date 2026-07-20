@@ -235,10 +235,17 @@ export const seedDB: DB = {
   notas_fiscais: [
     // Nota do pedido entregue — já conferida
     { id: "nf-1", fornecedor_id: "forn-hortifruti", pedido_id: "ped-2", numero: "45231", chave_acesso: "35260712345678000190550010000452311000452319", valor_total: 318.4, emitida_em: soData(diasAtras(5)), importada_em: diasAtras(5), status: "conferida" },
-    // Nota da distribuidora aguardando conferência (boleto travado)
-    { id: "nf-2", fornecedor_id: "forn-distribuidora", numero: "88102", chave_acesso: "35260734567890000112550010000881021000881029", valor_total: 654.0, emitida_em: soData(diasAtras(1)), importada_em: diasAtras(1), status: "aguardando_conferencia" },
-    // Nota do frigorífico (pedido confirmado) — gerou boleto suspeito
-    { id: "nf-3", fornecedor_id: "forn-frigorifico", pedido_id: "ped-3", numero: "12904", chave_acesso: "35260723456789000101550010000129041000129046", valor_total: 1240.0, emitida_em: soData(diasAtras(1)), importada_em: diasAtras(0), status: "aguardando_conferencia" },
+    // Nota da distribuidora aguardando conferência (boleto travado) — baixada da Receita
+    { id: "nf-2", fornecedor_id: "forn-distribuidora", numero: "88102", chave_acesso: "35260734567890000112550010000881021000881029", valor_total: 654.0, emitida_em: soData(diasAtras(1)), importada_em: diasAtras(1), status: "aguardando_conferencia", origem: "receita",
+      itens_importados: [
+        { descricao: "AZEITE EXTRA VIRGEM 500ML CX", codigo: "AZ-500", ean: "", unidade: "cx", quantidade: 6, preco_unitario: 42.0 },
+        { descricao: "ARROZ ARBOREO 1KG", codigo: "ARB-1", ean: "", unidade: "kg", quantidade: 30, preco_unitario: 13.4 },
+      ] },
+    // Nota do frigorífico (pedido confirmado) — baixada da Receita, gerou boleto suspeito
+    { id: "nf-3", fornecedor_id: "forn-frigorifico", pedido_id: "ped-3", numero: "12904", chave_acesso: "35260723456789000101550010000129041000129046", valor_total: 1240.0, emitida_em: soData(diasAtras(1)), importada_em: diasAtras(0), status: "aguardando_conferencia", origem: "receita",
+      itens_importados: [
+        { descricao: "FILE MIGNON BOVINO RESFRIADO KG", codigo: "FBF-0101", ean: "7891000200201", unidade: "kg", quantidade: 20, preco_unitario: 62.0 },
+      ] },
   ],
 
   boletos: [

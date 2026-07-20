@@ -92,6 +92,7 @@ export default function RecebimentoPage() {
   const [pedidoId, setPedidoId] = useState<string | null>(null);
   const [modoNota, setModoNota] = useState(false);
   const [modoAvulso, setModoAvulso] = useState(false);
+  const [notaConferirId, setNotaConferirId] = useState<string | null>(null);
   const [conferencia, setConferencia] = useState<Record<string, ConferenciaItem>>({});
   const [destaqueItem, setDestaqueItem] = useState<string | null>(null);
   const [avisoScanner, setAvisoScanner] = useState<string | null>(null);
@@ -99,6 +100,10 @@ export default function RecebimentoPage() {
   const timerDestaque = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pedidosParaReceber = db.pedidos.filter((p) => p.status === "enviado" || p.status === "confirmado");
+  // DANFEs baixadas da Receita (via certificado) aguardando conferência
+  const notasImportadas = db.notas_fiscais.filter(
+    (n) => n.status === "aguardando_conferencia" && n.itens_importados && n.itens_importados.length > 0
+  );
   const pedido = db.pedidos.find((p) => p.id === pedidoId);
   const itensPedido = pedido ? db.pedido_itens.filter((i) => i.pedido_id === pedido.id) : [];
 
@@ -257,6 +262,7 @@ export default function RecebimentoPage() {
     setPedidoId(null);
     setModoNota(false);
     setModoAvulso(false);
+    setNotaConferirId(null);
     setConferencia({});
     setResultado(null);
     setDestaqueItem(null);
@@ -327,6 +333,35 @@ export default function RecebimentoPage() {
     );
   }
 
+  // ---------- Conferir uma DANFE importada da Receita ----------
+  if (notaConferirId) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <TituloPagina titulo="Conferir nota importada" />
+        <ReceberPorNota
+          db={db}
+          usuarioId={usuarioId}
+          notaImportadaId={notaConferirId}
+          onVoltar={() => setNotaConferirId(null)}
+          aoFinalizar={(r) =>
+            setResultado({
+              status: r.status,
+              temNota: true,
+              boletosLiberados: r.boletosLiberados,
+              mensagemExtra: `Nota de ${r.fornecedorNome} conferida${
+                r.boletos > 0
+                  ? ` · ${r.boletosLiberados} de ${r.boletos} boleto${r.boletos === 1 ? "" : "s"} liberado${
+                      r.boletosLiberados === 1 ? "" : "s"
+                    }`
+                  : ""
+              }.`,
+            })
+          }
+        />
+      </div>
+    );
+  }
+
   // ---------- Modo avulso (QR da nota ou sem nota) ----------
   if (modoAvulso) {
     return (
@@ -383,6 +418,39 @@ export default function RecebimentoPage() {
             </span>
           </button>
         </div>
+
+        {notasImportadas.length > 0 && (
+          <section>
+            <h2 className="mb-2 flex items-center gap-2">
+              <ReceiptText size={20} className="text-primaria" /> Notas importadas da Receita
+            </h2>
+            <p className="mb-3 text-sm text-slate-600">
+              Baixadas automaticamente pelo certificado digital. Toque para conferir os itens.
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {notasImportadas.map((n) => {
+                const numItens = n.itens_importados?.length ?? 0;
+                return (
+                  <button
+                    key={n.id}
+                    className="card flex flex-col items-start gap-2 border-2 border-transparent p-5 text-left transition-colors hover:border-primaria"
+                    onClick={() => setNotaConferirId(n.id)}
+                  >
+                    <span className="flex w-full items-center justify-between gap-2">
+                      <span className="text-lg font-bold">{nomeFornecedor(db, n.fornecedor_id)}</span>
+                      <Badge cor="laranja">a conferir</Badge>
+                    </span>
+                    <span className="text-sm text-slate-600">
+                      Nota nº {n.numero} · {numItens} {numItens === 1 ? "item" : "itens"}
+                    </span>
+                    {verValores && <span className="text-sm font-semibold">{moeda(n.valor_total)}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         <p className="text-sm text-slate-600">Ou toque no pedido que chegou para começar a conferência.</p>
         {pedidosParaReceber.length === 0 ? (
           <Vazio mensagem="Nenhum pedido aguardando entrega no momento." />

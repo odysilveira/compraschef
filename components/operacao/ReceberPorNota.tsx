@@ -137,19 +137,60 @@ const XML_EXEMPLO = `<?xml version="1.0" encoding="UTF-8"?>
 <cobr><dup><nDup>001</nDup><dVenc>${hojeMais(28)}</dVenc><vDup>1240.00</vDup></dup></cobr>
 </infNFe></NFe></nfeProc>`;
 
+/** Converte uma nota já importada (Receita) para o formato de leitura + decisões iniciais. */
+function daNotaImportada(db: DB, notaId: string): { lida: NotaLida; decisoes: Record<number, DecisaoItem> } | null {
+  const nf = db.notas_fiscais.find((n) => n.id === notaId);
+  if (!nf || !nf.itens_importados) return null;
+  const forn = db.fornecedores.find((f) => f.id === nf.fornecedor_id);
+  const itens: ItemNota[] = nf.itens_importados.map((it, indice) => ({
+    indice,
+    cProd: it.codigo ?? "",
+    cEAN: it.ean ?? "",
+    xProd: it.descricao,
+    uCom: it.unidade,
+    qCom: it.quantidade,
+    vUnCom: it.preco_unitario,
+  }));
+  const lida: NotaLida = {
+    emitCnpj: forn ? somenteDigitos(forn.cnpj) : "",
+    emitNome: forn?.nome ?? "",
+    numero: nf.numero,
+    chave: nf.chave_acesso,
+    valorTotal: nf.valor_total,
+    duplicatas: [],
+    itens,
+  };
+  const decisoes: Record<number, DecisaoItem> = {};
+  for (const item of itens) {
+    const produtoId = casarProduto(db, item);
+    const produto = db.produtos.find((p) => p.id === produtoId);
+    decisoes[item.indice] = {
+      decisao: "pendente",
+      quantidade: item.qCom,
+      validade: hojeMais(produto?.validade_padrao_dias ?? 30),
+      produtoId,
+    };
+  }
+  return { lida, decisoes };
+}
+
 export default function ReceberPorNota({
   db,
   usuarioId,
+  notaImportadaId,
   onVoltar,
   aoFinalizar,
 }: {
   db: DB;
   usuarioId: string;
+  /** Quando vem de uma DANFE já baixada da Receita: pula o upload e usa os itens da nota. */
+  notaImportadaId?: string;
   onVoltar: () => void;
   aoFinalizar: (resultado: ResultadoNota) => void;
 }) {
-  const [nota, setNota] = useState<NotaLida | null>(null);
-  const [decisoes, setDecisoes] = useState<Record<number, DecisaoItem>>({});
+  const inicial = notaImportadaId ? daNotaImportada(db, notaImportadaId) : null;
+  const [nota, setNota] = useState<NotaLida | null>(inicial?.lida ?? null);
+  const [decisoes, setDecisoes] = useState<Record<number, DecisaoItem>>(inicial?.decisoes ?? {});
   const [erro, setErro] = useState<string | null>(null);
 
   const fornecedor = nota
@@ -211,37 +252,54 @@ export default function ReceberPorNota({
         )
       : undefined;
 
-    const notaId = uid("nf");
+    const notaId = notaImportadaId ?? uid("nf");
     const recebimentoId = uid("rec");
     let boletosLiberados = 0;
 
     const dbNovo = mutate((d) => {
-      d.notas_fiscais.unshift({
-        id: notaId,
-        fornecedor_id: fornecedor?.id ?? "",
-        pedido_id: pedido?.id,
-        numero: nota.numero || "s/n",
-        chave_acesso: nota.chave || uid("chave"),
-        valor_total: nota.valorTotal,
-        emitida_em: hoje,
-        importada_em: agora,
-        status: tudoOk ? "conferida" : "divergente",
-      });
-
-      for (const dup of nota.duplicatas) {
-        const liberado = tudoOk;
-        if (liberado) boletosLiberados += 1;
-        d.boletos.push({
-          id: uid("bol"),
-          nota_id: notaId,
-          valor: dup.valor,
-          vencimento: dup.vencimento || hojeMais(fornecedor?.prazo_boleto_dias ?? 28),
-          cnpj_beneficiario: nota.emitCnpj,
-          status: liberado ? "liberado" : "travado",
-          observacao: liberado
-            ? "Liberado após conferência OK da mercadoria (nota importada no recebimento)"
-            : "Divergência no recebimento — liberação proporcional pendente de acerto com o fornecedor",
+      if (notaImportadaId) {
+        // Nota já existe (baixada da Receita): só atualiza o status e libera os boletos.
+        const nf = d.notas_fiscais.find((n) => n.id === notaImportadaId);
+        if (nf) nf.status = tudoOk ? "conferida" : "divergente";
+        d.boletos.forEach((b) => {
+          if (b.nota_id !== notaImportadaId || b.status !== "travado") return;
+          if (tudoOk) {
+            b.status = "liberado";
+            b.observacao = "Liberado após conferência OK da mercadoria";
+            boletosLiberados += 1;
+          } else {
+            b.observacao = "Divergência no recebimento — liberação proporcional pendente de acerto com o fornecedor";
+          }
         });
+      } else {
+        d.notas_fiscais.unshift({
+          id: notaId,
+          fornecedor_id: fornecedor?.id ?? "",
+          pedido_id: pedido?.id,
+          numero: nota.numero || "s/n",
+          chave_acesso: nota.chave || uid("chave"),
+          valor_total: nota.valorTotal,
+          emitida_em: hoje,
+          importada_em: agora,
+          status: tudoOk ? "conferida" : "divergente",
+          origem: "manual",
+        });
+
+        for (const dup of nota.duplicatas) {
+          const liberado = tudoOk;
+          if (liberado) boletosLiberados += 1;
+          d.boletos.push({
+            id: uid("bol"),
+            nota_id: notaId,
+            valor: dup.valor,
+            vencimento: dup.vencimento || hojeMais(fornecedor?.prazo_boleto_dias ?? 28),
+            cnpj_beneficiario: nota.emitCnpj,
+            status: liberado ? "liberado" : "travado",
+            observacao: liberado
+              ? "Liberado após conferência OK da mercadoria (nota importada no recebimento)"
+              : "Divergência no recebimento — liberação proporcional pendente de acerto com o fornecedor",
+          });
+        }
       }
 
       d.recebimentos.unshift({
@@ -306,10 +364,14 @@ export default function ReceberPorNota({
       enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, dec.produtoId) + dec.quantidade);
     }
 
+    const totalBoletos = notaImportadaId
+      ? db.boletos.filter((b) => b.nota_id === notaImportadaId).length
+      : nota.duplicatas.length;
+
     aoFinalizar({
       status,
       fornecedorNome: fornecedor ? nomeFornecedor(db, fornecedor.id) : nota.emitNome,
-      boletos: nota.duplicatas.length,
+      boletos: totalBoletos,
       boletosLiberados,
       vinculouPedido: Boolean(pedido),
     });

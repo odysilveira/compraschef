@@ -159,6 +159,16 @@ export interface PedidoItem {
 
 export type StatusNota = "aguardando_conferencia" | "conferida" | "divergente";
 
+// Item de uma nota trazida da Receita Federal (via certificado digital).
+export interface ItemNotaImportada {
+  descricao: string;
+  codigo?: string; // cProd do fornecedor
+  ean?: string; // código de barras
+  unidade: string;
+  quantidade: number;
+  preco_unitario: number;
+}
+
 export interface NotaFiscal {
   id: string;
   fornecedor_id: string;
@@ -170,6 +180,8 @@ export interface NotaFiscal {
   emitida_em: string;
   importada_em: string;
   status: StatusNota;
+  origem?: "manual" | "receita"; // 'receita' = baixada automaticamente pelo certificado
+  itens_importados?: ItemNotaImportada[];
 }
 
 export type StatusBoleto = "travado" | "liberado" | "pago" | "suspeito";

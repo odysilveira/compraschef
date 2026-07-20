@@ -11,6 +11,7 @@ import { ArrowLeft, CircleCheck, PackagePlus, Plus, ReceiptText, Trash2 } from "
 import { Badge, Campo, Card } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
+import CampoMoeda from "@/components/operacao/CampoMoeda";
 import { estoqueAtual, mutate, nomeFornecedor, nomeProduto, siglaUnidadeUso, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
 import { moeda, qtd } from "@/lib/format";
@@ -282,17 +283,11 @@ export default function ReceberAvulso({
                 />
               </Campo>
               {verValores && (
-                <Campo rotulo="Preço unitário pago (R$, opcional)">
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    className="campo"
-                    value={item.preco ?? ""}
-                    onChange={(e) =>
-                      alterarItem(item.id, { preco: e.target.value === "" ? undefined : Number(e.target.value) })
-                    }
-                    placeholder="alimenta o histórico de preços"
+                <Campo rotulo="Preço unitário pago (opcional)">
+                  <CampoMoeda
+                    valor={item.preco}
+                    onChange={(v) => alterarItem(item.id, { preco: v })}
+                    placeholder="0,00"
                   />
                 </Campo>
               )}

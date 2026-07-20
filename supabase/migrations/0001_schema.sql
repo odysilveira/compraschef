@@ -153,7 +153,9 @@ create table notas_fiscais (
   emitida_em date,
   importada_em timestamptz not null default now(),
   status text not null default 'aguardando_conferencia'
-    check (status in ('aguardando_conferencia', 'conferida', 'divergente'))
+    check (status in ('aguardando_conferencia', 'conferida', 'divergente')),
+  origem text default 'manual' check (origem in ('manual', 'receita')),
+  itens_importados jsonb
 );
 
 create table boletos (

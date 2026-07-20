@@ -241,6 +241,14 @@ export function AbaFornecedores() {
                 onChange={(e) => alterar({ whatsapp: e.target.value || undefined })}
               />
             </Campo>
+            <Campo rotulo="Telefone (ligações)">
+              <input
+                className="campo"
+                placeholder="(11) 3000-0000"
+                value={form.telefone ?? ""}
+                onChange={(e) => alterar({ telefone: e.target.value || undefined })}
+              />
+            </Campo>
             <Campo rotulo="E-mail">
               <input
                 type="email"

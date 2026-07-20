@@ -4,8 +4,9 @@
 // em tempo real, recomendação da IA e geração de pedido. Só dono/gerente.
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, Check, Copy, Sparkles } from "lucide-react";
+import { Bell, Check, Copy, Plus, Sparkles } from "lucide-react";
 import { Badge, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
 import { podeVerValores, usePapel } from "@/lib/roles";
@@ -103,10 +104,27 @@ export default function CotacoesPage() {
 
   return (
     <div>
-      <TituloPagina titulo="Cotações" />
+      <TituloPagina
+        titulo="Cotações"
+        subtitulo="Toda cotação nasce de uma lista de compras confirmada"
+        acao={
+          <Link href="/lista-compras" className="btn-primario">
+            <Plus size={16} /> Nova cotação (criar lista)
+          </Link>
+        }
+      />
 
       {listas.length === 0 ? (
-        <Vazio mensagem="Nenhuma lista em cotação no momento. Confirme uma lista na tela de Lista de Compras para disparar as cotações." />
+        <Card className="py-8 text-center">
+          <p className="font-semibold">Nenhuma cotação em andamento.</p>
+          <p className="mx-auto mt-2 max-w-md text-sm text-stone-500">
+            O caminho é: <strong>Lista de compras</strong> → gerar automática (ou montar a sua) → ajustar os itens
+            → <strong>Confirmar</strong> → escolher os fornecedores. As cotações aparecem aqui.
+          </p>
+          <Link href="/lista-compras" className="btn-primario mt-4">
+            Começar pela lista de compras
+          </Link>
+        </Card>
       ) : (
         listas.map((lista) => {
           const cotacoes = db.cotacoes.filter((c) => c.lista_id === lista.id);

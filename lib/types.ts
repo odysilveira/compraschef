@@ -22,6 +22,7 @@ export interface Fornecedor {
   nome: string;
   cnpj: string;
   whatsapp?: string;
+  telefone?: string; // segundo contato — quando o WhatsApp não atende chamada
   email?: string;
   contato_nome?: string;
   prazo_entrega_dias?: number;

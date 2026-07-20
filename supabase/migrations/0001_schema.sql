@@ -21,6 +21,7 @@ create table fornecedores (
   nome text not null,
   cnpj text not null unique,
   whatsapp text,
+  telefone text,
   email text,
   contato_nome text,
   prazo_entrega_dias integer,

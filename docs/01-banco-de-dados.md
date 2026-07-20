@@ -19,6 +19,7 @@ tabela: fornecedores
   - nome: text, obrigatório
   - cnpj: text, obrigatório, único
   - whatsapp: text, opcional
+  - telefone: text, opcional (segundo contato, para ligações)
   - email: text, opcional
   - contato_nome: text, opcional
   - prazo_entrega_dias: integer, opcional

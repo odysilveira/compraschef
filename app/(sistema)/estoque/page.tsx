@@ -19,7 +19,6 @@ import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import {
   caixaFifo,
-  caixasVencendo,
   estoqueAtual,
   mutate,
   nomeLocal,
@@ -166,7 +165,7 @@ function FormEncher({
         <Campo rotulo="Data de envase">
           <input type="date" className="campo" value={envase} onChange={(e) => setEnvase(e.target.value)} />
         </Campo>
-        <Campo rotulo="Validade">
+        <Campo rotulo="Validade (obrigatória)">
           <input type="date" className="campo" value={validade} onChange={(e) => setValidade(e.target.value)} />
         </Campo>
       </div>
@@ -186,7 +185,12 @@ function FormEncher({
           precisar.
         </p>
       )}
-      <button className="btn-gigante" onClick={salvar} disabled={!produtoId || quantidade <= 0}>
+      {!validade && produtoId && (
+        <p className="rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
+          Informe a validade — é ela que alimenta os alertas de vencimento e o uso na ordem certa (FIFO).
+        </p>
+      )}
+      <button className="btn-gigante" onClick={salvar} disabled={!produtoId || quantidade <= 0 || !validade}>
         Salvar caixa cheia
       </button>
     </div>
@@ -216,7 +220,12 @@ export default function EstoquePage() {
 
   const balancoAtivo = db.balancos.find((b) => b.status === "em_andamento");
   const caixaAtiva = db.caixas.find((c) => c.id === caixaAtivaId);
-  const vencendo = caixasVencendo(db, 3);
+
+  // Janela de vencimentos configurável: atalhos (hoje/3/7/15 dias) ou data escolhida
+  const [dataAlvoVencimento, setDataAlvoVencimento] = useState(() => hojeMais(3));
+  const vencendo = db.caixas
+    .filter((c) => c.status !== "vazia" && c.validade && c.validade <= dataAlvoVencimento)
+    .sort((a, b) => (a.validade ?? "").localeCompare(b.validade ?? ""));
 
   function abrirConferencia(caixa: Caixa) {
     setConferindoCaixaId(caixa.id);
@@ -545,12 +554,45 @@ export default function EstoquePage() {
             </Card>
           )}
 
-          {/* Alertas de validade */}
-          {vencendo.length > 0 && (
-            <Card className="space-y-2">
+          {/* Alertas de validade — janela configurável */}
+          <Card className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="flex items-center gap-2 font-bold">
-                <Timer size={20} className="text-destaque" /> Validades próximas (3 dias)
+                <Timer size={20} className="text-destaque" /> Vencimentos até {dataBR(dataAlvoVencimento)}
               </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { rotulo: "Hoje", dias: 0 },
+                  { rotulo: "3 dias", dias: 3 },
+                  { rotulo: "7 dias", dias: 7 },
+                  { rotulo: "15 dias", dias: 15 },
+                ].map((opcao) => (
+                  <button
+                    key={opcao.dias}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                      dataAlvoVencimento === hojeMais(opcao.dias)
+                        ? "bg-primaria text-white"
+                        : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                    }`}
+                    onClick={() => setDataAlvoVencimento(hojeMais(opcao.dias))}
+                  >
+                    {opcao.rotulo}
+                  </button>
+                ))}
+                <input
+                  type="date"
+                  className="rounded-full border border-stone-200 px-2 py-0.5 text-xs"
+                  value={dataAlvoVencimento}
+                  onChange={(e) => e.target.value && setDataAlvoVencimento(e.target.value)}
+                  aria-label="Escolher data limite"
+                />
+              </div>
+            </div>
+            {vencendo.length === 0 && (
+              <p className="py-2 text-sm text-stone-500">
+                Nenhuma caixa vence até {dataBR(dataAlvoVencimento)}. 👍
+              </p>
+            )}
               {vencendo.map((c) => {
                 const dias = diasAte(c.validade);
                 const vencida = dias !== undefined && dias <= 0;
@@ -571,8 +613,7 @@ export default function EstoquePage() {
                   </button>
                 );
               })}
-            </Card>
-          )}
+          </Card>
 
           {/* Lista de todas as caixas */}
           <Card className="space-y-3">

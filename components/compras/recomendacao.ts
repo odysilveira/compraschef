@@ -10,13 +10,14 @@ import {
   nomeProduto,
   precoForaDoPadrao,
   precoMedioHistorico,
-  siglaUnidadeUso,
+  siglaParaItem,
 } from "@/lib/data";
 import { dataBR, moeda } from "@/lib/format";
 
 export interface ItemRecomendado {
   produto_id: string;
   quantidade: number;
+  unidade_id?: string;
   fornecedor_id: string;
   cotacao_id: string;
   preco_unitario: number;
@@ -42,7 +43,7 @@ export function gerarRecomendacao(db: DB, listaId: string): Recomendacao {
 
   for (const il of itensLista) {
     const nome = nomeProduto(db, il.produto_id);
-    const sigla = siglaUnidadeUso(db, il.produto_id) || "un";
+    const sigla = siglaParaItem(db, il.produto_id, il.unidade_id) || "un";
     const media = precoMedioHistorico(db, il.produto_id);
 
     interface Oferta {
@@ -98,6 +99,7 @@ export function gerarRecomendacao(db: DB, listaId: string): Recomendacao {
     itens.push({
       produto_id: il.produto_id,
       quantidade: il.quantidade,
+      unidade_id: il.unidade_id,
       fornecedor_id: melhor.fornecedorId,
       cotacao_id: melhor.cotacaoId,
       preco_unitario: melhor.preco,

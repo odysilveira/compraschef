@@ -97,6 +97,7 @@ export interface ListaItem {
   lista_id: string;
   produto_id: string;
   quantidade: number;
+  unidade_id?: string; // opcional: troca a unidade de uso do produto neste pedido
   observacao?: string;
 }
 
@@ -119,6 +120,7 @@ export interface CotacaoItem {
   cotacao_id: string;
   produto_id: string;
   quantidade: number;
+  unidade_id?: string; // herdada do item da lista, quando trocada
   preco_unitario?: number; // preenchido pelo fornecedor
   prazo_entrega_dias?: number;
   disponivel: boolean;
@@ -151,6 +153,7 @@ export interface PedidoItem {
   pedido_id: string;
   produto_id: string;
   quantidade: number;
+  unidade_id?: string; // herdada da cotação, quando trocada
   preco_unitario: number;
 }
 

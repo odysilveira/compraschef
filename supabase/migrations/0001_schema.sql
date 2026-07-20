@@ -91,6 +91,7 @@ create table lista_itens (
   lista_id uuid not null references listas_compras (id),
   produto_id uuid not null references produtos (id),
   quantidade numeric not null,
+  unidade_id uuid references unidades (id),
   observacao text
 );
 
@@ -111,6 +112,7 @@ create table cotacao_itens (
   cotacao_id uuid not null references cotacoes (id),
   produto_id uuid not null references produtos (id),
   quantidade numeric not null,
+  unidade_id uuid references unidades (id),
   preco_unitario numeric,
   prazo_entrega_dias integer,
   disponivel boolean not null default true,
@@ -136,6 +138,7 @@ create table pedido_itens (
   pedido_id uuid not null references pedidos (id),
   produto_id uuid not null references produtos (id),
   quantidade numeric not null,
+  unidade_id uuid references unidades (id),
   preco_unitario numeric not null
 );
 

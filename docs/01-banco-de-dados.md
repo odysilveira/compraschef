@@ -83,6 +83,7 @@ tabela: lista_itens
   - lista_id: uuid, FK → listas_compras.id
   - produto_id: uuid, FK → produtos.id
   - quantidade: numeric, obrigatório
+  - unidade_id: uuid, FK → unidades.id, opcional (troca a unidade do produto neste pedido; herdada por cotacao_itens e pedido_itens)
   - observacao: text, opcional
 
 tabela: cotacoes                     (uma por fornecedor, por lista)

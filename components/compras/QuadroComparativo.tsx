@@ -6,7 +6,7 @@
 
 import { AlertTriangle } from "lucide-react";
 import type { CotacaoItem, DB } from "@/lib/types";
-import { nomeFornecedor, nomeProduto, precoForaDoPadrao, siglaUnidadeUso } from "@/lib/data";
+import { nomeFornecedor, nomeProduto, precoForaDoPadrao, siglaParaItem } from "@/lib/data";
 import { moeda, qtd } from "@/lib/format";
 
 export function QuadroComparativo({ db, listaId }: { db: DB; listaId: string }) {
@@ -44,7 +44,7 @@ export function QuadroComparativo({ db, listaId }: { db: DB; listaId: string }) 
                 <td className="whitespace-nowrap px-3 py-2 font-medium">
                   {nomeProduto(db, il.produto_id)}
                   <span className="ml-1 text-xs font-normal text-slate-400">
-                    {qtd(il.quantidade, siglaUnidadeUso(db, il.produto_id))}
+                    {qtd(il.quantidade, siglaParaItem(db, il.produto_id, il.unidade_id))}
                   </span>
                 </td>
                 {cotacoes.map((c) => {

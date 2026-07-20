@@ -4,14 +4,16 @@
 // edição do rascunho e confirmação que dispara cotações por fornecedor.
 
 import { useState } from "react";
-import { Plus, Sparkles, Store, Trash2 } from "lucide-react";
+import { FilePlus2, Plus, Sparkles, Store, Trash2 } from "lucide-react";
 import { Badge, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
 import {
   estoqueAtual,
   mutate,
+  nomeFornecedor,
   nomePerfil,
   nomeProduto,
   produtosAbaixoDoMinimo,
+  siglaParaItem,
   siglaUnidadeUso,
   uid,
   useDB,
@@ -61,6 +63,28 @@ export default function ListaComprasPage() {
       }
     });
     setAviso(`Lista automática criada com ${abaixo.length} produto${abaixo.length === 1 ? "" : "s"} abaixo do mínimo.`);
+  }
+
+  function novaListaManual() {
+    mutate((d) => {
+      d.listas_compras.push({
+        id: uid("lista"),
+        status: "rascunho",
+        gerada_automaticamente: false,
+        criada_por: `perfil-${papel}`,
+        criada_em: new Date().toISOString(),
+      });
+    });
+    setAviso("Lista manual criada em branco — adicione os produtos conforme a necessidade.");
+  }
+
+  /** Fornecedores cadastrados como vendedores de um produto. */
+  function quemVende(produtoId: string): string[] {
+    return db.fornecedor_produtos
+      .filter((fp) => fp.produto_id === produtoId)
+      .map((fp) => nomeFornecedor(db, fp.fornecedor_id))
+      .filter((n) => n !== "—")
+      .sort((a, b) => a.localeCompare(b, "pt-BR"));
   }
 
   function atualizarItem(itemId: string, mudancas: Partial<ListaItem>) {
@@ -141,6 +165,7 @@ export default function ListaComprasPage() {
             cotacao_id: cotacaoId,
             produto_id: item.produto_id,
             quantidade: item.quantidade,
+            unidade_id: item.unidade_id,
             disponivel: true,
           });
         }
@@ -162,9 +187,14 @@ export default function ListaComprasPage() {
       <TituloPagina
         titulo="Lista de Compras"
         acao={
-          <button className="btn-primario" onClick={gerarListaAutomatica}>
-            <Sparkles className="h-4 w-4" /> Gerar lista automática
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-secundario" onClick={novaListaManual}>
+              <FilePlus2 className="h-4 w-4" /> Nova lista manual
+            </button>
+            <button className="btn-primario" onClick={gerarListaAutomatica}>
+              <Sparkles className="h-4 w-4" /> Gerar lista automática
+            </button>
+          </div>
         }
       />
 
@@ -204,10 +234,11 @@ export default function ListaComprasPage() {
                     {itens.length === 0 ? (
                       <p className="py-3 text-sm text-slate-500">Lista vazia — adicione produtos abaixo.</p>
                     ) : (
-                      <Tabela cabecalho={["Produto", "Quantidade", "Observação", ""]}>
+                      <Tabela cabecalho={["Produto", "Quantidade e unidade", "Observação", ""]}>
                         {itens.map((item) => {
                           const sigla = siglaUnidadeUso(db, item.produto_id);
                           const produto = db.produtos.find((p) => p.id === item.produto_id);
+                          const vendedores = quemVende(item.produto_id);
                           return (
                             <tr key={item.id}>
                               <td className="px-3 py-2">
@@ -216,6 +247,17 @@ export default function ListaComprasPage() {
                                   <p className="text-xs text-slate-400">
                                     estoque {qtd(estoqueAtual(db, produto.id), sigla)} · mín.{" "}
                                     {qtd(produto.estoque_minimo, sigla)}
+                                  </p>
+                                )}
+                                {vendedores.length > 0 ? (
+                                  <p className="text-xs text-primaria-escura">
+                                    <Store size={11} className="mr-1 inline" />
+                                    vendem: {vendedores.join(", ")}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-destaque">
+                                    <Store size={11} className="mr-1 inline" />
+                                    nenhum fornecedor vinculado — inclua manualmente na hora de cotar
                                   </p>
                                 )}
                               </td>
@@ -232,7 +274,18 @@ export default function ListaComprasPage() {
                                       })
                                     }
                                   />
-                                  <span className="text-xs text-slate-500">{sigla}</span>
+                                  <select
+                                    className="campo !w-auto !py-1.5"
+                                    value={item.unidade_id ?? produto?.unidade_uso_id ?? ""}
+                                    onChange={(e) => atualizarItem(item.id, { unidade_id: e.target.value })}
+                                    aria-label="Unidade do item"
+                                  >
+                                    {db.unidades.map((u) => (
+                                      <option key={u.id} value={u.id}>
+                                        {u.sigla}
+                                      </option>
+                                    ))}
+                                  </select>
                                 </div>
                               </td>
                               <td className="px-3 py-2">
@@ -295,7 +348,7 @@ export default function ListaComprasPage() {
                       <li key={item.id} className="flex flex-wrap items-baseline gap-2">
                         <span className="font-medium">{nomeProduto(db, item.produto_id)}</span>
                         <span className="text-slate-500">
-                          {qtd(item.quantidade, siglaUnidadeUso(db, item.produto_id))}
+                          {qtd(item.quantidade, siglaParaItem(db, item.produto_id, item.unidade_id))}
                         </span>
                         {item.observacao && <span className="text-xs text-slate-400">({item.observacao})</span>}
                       </li>

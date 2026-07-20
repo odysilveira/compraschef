@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Clock } from "lucide-react";
-import { mutate, nomeProduto, siglaUnidadeUso, useDB } from "@/lib/data";
+import { mutate, nomeProduto, siglaParaItem, useDB } from "@/lib/data";
 import { dataBR, dataHoraBR, qtd } from "@/lib/format";
 
 interface ItemForm {
@@ -178,7 +178,7 @@ export default function CotacaoPublicaPage() {
               <div className="mb-3 flex items-baseline justify-between gap-2">
                 <p className="font-semibold">{nomeProduto(db, item.produto_id)}</p>
                 <span className="whitespace-nowrap text-sm text-slate-500">
-                  {qtd(item.quantidade, siglaUnidadeUso(db, item.produto_id))}
+                  {qtd(item.quantidade, siglaParaItem(db, item.produto_id, item.unidade_id))}
                 </span>
               </div>
 

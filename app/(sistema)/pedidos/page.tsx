@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
-import { mutate, nomeFornecedor, nomePerfil, nomeProduto, siglaUnidadeUso, useDB } from "@/lib/data";
+import { mutate, nomeFornecedor, nomePerfil, nomeProduto, siglaParaItem, useDB } from "@/lib/data";
 import { podeAprovar, podeVerValores, usePapel } from "@/lib/roles";
 import { dataHoraBR, moeda, qtd } from "@/lib/format";
 import { EtapasPedido } from "@/components/compras/EtapasPedido";
@@ -94,7 +94,7 @@ export default function PedidosPage() {
               {itens.map((i) => (
                 <tr key={i.id}>
                   <td className="px-3 py-2">{nomeProduto(db, i.produto_id)}</td>
-                  <td className="px-3 py-2">{qtd(i.quantidade, siglaUnidadeUso(db, i.produto_id))}</td>
+                  <td className="px-3 py-2">{qtd(i.quantidade, siglaParaItem(db, i.produto_id, i.unidade_id))}</td>
                   {verValores && <td className="px-3 py-2">{moeda(i.preco_unitario)}</td>}
                   {verValores && (
                     <td className="px-3 py-2 font-semibold">{moeda(i.preco_unitario * i.quantidade)}</td>

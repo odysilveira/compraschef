@@ -74,6 +74,7 @@ export default function CotacoesPage() {
             pedido_id: pedidoId,
             produto_id: item.produto_id,
             quantidade: item.quantidade,
+            unidade_id: item.unidade_id,
             preco_unitario: item.preco_unitario,
           });
         }

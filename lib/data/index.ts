@@ -187,6 +187,12 @@ export function siglaUnidadeUso(db: DB, produtoId?: string): string {
   return db.unidades.find((u) => u.id === produto?.unidade_uso_id)?.sigla ?? "";
 }
 
+/** Sigla de um item de lista/cotação/pedido: usa a unidade trocada no item, senão a do produto. */
+export function siglaParaItem(db: DB, produtoId?: string, unidadeId?: string): string {
+  if (unidadeId) return db.unidades.find((u) => u.id === unidadeId)?.sigla ?? "";
+  return siglaUnidadeUso(db, produtoId);
+}
+
 export function nomeLocal(db: DB, id?: string): string {
   return db.locais.find((l) => l.id === id)?.nome ?? "sem local";
 }

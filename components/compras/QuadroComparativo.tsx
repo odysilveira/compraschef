@@ -106,7 +106,7 @@ export function QuadroComparativo({
                     </>
                   );
                   const dica = [
-                    ehMinha ? "✔ Sua escolha (toque de novo para desmarcar)" : "Tocar para escolher este preço",
+                    ehMinha ? "✔ Sua escolha (toque de novo para desmarcar)" : "Tocar na célula para escolher este fornecedor",
                     ehSugestao ? "✨ Sugestão da IA" : "",
                     fora ? "⚠ Preço fora do padrão: 15% ou mais acima da média histórica" : "",
                     ehMelhor ? "Melhor preço da linha" : "",
@@ -116,18 +116,14 @@ export function QuadroComparativo({
                   return (
                     <td
                       key={c.id}
-                      className={`whitespace-nowrap px-1.5 py-1.5 font-semibold ${
+                      className={`whitespace-nowrap p-0 font-semibold ${
                         fora ? "bg-destaque-clara text-destaque" : ehMelhor ? "bg-sucesso-clara text-primaria-escura" : ""
-                      }`}
+                      } ${ehMinha ? "ring-[3px] ring-inset ring-emerald-600" : ""}`}
                     >
                       {onEscolher ? (
                         <button
-                          className={`rounded-lg px-2 py-1 transition-all ${
-                            ehMinha
-                              ? "bg-white shadow-card ring-2 ring-emerald-600"
-                              : ehSugestao
-                                ? "bg-white/60 ring-2 ring-destaque"
-                                : "hover:bg-white/70 hover:ring-1 hover:ring-stone-300"
+                          className={`block h-full w-full px-3 py-2.5 text-left transition-colors ${
+                            ehMinha ? "" : "hover:bg-white/60"
                           }`}
                           title={dica}
                           onClick={() => onEscolher(il.produto_id, c.id)}
@@ -135,7 +131,7 @@ export function QuadroComparativo({
                           {conteudo}
                         </button>
                       ) : (
-                        <span className="px-1.5">{conteudo}</span>
+                        <span className="block px-3 py-2.5">{conteudo}</span>
                       )}
                     </td>
                   );

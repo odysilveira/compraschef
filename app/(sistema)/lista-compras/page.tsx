@@ -87,6 +87,19 @@ export default function ListaComprasPage() {
       .sort((a, b) => a.localeCompare(b, "pt-BR"));
   }
 
+  /** Vincula um fornecedor ao produto direto da lista (vale também para as próximas cotações). */
+  function vincularFornecedorAoProduto(produtoId: string, fornecedorId: string) {
+    if (!fornecedorId) return;
+    mutate((d) => {
+      const jaExiste = d.fornecedor_produtos.some(
+        (fp) => fp.fornecedor_id === fornecedorId && fp.produto_id === produtoId
+      );
+      if (!jaExiste) {
+        d.fornecedor_produtos.push({ id: uid("fp"), fornecedor_id: fornecedorId, produto_id: produtoId });
+      }
+    });
+  }
+
   function atualizarItem(itemId: string, mudancas: Partial<ListaItem>) {
     mutate((d) => {
       const item = d.lista_itens.find((i) => i.id === itemId);
@@ -249,17 +262,44 @@ export default function ListaComprasPage() {
                                     {qtd(produto.estoque_minimo, sigla)}
                                   </p>
                                 )}
-                                {vendedores.length > 0 ? (
-                                  <p className="text-xs text-primaria-escura">
-                                    <Store size={11} className="mr-1 inline" />
-                                    vendem: {vendedores.join(", ")}
-                                  </p>
-                                ) : (
-                                  <p className="text-xs text-destaque">
-                                    <Store size={11} className="mr-1 inline" />
-                                    nenhum fornecedor vinculado — inclua manualmente na hora de cotar
-                                  </p>
-                                )}
+                                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                  {vendedores.length > 0 ? (
+                                    <span className="text-xs text-primaria-escura">
+                                      <Store size={11} className="mr-1 inline" />
+                                      vendem: {vendedores.join(", ")}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-destaque">
+                                      <Store size={11} className="mr-1 inline" />
+                                      nenhum fornecedor vinculado
+                                    </span>
+                                  )}
+                                  {(() => {
+                                    const disponiveis = db.fornecedores.filter(
+                                      (f) =>
+                                        f.ativo &&
+                                        !db.fornecedor_produtos.some(
+                                          (fp) => fp.fornecedor_id === f.id && fp.produto_id === item.produto_id
+                                        )
+                                    );
+                                    if (disponiveis.length === 0) return null;
+                                    return (
+                                      <select
+                                        className="rounded-full border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-xs text-stone-500"
+                                        value=""
+                                        onChange={(e) => vincularFornecedorAoProduto(item.produto_id, e.target.value)}
+                                        aria-label="Incluir fornecedor para este produto"
+                                      >
+                                        <option value="">+ fornecedor</option>
+                                        {disponiveis.map((f) => (
+                                          <option key={f.id} value={f.id}>
+                                            {f.nome}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    );
+                                  })()}
+                                </div>
                               </td>
                               <td className="px-3 py-2">
                                 <div className="flex items-center gap-1.5">

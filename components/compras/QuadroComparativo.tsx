@@ -3,13 +3,26 @@
 // Quadro comparativo das cotações de uma lista: produtos nas linhas,
 // fornecedores nas colunas, preços nas células. Melhor preço em verde,
 // preço fora do padrão em laranja com aviso, indisponível com substituto.
+// Com `onEscolher`, os preços viram botões: o dono toca no preço para
+// escolher de qual fornecedor comprar cada produto (☑ = escolhido).
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, CircleCheck } from "lucide-react";
 import type { CotacaoItem, DB } from "@/lib/types";
 import { nomeFornecedor, nomeProduto, precoForaDoPadrao, siglaParaItem } from "@/lib/data";
 import { moeda, qtd } from "@/lib/format";
 
-export function QuadroComparativo({ db, listaId }: { db: DB; listaId: string }) {
+export function QuadroComparativo({
+  db,
+  listaId,
+  selecao,
+  onEscolher,
+}: {
+  db: DB;
+  listaId: string;
+  /** produtoId → cotacaoId escolhida (pré-preenchida pela recomendação) */
+  selecao?: Record<string, string>;
+  onEscolher?: (produtoId: string, cotacaoId: string) => void;
+}) {
   const cotacoes = db.cotacoes.filter((c) => c.lista_id === listaId);
   const itensLista = db.lista_itens.filter((i) => i.lista_id === listaId);
 
@@ -78,6 +91,14 @@ export function QuadroComparativo({ db, listaId }: { db: DB; listaId: string }) 
                   }
                   const fora = precoForaDoPadrao(db, il.produto_id, ci.preco_unitario);
                   const ehMelhor = !fora && melhorPreco !== undefined && ci.preco_unitario === melhorPreco;
+                  const escolhido = selecao?.[il.produto_id] === c.id;
+                  const conteudo = (
+                    <>
+                      {escolhido && <CircleCheck className="mr-1 inline h-4 w-4 text-primaria-escura" />}
+                      {fora && <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />}
+                      {moeda(ci.preco_unitario)}
+                    </>
+                  );
                   return (
                     <td
                       key={c.id}
@@ -88,12 +109,25 @@ export function QuadroComparativo({ db, listaId }: { db: DB; listaId: string }) 
                             ? "Melhor preço da linha"
                             : undefined
                       }
-                      className={`whitespace-nowrap px-3 py-2 font-semibold ${
+                      className={`whitespace-nowrap px-1.5 py-1.5 font-semibold ${
                         fora ? "bg-destaque-clara text-destaque" : ehMelhor ? "bg-sucesso-clara text-primaria-escura" : ""
                       }`}
                     >
-                      {fora && <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />}
-                      {moeda(ci.preco_unitario)}
+                      {onEscolher ? (
+                        <button
+                          className={`rounded-lg px-2 py-1 transition-all ${
+                            escolhido
+                              ? "bg-white shadow-card ring-2 ring-primaria"
+                              : "hover:bg-white/70 hover:ring-1 hover:ring-stone-300"
+                          }`}
+                          title={escolhido ? "Escolhido para o pedido — toque em outro preço para trocar" : "Tocar para comprar deste fornecedor"}
+                          onClick={() => onEscolher(il.produto_id, c.id)}
+                        >
+                          {conteudo}
+                        </button>
+                      ) : (
+                        <span className="px-1.5">{conteudo}</span>
+                      )}
                     </td>
                   );
                 })}

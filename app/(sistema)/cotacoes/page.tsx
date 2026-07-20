@@ -8,9 +8,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, Check, Copy, Plus, Sparkles } from "lucide-react";
 import { Badge, Card, TituloPagina, Vazio } from "@/components/ui";
-import { mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
+import { mutate, nomeFornecedor, nomeProduto, siglaParaItem, uid, useDB } from "@/lib/data";
 import { podeVerValores, usePapel } from "@/lib/roles";
-import { dataBR, dataHoraBR } from "@/lib/format";
+import { dataBR, dataHoraBR, moeda, qtd } from "@/lib/format";
 import { QuadroComparativo } from "@/components/compras/QuadroComparativo";
 import { gerarRecomendacao, type ItemRecomendado } from "@/components/compras/recomendacao";
 
@@ -20,6 +20,8 @@ export default function CotacoesPage() {
   const router = useRouter();
   const [copiado, setCopiado] = useState<string | null>(null);
   const [lembretes, setLembretes] = useState<string[]>([]);
+  // Escolha manual por produto: listaId → (produtoId → cotacaoId)
+  const [escolhas, setEscolhas] = useState<Record<string, Record<string, string>>>({});
 
   if (!podeVerValores(papel)) {
     return (
@@ -44,15 +46,35 @@ export default function CotacoesPage() {
     }
   }
 
-  function gerarPedido(listaId: string) {
-    const rec = gerarRecomendacao(db, listaId);
-    if (rec.itens.length === 0) return;
+  /** Monta os itens finais a partir da escolha do dono (produtoId → cotacaoId). */
+  function itensEscolhidos(selecao: Record<string, string>): ItemRecomendado[] {
+    const itens: ItemRecomendado[] = [];
+    for (const [produtoId, cotacaoId] of Object.entries(selecao)) {
+      const cot = db.cotacoes.find((c) => c.id === cotacaoId);
+      const ci = db.cotacao_itens.find((x) => x.cotacao_id === cotacaoId && x.produto_id === produtoId);
+      if (!cot || cot.status !== "respondida" || !ci || !ci.disponivel || ci.preco_unitario === undefined) continue;
+      itens.push({
+        produto_id: produtoId,
+        quantidade: ci.quantidade,
+        unidade_id: ci.unidade_id,
+        fornecedor_id: cot.fornecedor_id,
+        cotacao_id: cotacaoId,
+        preco_unitario: ci.preco_unitario,
+        prazo_entrega_dias: ci.prazo_entrega_dias,
+      });
+    }
+    return itens;
+  }
+
+  function gerarPedido(listaId: string, selecao: Record<string, string>, justificativa: string) {
+    const itens = itensEscolhidos(selecao);
+    if (itens.length === 0) return;
     const agora = new Date().toISOString();
     const hoje = agora.slice(0, 10);
 
     mutate((d) => {
       const porFornecedor = new Map<string, ItemRecomendado[]>();
-      for (const item of rec.itens) {
+      for (const item of itens) {
         const grupo = porFornecedor.get(item.fornecedor_id) ?? [];
         grupo.push(item);
         porFornecedor.set(item.fornecedor_id, grupo);
@@ -65,7 +87,7 @@ export default function CotacoesPage() {
           fornecedor_id: fornecedorId,
           status: "aguardando_aprovacao",
           valor_total: grupo.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0),
-          analise_ia: rec.justificativa,
+          analise_ia: justificativa,
           criado_em: agora,
         });
         for (const item of grupo) {
@@ -130,6 +152,28 @@ export default function CotacoesPage() {
         listas.map((lista) => {
           const cotacoes = db.cotacoes.filter((c) => c.lista_id === lista.id);
           const rec = gerarRecomendacao(db, lista.id);
+          // Escolha ativa: sugestão da IA por padrão + trocas feitas pelo dono nos preços
+          const padrao = Object.fromEntries(rec.itens.map((i) => [i.produto_id, i.cotacao_id]));
+          const selecao: Record<string, string> = { ...padrao, ...(escolhas[lista.id] ?? {}) };
+          const escolhidos = itensEscolhidos(selecao);
+          const ajustados = escolhidos.filter((i) => padrao[i.produto_id] && padrao[i.produto_id] !== i.cotacao_id);
+
+          const grupos = new Map<string, typeof escolhidos>();
+          for (const item of escolhidos) {
+            grupos.set(item.fornecedor_id, [...(grupos.get(item.fornecedor_id) ?? []), item]);
+          }
+
+          const justificativaFinal =
+            rec.justificativa +
+            (ajustados.length > 0
+              ? "\n" +
+                ajustados
+                  .map(
+                    (i) =>
+                      `• Ajuste manual do dono: ${nomeProduto(db, i.produto_id)} comprado de ${nomeFornecedor(db, i.fornecedor_id)} em vez da sugestão.`
+                  )
+                  .join("\n")
+              : "");
           return (
             <div key={lista.id} className="mb-8 space-y-4">
               <Card>
@@ -189,8 +233,22 @@ export default function CotacoesPage() {
               </Card>
 
               <Card>
-                <h2 className="mb-3">Quadro comparativo</h2>
-                <QuadroComparativo db={db} listaId={lista.id} />
+                <h2 className="mb-1">Quadro comparativo</h2>
+                <p className="mb-3 text-xs text-stone-500">
+                  A melhor opção de cada produto já vem marcada ☑ — toque em outro preço para comprar daquele
+                  fornecedor.
+                </p>
+                <QuadroComparativo
+                  db={db}
+                  listaId={lista.id}
+                  selecao={selecao}
+                  onEscolher={(produtoId, cotacaoId) =>
+                    setEscolhas((atual) => ({
+                      ...atual,
+                      [lista.id]: { ...(atual[lista.id] ?? {}), [produtoId]: cotacaoId },
+                    }))
+                  }
+                />
               </Card>
 
               <Card className="border-2 border-destaque">
@@ -201,20 +259,58 @@ export default function CotacoesPage() {
                 <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
                   {rec.justificativa || "Aguardando as primeiras respostas dos fornecedores."}
                 </p>
-                <div className="mt-4">
-                  <button
-                    className="btn-primario"
-                    disabled={rec.itens.length === 0}
-                    onClick={() => gerarPedido(lista.id)}
-                  >
-                    Gerar pedido
-                  </button>
-                  {rec.itens.length === 0 && (
-                    <p className="mt-2 text-xs text-slate-500">
-                      É preciso ao menos uma resposta com preço disponível para gerar o pedido.
-                    </p>
+              </Card>
+
+              <Card className="border-2 border-primaria">
+                <h2 className="mb-1">Resumo do pedido</h2>
+                <p className="mb-3 text-xs text-stone-500">
+                  Confira de quem você vai comprar. {ajustados.length > 0 && (
+                    <span className="font-semibold text-destaque">
+                      {ajustados.length} {ajustados.length === 1 ? "item ajustado" : "itens ajustados"} por você.
+                    </span>
                   )}
-                </div>
+                </p>
+                {escolhidos.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    É preciso ao menos uma resposta com preço disponível para montar o pedido.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {Array.from(grupos.entries()).map(([fornecedorId, itensGrupo]) => {
+                      const total = itensGrupo.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0);
+                      const forn = db.fornecedores.find((f) => f.id === fornecedorId);
+                      const abaixoMinimo = forn?.pedido_minimo !== undefined && total < forn.pedido_minimo;
+                      return (
+                        <div key={fornecedorId} className="rounded-card border border-stone-200 p-3">
+                          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-bold">{nomeFornecedor(db, fornecedorId)}</p>
+                            <p className="font-bold">{moeda(total)}</p>
+                          </div>
+                          <ul className="space-y-0.5 text-sm text-slate-600">
+                            {itensGrupo.map((i) => (
+                              <li key={i.produto_id}>
+                                {nomeProduto(db, i.produto_id)} —{" "}
+                                {qtd(i.quantidade, siglaParaItem(db, i.produto_id, i.unidade_id))} ×{" "}
+                                {moeda(i.preco_unitario)}
+                              </li>
+                            ))}
+                          </ul>
+                          {abaixoMinimo && (
+                            <p className="mt-1.5 text-xs font-semibold text-destaque">
+                              ⚠ Abaixo do pedido mínimo de {moeda(forn?.pedido_minimo)} deste fornecedor.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <button
+                      className="btn-primario w-full"
+                      onClick={() => gerarPedido(lista.id, selecao, justificativaFinal)}
+                    >
+                      Confirmar e gerar {grupos.size === 1 ? "pedido" : `pedidos (${grupos.size} fornecedores)`}
+                    </button>
+                  </div>
+                )}
               </Card>
             </div>
           );

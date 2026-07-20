@@ -11,11 +11,13 @@ import {
   Camera,
   CircleCheck,
   PackageCheck,
+  ReceiptText,
   TriangleAlert,
 } from "lucide-react";
 import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
+import ReceberPorNota from "@/components/operacao/ReceberPorNota";
 import {
   estoqueAtual,
   mutate,
@@ -42,6 +44,7 @@ interface Resultado {
   status: StatusRecebimento;
   temNota: boolean;
   boletosLiberados: number;
+  mensagemExtra?: string;
 }
 
 function hojeMais(dias: number): string {
@@ -85,6 +88,7 @@ export default function RecebimentoPage() {
   const usuarioId = db.perfis.find((p) => p.papel === papel)?.id ?? "perfil-dono";
 
   const [pedidoId, setPedidoId] = useState<string | null>(null);
+  const [modoNota, setModoNota] = useState(false);
   const [conferencia, setConferencia] = useState<Record<string, ConferenciaItem>>({});
   const [destaqueItem, setDestaqueItem] = useState<string | null>(null);
   const [avisoScanner, setAvisoScanner] = useState<string | null>(null);
@@ -248,6 +252,7 @@ export default function RecebimentoPage() {
 
   function recomecar() {
     setPedidoId(null);
+    setModoNota(false);
     setConferencia({});
     setResultado(null);
     setDestaqueItem(null);
@@ -281,6 +286,7 @@ export default function RecebimentoPage() {
                   ? "A entrada foi registrada, mas os boletos continuam travados até o acerto com o fornecedor (liberação proporcional pendente)."
                   : "A entrada foi registrada com a divergência anotada."}
             </p>
+            {resultado.mensagemExtra && <p className="text-sm text-slate-700">{resultado.mensagemExtra}</p>}
           </div>
         </Card>
         <button className="btn-gigante" onClick={recomecar}>
@@ -293,12 +299,48 @@ export default function RecebimentoPage() {
     );
   }
 
+  // ---------- Modo nota fiscal (XML) ----------
+  if (modoNota) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <TituloPagina titulo="Recebimento pela nota" />
+        <ReceberPorNota
+          db={db}
+          usuarioId={usuarioId}
+          onVoltar={() => setModoNota(false)}
+          aoFinalizar={(r) =>
+            setResultado({
+              status: r.status,
+              temNota: true,
+              boletosLiberados: r.boletosLiberados,
+              mensagemExtra: `Nota de ${r.fornecedorNome} registrada no financeiro${
+                r.boletos > 0 ? ` com ${r.boletos} boleto${r.boletos === 1 ? "" : "s"}` : ""
+              }${r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""}.`,
+            })
+          }
+        />
+      </div>
+    );
+  }
+
   // ---------- Passo 1: escolher pedido ----------
   if (!pedido) {
     return (
       <div className="space-y-4">
         <TituloPagina titulo="Recebimento" />
-        <p className="text-sm text-slate-600">Toque no pedido que chegou para começar a conferência.</p>
+        <button
+          className="card flex w-full items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara"
+          onClick={() => setModoNota(true)}
+        >
+          <ReceiptText size={32} className="shrink-0 text-primaria" />
+          <span>
+            <span className="block text-lg font-bold">Ler nota fiscal (XML)</span>
+            <span className="block text-sm text-slate-600">
+              Importe o XML da NF-e e confirme os itens um a um — mesmo sem pedido no sistema.
+            </span>
+          </span>
+        </button>
+        <p className="text-sm text-slate-600">Ou toque no pedido que chegou para começar a conferência.</p>
         {pedidosParaReceber.length === 0 ? (
           <Vazio mensagem="Nenhum pedido aguardando entrega no momento." />
         ) : (

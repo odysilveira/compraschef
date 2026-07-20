@@ -13,6 +13,82 @@ import { podeVerValores, usePapel } from "@/lib/roles";
 import { dataBR, dataHoraBR, moeda, qtd } from "@/lib/format";
 import { QuadroComparativo } from "@/components/compras/QuadroComparativo";
 import { gerarRecomendacao, type ItemRecomendado } from "@/components/compras/recomendacao";
+import type { DB } from "@/lib/types";
+
+// Bloco de fechamento (usado 2x: "Minha cotação" e "Sugestão da IA"):
+// lista por fornecedor com itens, totais, aviso de pedido mínimo e botão de fechar.
+function BlocoFechamento({
+  db,
+  titulo,
+  icone,
+  corBorda,
+  itens,
+  rotuloBotao,
+  onFechar,
+  mensagemVazio,
+}: {
+  db: DB;
+  titulo: string;
+  icone: React.ReactNode;
+  corBorda: string;
+  itens: ItemRecomendado[];
+  rotuloBotao: string;
+  onFechar: () => void;
+  mensagemVazio: string;
+}) {
+  const grupos = new Map<string, ItemRecomendado[]>();
+  for (const item of itens) {
+    grupos.set(item.fornecedor_id, [...(grupos.get(item.fornecedor_id) ?? []), item]);
+  }
+  const totalGeral = itens.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0);
+
+  return (
+    <Card className={`border-2 ${corBorda}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2">
+          {icone}
+          {titulo}
+        </h2>
+        {itens.length > 0 && <p className="font-bold">{moeda(totalGeral)}</p>}
+      </div>
+      {itens.length === 0 ? (
+        <p className="text-sm text-stone-500">{mensagemVazio}</p>
+      ) : (
+        <div className="space-y-3">
+          {Array.from(grupos.entries()).map(([fornecedorId, itensGrupo]) => {
+            const total = itensGrupo.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0);
+            const forn = db.fornecedores.find((f) => f.id === fornecedorId);
+            const abaixoMinimo = forn?.pedido_minimo !== undefined && total < forn.pedido_minimo;
+            return (
+              <div key={fornecedorId} className="rounded-card border border-stone-200 p-3">
+                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-bold">{nomeFornecedor(db, fornecedorId)}</p>
+                  <p className="font-bold">{moeda(total)}</p>
+                </div>
+                <ul className="space-y-0.5 text-sm text-slate-600">
+                  {itensGrupo.map((i) => (
+                    <li key={i.produto_id}>
+                      {nomeProduto(db, i.produto_id)} —{" "}
+                      {qtd(i.quantidade, siglaParaItem(db, i.produto_id, i.unidade_id))} × {moeda(i.preco_unitario)}
+                    </li>
+                  ))}
+                </ul>
+                {abaixoMinimo && (
+                  <p className="mt-1.5 text-xs font-semibold text-destaque">
+                    ⚠ Abaixo do pedido mínimo de {moeda(forn?.pedido_minimo)} deste fornecedor.
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          <button className="btn-primario w-full" onClick={onFechar}>
+            {rotuloBotao}
+          </button>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export default function CotacoesPage() {
   const db = useDB();
@@ -86,7 +162,7 @@ export default function CotacoesPage() {
           cotacao_id: grupo[0].cotacao_id,
           fornecedor_id: fornecedorId,
           status: "aguardando_aprovacao",
-          valor_total: grupo.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0),
+          valor_total: Math.round(grupo.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0) * 100) / 100,
           analise_ia: justificativa,
           criado_em: agora,
         });
@@ -152,25 +228,22 @@ export default function CotacoesPage() {
         listas.map((lista) => {
           const cotacoes = db.cotacoes.filter((c) => c.lista_id === lista.id);
           const rec = gerarRecomendacao(db, lista.id);
-          // Escolha ativa: sugestão da IA por padrão + trocas feitas pelo dono nos preços
-          const padrao = Object.fromEntries(rec.itens.map((i) => [i.produto_id, i.cotacao_id]));
-          const selecao: Record<string, string> = { ...padrao, ...(escolhas[lista.id] ?? {}) };
-          const escolhidos = itensEscolhidos(selecao);
-          const ajustados = escolhidos.filter((i) => padrao[i.produto_id] && padrao[i.produto_id] !== i.cotacao_id);
+          // Duas seleções independentes: a sugestão da IA e as marcações do dono
+          const sugestao = Object.fromEntries(rec.itens.map((i) => [i.produto_id, i.cotacao_id]));
+          const minha = escolhas[lista.id] ?? {};
+          const itensIA = rec.itens;
+          const itensMinha = itensEscolhidos(minha);
+          const diferentes = itensMinha.filter((i) => sugestao[i.produto_id] !== i.cotacao_id);
 
-          const grupos = new Map<string, typeof escolhidos>();
-          for (const item of escolhidos) {
-            grupos.set(item.fornecedor_id, [...(grupos.get(item.fornecedor_id) ?? []), item]);
-          }
-
-          const justificativaFinal =
+          const justificativaMinha =
             rec.justificativa +
-            (ajustados.length > 0
+            "\n• Fechamento: cotação marcada manualmente pelo dono." +
+            (diferentes.length > 0
               ? "\n" +
-                ajustados
+                diferentes
                   .map(
                     (i) =>
-                      `• Ajuste manual do dono: ${nomeProduto(db, i.produto_id)} comprado de ${nomeFornecedor(db, i.fornecedor_id)} em vez da sugestão.`
+                      `• ${nomeProduto(db, i.produto_id)} comprado de ${nomeFornecedor(db, i.fornecedor_id)} em vez da sugestão da IA.`
                   )
                   .join("\n")
               : "");
@@ -235,18 +308,27 @@ export default function CotacoesPage() {
               <Card>
                 <h2 className="mb-1">Quadro comparativo</h2>
                 <p className="mb-3 text-xs text-stone-500">
-                  A melhor opção de cada produto já vem marcada ☑ — toque em outro preço para comprar daquele
-                  fornecedor.
+                  <Sparkles className="mr-0.5 inline h-3.5 w-3.5 text-destaque" />
+                  <span className="mr-3 font-semibold text-destaque">laranja = sugestão da IA</span>
+                  <span className="mr-1 inline-block h-3 w-3 rounded-full border-2 border-emerald-600 align-middle" />
+                  <span className="font-semibold text-emerald-700">verde = sua escolha</span> — toque num preço para
+                  marcar a sua cotação (toque de novo para desmarcar).
                 </p>
                 <QuadroComparativo
                   db={db}
                   listaId={lista.id}
-                  selecao={selecao}
+                  sugestao={sugestao}
+                  minha={minha}
                   onEscolher={(produtoId, cotacaoId) =>
-                    setEscolhas((atual) => ({
-                      ...atual,
-                      [lista.id]: { ...(atual[lista.id] ?? {}), [produtoId]: cotacaoId },
-                    }))
+                    setEscolhas((atual) => {
+                      const daLista = { ...(atual[lista.id] ?? {}) };
+                      if (daLista[produtoId] === cotacaoId) {
+                        delete daLista[produtoId];
+                      } else {
+                        daLista[produtoId] = cotacaoId;
+                      }
+                      return { ...atual, [lista.id]: daLista };
+                    })
                   }
                 />
               </Card>
@@ -261,57 +343,28 @@ export default function CotacoesPage() {
                 </p>
               </Card>
 
-              <Card className="border-2 border-primaria">
-                <h2 className="mb-1">Resumo do pedido</h2>
-                <p className="mb-3 text-xs text-stone-500">
-                  Confira de quem você vai comprar. {ajustados.length > 0 && (
-                    <span className="font-semibold text-destaque">
-                      {ajustados.length} {ajustados.length === 1 ? "item ajustado" : "itens ajustados"} por você.
-                    </span>
-                  )}
-                </p>
-                {escolhidos.length === 0 ? (
-                  <p className="text-sm text-slate-500">
-                    É preciso ao menos uma resposta com preço disponível para montar o pedido.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {Array.from(grupos.entries()).map(([fornecedorId, itensGrupo]) => {
-                      const total = itensGrupo.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0);
-                      const forn = db.fornecedores.find((f) => f.id === fornecedorId);
-                      const abaixoMinimo = forn?.pedido_minimo !== undefined && total < forn.pedido_minimo;
-                      return (
-                        <div key={fornecedorId} className="rounded-card border border-stone-200 p-3">
-                          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                            <p className="font-bold">{nomeFornecedor(db, fornecedorId)}</p>
-                            <p className="font-bold">{moeda(total)}</p>
-                          </div>
-                          <ul className="space-y-0.5 text-sm text-slate-600">
-                            {itensGrupo.map((i) => (
-                              <li key={i.produto_id}>
-                                {nomeProduto(db, i.produto_id)} —{" "}
-                                {qtd(i.quantidade, siglaParaItem(db, i.produto_id, i.unidade_id))} ×{" "}
-                                {moeda(i.preco_unitario)}
-                              </li>
-                            ))}
-                          </ul>
-                          {abaixoMinimo && (
-                            <p className="mt-1.5 text-xs font-semibold text-destaque">
-                              ⚠ Abaixo do pedido mínimo de {moeda(forn?.pedido_minimo)} deste fornecedor.
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <button
-                      className="btn-primario w-full"
-                      onClick={() => gerarPedido(lista.id, selecao, justificativaFinal)}
-                    >
-                      Confirmar e gerar {grupos.size === 1 ? "pedido" : `pedidos (${grupos.size} fornecedores)`}
-                    </button>
-                  </div>
-                )}
-              </Card>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <BlocoFechamento
+                  db={db}
+                  titulo="Minha cotação"
+                  icone={<span className="inline-block h-4 w-4 rounded-full border-[3px] border-emerald-600" />}
+                  corBorda="border-emerald-600"
+                  itens={itensMinha}
+                  rotuloBotao="Fechar com a MINHA cotação"
+                  onFechar={() => gerarPedido(lista.id, minha, justificativaMinha)}
+                  mensagemVazio="Você ainda não marcou nenhum preço — toque nos valores do quadro acima para montar a sua cotação."
+                />
+                <BlocoFechamento
+                  db={db}
+                  titulo="Sugestão da IA"
+                  icone={<Sparkles className="h-5 w-5 text-destaque" />}
+                  corBorda="border-destaque"
+                  itens={itensIA}
+                  rotuloBotao="Fechar com a sugestão da IA"
+                  onFechar={() => gerarPedido(lista.id, sugestao, rec.justificativa)}
+                  mensagemVazio="Aguardando as primeiras respostas com preço para montar a sugestão."
+                />
+              </div>
             </div>
           );
         })

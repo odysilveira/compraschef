@@ -3,10 +3,11 @@
 // Quadro comparativo das cotações de uma lista: produtos nas linhas,
 // fornecedores nas colunas, preços nas células. Melhor preço em verde,
 // preço fora do padrão em laranja com aviso, indisponível com substituto.
-// Com `onEscolher`, os preços viram botões: o dono toca no preço para
-// escolher de qual fornecedor comprar cada produto (☑ = escolhido).
+// Duas marcações independentes por linha:
+//   ✨ laranja = sugestão da IA (sempre visível)
+//   ✔ verde  = escolha do dono (toque no preço para marcar; toque de novo para desmarcar)
 
-import { AlertTriangle, CircleCheck } from "lucide-react";
+import { AlertTriangle, CircleCheck, Sparkles } from "lucide-react";
 import type { CotacaoItem, DB } from "@/lib/types";
 import { nomeFornecedor, nomeProduto, precoForaDoPadrao, siglaParaItem } from "@/lib/data";
 import { moeda, qtd } from "@/lib/format";
@@ -14,13 +15,16 @@ import { moeda, qtd } from "@/lib/format";
 export function QuadroComparativo({
   db,
   listaId,
-  selecao,
+  sugestao,
+  minha,
   onEscolher,
 }: {
   db: DB;
   listaId: string;
-  /** produtoId → cotacaoId escolhida (pré-preenchida pela recomendação) */
-  selecao?: Record<string, string>;
+  /** produtoId → cotacaoId sugerida pela IA */
+  sugestao?: Record<string, string>;
+  /** produtoId → cotacaoId marcada pelo dono */
+  minha?: Record<string, string>;
   onEscolher?: (produtoId: string, cotacaoId: string) => void;
 }) {
   const cotacoes = db.cotacoes.filter((c) => c.lista_id === listaId);
@@ -91,24 +95,27 @@ export function QuadroComparativo({
                   }
                   const fora = precoForaDoPadrao(db, il.produto_id, ci.preco_unitario);
                   const ehMelhor = !fora && melhorPreco !== undefined && ci.preco_unitario === melhorPreco;
-                  const escolhido = selecao?.[il.produto_id] === c.id;
+                  const ehSugestao = sugestao?.[il.produto_id] === c.id;
+                  const ehMinha = minha?.[il.produto_id] === c.id;
                   const conteudo = (
                     <>
-                      {escolhido && <CircleCheck className="mr-1 inline h-4 w-4 text-primaria-escura" />}
+                      {ehMinha && <CircleCheck className="mr-1 inline h-4 w-4 text-emerald-600" />}
+                      {ehSugestao && <Sparkles className="mr-1 inline h-3.5 w-3.5 text-destaque" />}
                       {fora && <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />}
                       {moeda(ci.preco_unitario)}
                     </>
                   );
+                  const dica = [
+                    ehMinha ? "✔ Sua escolha (toque de novo para desmarcar)" : "Tocar para escolher este preço",
+                    ehSugestao ? "✨ Sugestão da IA" : "",
+                    fora ? "⚠ Preço fora do padrão: 15% ou mais acima da média histórica" : "",
+                    ehMelhor ? "Melhor preço da linha" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
                   return (
                     <td
                       key={c.id}
-                      title={
-                        fora
-                          ? "⚠ Preço fora do padrão: 15% ou mais acima da média histórica"
-                          : ehMelhor
-                            ? "Melhor preço da linha"
-                            : undefined
-                      }
                       className={`whitespace-nowrap px-1.5 py-1.5 font-semibold ${
                         fora ? "bg-destaque-clara text-destaque" : ehMelhor ? "bg-sucesso-clara text-primaria-escura" : ""
                       }`}
@@ -116,11 +123,13 @@ export function QuadroComparativo({
                       {onEscolher ? (
                         <button
                           className={`rounded-lg px-2 py-1 transition-all ${
-                            escolhido
-                              ? "bg-white shadow-card ring-2 ring-primaria"
-                              : "hover:bg-white/70 hover:ring-1 hover:ring-stone-300"
+                            ehMinha
+                              ? "bg-white shadow-card ring-2 ring-emerald-600"
+                              : ehSugestao
+                                ? "bg-white/60 ring-2 ring-destaque"
+                                : "hover:bg-white/70 hover:ring-1 hover:ring-stone-300"
                           }`}
-                          title={escolhido ? "Escolhido para o pedido — toque em outro preço para trocar" : "Tocar para comprar deste fornecedor"}
+                          title={dica}
                           onClick={() => onEscolher(il.produto_id, c.id)}
                         >
                           {conteudo}

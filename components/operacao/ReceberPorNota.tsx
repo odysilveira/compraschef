@@ -11,6 +11,13 @@ import { Badge, Campo, Card, Vazio } from "@/components/ui";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import { estoqueAtual, mutate, nomeFornecedor, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
+import {
+  converterParaUnidadeUso,
+  identificarProduto,
+  precoPorUnidadeUso,
+  unidadePorSigla,
+} from "@/lib/domain/produtos";
+import { criarLote } from "@/lib/domain/estoque";
 import { moeda, dataBR, qtd } from "@/lib/format";
 import type { DB, StatusRecebimento } from "@/lib/types";
 
@@ -51,14 +58,6 @@ export interface ResultadoNota {
 
 function somenteDigitos(s: string): string {
   return s.replace(/\D/g, "");
-}
-
-function normalizar(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .trim();
 }
 
 function hojeMais(dias: number): string {
@@ -111,19 +110,14 @@ function lerNFe(xmlTexto: string): NotaLida | null {
   }
 }
 
-/** Tenta casar um item do XML com um produto cadastrado (EAN → código externo → nome). */
-function casarProduto(db: DB, item: ItemNota): string {
-  const porEan = item.cEAN && db.produtos.find((p) => p.ativo && p.codigo_barras === item.cEAN);
-  if (porEan) return porEan.id;
-  const porCodigo = item.cProd && db.produtos.find((p) => p.ativo && p.codigo_externo === item.cProd);
-  if (porCodigo) return porCodigo.id;
-  const nomeXml = normalizar(item.xProd);
-  const porNome = db.produtos.find((p) => {
-    if (!p.ativo) return false;
-    const nome = normalizar(p.nome);
-    return nome === nomeXml || nomeXml.includes(nome) || nome.includes(nomeXml);
-  });
-  return porNome?.id ?? "";
+/** Identifica sem confundir o cProd do fornecedor com o código do EaseEat. */
+function casarProduto(db: DB, item: ItemNota, fornecedorId?: string): string {
+  return identificarProduto(db, {
+    fornecedorId,
+    codigoFornecedor: item.cProd,
+    ean: item.cEAN,
+    nome: item.xProd,
+  }).produto?.id ?? "";
 }
 
 // Nota de demonstração: Frigorífico Boi Feliz entregando o filé mignon do pedido em aberto
@@ -162,7 +156,7 @@ function daNotaImportada(db: DB, notaId: string): { lida: NotaLida; decisoes: Re
   };
   const decisoes: Record<number, DecisaoItem> = {};
   for (const item of itens) {
-    const produtoId = casarProduto(db, item);
+    const produtoId = casarProduto(db, item, nf.fornecedor_id);
     const produto = db.produtos.find((p) => p.id === produtoId);
     decisoes[item.indice] = {
       decisao: "pendente",
@@ -210,8 +204,11 @@ export default function ReceberPorNota({
     }
     setErro(null);
     const iniciais: Record<number, DecisaoItem> = {};
+    const fornecedorLido = db.fornecedores.find(
+      (f) => somenteDigitos(f.cnpj) === somenteDigitos(lida.emitCnpj)
+    );
     for (const item of lida.itens) {
-      const produtoId = casarProduto(db, item);
+      const produtoId = casarProduto(db, item, fornecedorLido?.id);
       const produto = db.produtos.find((p) => p.id === produtoId);
       iniciais[item.indice] = {
         decisao: "pendente",
@@ -317,21 +314,46 @@ export default function ReceberPorNota({
         const recusado = dec.decisao === "recusado";
         const quantidade = recusado ? 0 : dec.quantidade;
         if (!dec.produtoId) continue; // item sem produto vinculado e não recusado: ignorado
+        const unidadeOrigem = unidadePorSigla(d, item.uCom);
+        const esperadaConvertida = converterParaUnidadeUso(d, dec.produtoId, item.qCom, {
+          unidadeOrigemId: unidadeOrigem?.id,
+          fornecedorId: fornecedor?.id,
+        });
+        const recebidaConvertida = converterParaUnidadeUso(d, dec.produtoId, quantidade, {
+          unidadeOrigemId: unidadeOrigem?.id,
+          fornecedorId: fornecedor?.id,
+        });
+        const recebimentoItemId = uid("ri");
         d.recebimento_itens.push({
-          id: uid("ri"),
+          id: recebimentoItemId,
           recebimento_id: recebimentoId,
           produto_id: dec.produtoId,
-          qtd_esperada: item.qCom,
-          qtd_recebida: quantidade,
+          qtd_esperada: esperadaConvertida.quantidadeUso,
+          qtd_recebida: recebidaConvertida.quantidadeUso,
+          qtd_esperada_origem: item.qCom,
+          qtd_recebida_origem: quantidade,
+          unidade_origem_id: unidadeOrigem?.id,
+          fator_conversao_aplicado: recebidaConvertida.fator,
           validade: recusado ? undefined : dec.validade || undefined,
           divergencia: recusado ? `Recusado no recebimento (${item.xProd})` : undefined,
         });
-        if (quantidade > 0) {
+        if (recebidaConvertida.quantidadeUso > 0) {
+          criarLote(d, {
+            id: uid("lote"),
+            produto_id: dec.produtoId,
+            recebimento_item_id: recebimentoItemId,
+            origem: "recebimento",
+            quantidade: recebidaConvertida.quantidadeUso,
+            data_entrada: hoje,
+            validade: dec.validade || undefined,
+            criado_em: agora,
+            atualizado_em: agora,
+          });
           d.movimentos_estoque.unshift({
             id: uid("mov"),
             produto_id: dec.produtoId,
             tipo: "entrada",
-            quantidade,
+            quantidade: recebidaConvertida.quantidadeUso,
             recebimento_id: recebimentoId,
             usuario_id: usuarioId,
             criado_em: agora,
@@ -342,7 +364,10 @@ export default function ReceberPorNota({
               id: uid("ph"),
               produto_id: dec.produtoId,
               fornecedor_id: fornecedor.id,
-              preco: item.vUnCom,
+              preco: precoPorUnidadeUso(d, dec.produtoId, item.vUnCom, {
+                unidadeOrigemId: unidadeOrigem?.id,
+                fornecedorId: fornecedor.id,
+              }),
               origem: "nota",
               data: hoje,
             });
@@ -361,7 +386,7 @@ export default function ReceberPorNota({
       const dec = decisoes[item.indice];
       if (!dec?.produtoId || dec.decisao !== "confirmado" || dec.quantidade <= 0) continue;
       const produto = dbNovo.produtos.find((p) => p.id === dec.produtoId);
-      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, dec.produtoId) + dec.quantidade);
+      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, dec.produtoId));
     }
 
     const totalBoletos = notaImportadaId

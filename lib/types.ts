@@ -12,6 +12,8 @@ export interface Perfil {
 
 export interface Unidade {
   id: string;
+  /** Código da unidade no EASE EAT. O id interno continua sendo próprio do ComprasChef. */
+  codigo_externo?: string;
   nome: string;
   sigla: string;
 }
@@ -55,7 +57,16 @@ export interface FornecedorProduto {
   id: string;
   fornecedor_id: string;
   produto_id: string;
+  /** Código cProd/código de catálogo usado por este fornecedor. Não é o código do EASE EAT. */
+  codigo_produto_fornecedor?: string;
+  /** EAN/GTIN específico da embalagem vendida por este fornecedor. */
+  codigo_barras_fornecedor?: string;
+  /** Unidade em que este fornecedor costuma cotar/faturar o produto. */
+  unidade_compra_id?: string;
+  /** 1 unidade do fornecedor = X unidades de uso do ComprasChef. */
+  fator_conversao?: number;
   ultimo_preco?: number;
+  ultimo_preco_unidade_id?: string;
   atualizado_em?: string;
 }
 
@@ -80,6 +91,33 @@ export interface Caixa {
   validade?: string; // ISO date
   local_id?: string;
   atualizado_em: string;
+}
+
+/** Saldo canônico de uma entrada. A caixa é o recipiente físico opcional do lote. */
+export interface LoteEstoque {
+  id: string;
+  produto_id: string;
+  recebimento_item_id?: string;
+  origem: "recebimento" | "producao" | "manual";
+  porcionado_por_id?: string;
+  quantidade_inicial: number;
+  quantidade_atual: number;
+  data_entrada: string;
+  validade?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+/** Parte de um lote armazenada em uma caixa física. Um lote pode ocupar várias caixas. */
+export interface AlocacaoCaixa {
+  id: string;
+  lote_id: string;
+  caixa_id: string;
+  quantidade_inicial: number;
+  quantidade_atual: number;
+  criado_em: string;
+  atualizado_em: string;
+  finalizado_em?: string;
 }
 
 export type StatusLista = "rascunho" | "confirmada" | "em_cotacao" | "finalizada";
@@ -214,6 +252,11 @@ export interface RecebimentoItem {
   produto_id: string;
   qtd_esperada: number;
   qtd_recebida: number;
+  /** Quantidades originais antes da conversão para a unidade de uso. */
+  qtd_esperada_origem?: number;
+  qtd_recebida_origem?: number;
+  unidade_origem_id?: string;
+  fator_conversao_aplicado?: number;
   validade?: string;
   divergencia?: string;
   foto_url?: string;
@@ -278,6 +321,8 @@ export interface DB {
   fornecedor_produtos: FornecedorProduto[];
   locais: Local[];
   caixas: Caixa[];
+  lotes_estoque: LoteEstoque[];
+  alocacoes_caixa: AlocacaoCaixa[];
   listas_compras: ListaCompras[];
   lista_itens: ListaItem[];
   cotacoes: Cotacao[];

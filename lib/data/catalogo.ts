@@ -5,7 +5,7 @@
 
 import type { Local, Produto, Unidade } from "@/lib/types";
 
-export const UNIDADE_SACO: Unidade = { id: "un-saco", nome: "saco (porção)", sigla: "sc" };
+export const UNIDADE_SACO: Unidade = { id: "un-saco", codigo_externo: "SC", nome: "saco (porção)", sigla: "sc" };
 
 export const LOCAL_ESTOQUE_SECO: Local = { id: "loc-estoque-seco", nome: "Estoque seco", tipo: "despensa" };
 

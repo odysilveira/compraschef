@@ -8,7 +8,7 @@ import { Badge, Campo, Modal, StatCard, Tabela, Vazio } from "@/components/ui";
 import { mutate, nomeProduto, uid, useDB } from "@/lib/data";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { moeda } from "@/lib/format";
-import type { Fornecedor } from "@/lib/types";
+import type { Fornecedor, FornecedorProduto } from "@/lib/types";
 import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
 
 function fornecedorVazio(): Fornecedor {
@@ -93,6 +93,13 @@ export function AbaFornecedores() {
     if (!window.confirm(`Remover "${nome}" da lista de produtos deste fornecedor?`)) return;
     mutate((banco) => {
       banco.fornecedor_produtos = banco.fornecedor_produtos.filter((fp) => fp.id !== fpId);
+    });
+  }
+
+  function atualizarVinculo(fpId: string, mudanca: Partial<FornecedorProduto>) {
+    mutate((banco) => {
+      const vinculo = banco.fornecedor_produtos.find((fp) => fp.id === fpId);
+      if (vinculo) Object.assign(vinculo, mudanca, { atualizado_em: new Date().toISOString() });
     });
   }
 
@@ -340,9 +347,10 @@ export function AbaFornecedores() {
                 ) : (
                   <ul className="mb-3 divide-y divide-stone-100">
                     {vinculos.map((fp) => (
-                      <li key={fp.id} className="flex items-center justify-between gap-2 py-1.5 text-sm">
-                        <span className="min-w-0 truncate font-medium">{nomeProduto(db, fp.produto_id)}</span>
-                        <span className="flex shrink-0 items-center gap-2">
+                      <li key={fp.id} className="space-y-2 py-2 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 truncate font-medium">{nomeProduto(db, fp.produto_id)}</span>
+                          <span className="flex shrink-0 items-center gap-2">
                           {podeVerValores(papel) && fp.ultimo_preco !== undefined && (
                             <span className="text-xs text-stone-500">último preço {moeda(fp.ultimo_preco)}</span>
                           )}
@@ -355,7 +363,43 @@ export function AbaFornecedores() {
                           >
                             <X size={16} />
                           </button>
-                        </span>
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <input
+                            className="campo"
+                            aria-label="Código do produto no fornecedor"
+                            placeholder="Código fornecedor"
+                            value={fp.codigo_produto_fornecedor ?? ""}
+                            onChange={(e) => atualizarVinculo(fp.id, { codigo_produto_fornecedor: e.target.value || undefined })}
+                          />
+                          <input
+                            className="campo"
+                            aria-label="EAN da embalagem do fornecedor"
+                            placeholder="EAN fornecedor"
+                            value={fp.codigo_barras_fornecedor ?? ""}
+                            onChange={(e) => atualizarVinculo(fp.id, { codigo_barras_fornecedor: e.target.value || undefined })}
+                          />
+                          <select
+                            className="campo"
+                            aria-label="Unidade de compra do fornecedor"
+                            value={fp.unidade_compra_id ?? ""}
+                            onChange={(e) => atualizarVinculo(fp.id, { unidade_compra_id: e.target.value || undefined })}
+                          >
+                            <option value="">Unidade de compra</option>
+                            {db.unidades.map((u) => <option key={u.id} value={u.id}>{u.sigla}</option>)}
+                          </select>
+                          <input
+                            type="number"
+                            min="0.000001"
+                            step="any"
+                            className="campo"
+                            aria-label="Fator de conversão do fornecedor"
+                            placeholder="Fator"
+                            value={fp.fator_conversao ?? ""}
+                            onChange={(e) => atualizarVinculo(fp.id, { fator_conversao: numOpcional(e.target.value) })}
+                          />
+                        </div>
                       </li>
                     ))}
                   </ul>

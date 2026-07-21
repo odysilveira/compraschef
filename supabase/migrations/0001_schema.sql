@@ -11,13 +11,14 @@ create table perfis (
 
 create table unidades (
   id uuid primary key default gen_random_uuid(),
+  codigo_externo text unique,
   nome text not null,
   sigla text not null unique
 );
 
 create table fornecedores (
   id uuid primary key default gen_random_uuid(),
-  codigo_externo text,
+  codigo_externo text unique,
   nome text not null,
   cnpj text not null unique,
   whatsapp text,
@@ -42,7 +43,7 @@ create table produtos (
   tipo text not null check (tipo in ('comprado', 'produzido')),
   unidade_compra_id uuid references unidades (id),
   unidade_uso_id uuid not null references unidades (id),
-  fator_conversao numeric not null default 1,
+  fator_conversao numeric not null default 1 check (fator_conversao > 0),
   codigo_barras text,
   estoque_minimo numeric not null default 0,
   validade_padrao_dias integer,
@@ -54,9 +55,15 @@ create table fornecedor_produtos (
   id uuid primary key default gen_random_uuid(),
   fornecedor_id uuid not null references fornecedores (id),
   produto_id uuid not null references produtos (id),
+  codigo_produto_fornecedor text,
+  codigo_barras_fornecedor text,
+  unidade_compra_id uuid references unidades (id),
+  fator_conversao numeric check (fator_conversao > 0),
   ultimo_preco numeric,
+  ultimo_preco_unidade_id uuid references unidades (id),
   atualizado_em timestamptz,
-  unique (fornecedor_id, produto_id)
+  unique (fornecedor_id, produto_id),
+  unique (fornecedor_id, codigo_produto_fornecedor)
 );
 
 create table locais (
@@ -184,10 +191,45 @@ create table recebimento_itens (
   produto_id uuid not null references produtos (id),
   qtd_esperada numeric,
   qtd_recebida numeric,
+  qtd_esperada_origem numeric,
+  qtd_recebida_origem numeric,
+  unidade_origem_id uuid references unidades (id),
+  fator_conversao_aplicado numeric check (fator_conversao_aplicado > 0),
   validade date,
   divergencia text,
   foto_url text
 );
+
+-- O lote é o saldo canônico de uma compra ou produção. Um mesmo lote pode ser
+-- distribuído entre várias caixas sem gerar novas entradas de estoque.
+create table lotes_estoque (
+  id uuid primary key default gen_random_uuid(),
+  produto_id uuid not null references produtos (id),
+  recebimento_item_id uuid unique references recebimento_itens (id),
+  origem text not null check (origem in ('recebimento', 'producao', 'manual')),
+  porcionado_por_id uuid references perfis (id),
+  quantidade_inicial numeric not null check (quantidade_inicial > 0),
+  quantidade_atual numeric not null check (quantidade_atual >= 0),
+  data_entrada date not null,
+  validade date,
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+create table alocacoes_caixa (
+  id uuid primary key default gen_random_uuid(),
+  lote_id uuid not null references lotes_estoque (id),
+  caixa_id uuid not null references caixas (id),
+  quantidade_inicial numeric not null check (quantidade_inicial > 0),
+  quantidade_atual numeric not null check (quantidade_atual >= 0),
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  finalizado_em timestamptz
+);
+
+create unique index uma_alocacao_ativa_por_caixa
+  on alocacoes_caixa (caixa_id)
+  where finalizado_em is null;
 
 create table movimentos_estoque (
   id uuid primary key default gen_random_uuid(),
@@ -263,6 +305,8 @@ create policy leitura_autenticada on unidades for select using (auth.uid() is no
 create policy leitura_autenticada on locais for select using (auth.uid() is not null);
 create policy leitura_autenticada on produtos for select using (auth.uid() is not null);
 create policy leitura_autenticada on caixas for select using (auth.uid() is not null);
+create policy leitura_autenticada on lotes_estoque for select using (auth.uid() is not null);
+create policy leitura_autenticada on alocacoes_caixa for select using (auth.uid() is not null);
 create policy leitura_autenticada on perfis for select using (auth.uid() is not null);
 create policy leitura_autenticada on fornecedores for select using (auth.uid() is not null);
 create policy leitura_autenticada on listas_compras for select using (auth.uid() is not null);
@@ -294,6 +338,10 @@ create policy aprovacao_dono on pedidos for update
 
 -- Escrita operacional (recebimento, estoque, balanço): qualquer papel ativo
 create policy escrita_operacao on caixas for update using (papel_atual() is not null);
+create policy escrita_operacao on lotes_estoque for insert with check (papel_atual() is not null);
+create policy atualiza_operacao on lotes_estoque for update using (papel_atual() is not null);
+create policy escrita_operacao on alocacoes_caixa for insert with check (papel_atual() is not null);
+create policy atualiza_operacao on alocacoes_caixa for update using (papel_atual() is not null);
 create policy escrita_operacao on recebimentos for insert with check (papel_atual() is not null);
 create policy escrita_operacao on recebimento_itens for insert with check (papel_atual() is not null);
 create policy escrita_operacao on movimentos_estoque for insert with check (papel_atual() is not null);

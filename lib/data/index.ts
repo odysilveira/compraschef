@@ -44,6 +44,17 @@ function atualizarComNovidades(db: DB): boolean {
       mudou = true;
     }
   }
+  // Notas de demonstração que ganharam itens importados/origem depois de salvas:
+  // completa nas cópias antigas sem tocar no resto dos dados do usuário.
+  for (const semente of seedDB.notas_fiscais) {
+    if (!semente.itens_importados) continue;
+    const existente = db.notas_fiscais.find((n) => n.id === semente.id);
+    if (existente && !existente.itens_importados) {
+      existente.itens_importados = semente.itens_importados;
+      existente.origem = semente.origem;
+      mudou = true;
+    }
+  }
   return mudou;
 }
 

@@ -7,7 +7,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { Caixa, DB, Produto } from "@/lib/types";
 import { seedDB } from "./seed";
-import { LOCAL_ESTOQUE_SECO, produtosReais, UNIDADE_SACO } from "./catalogo";
+import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_SACO } from "./catalogo";
 import { compararPrioridadeConsumo, saldoDosLotes } from "@/lib/domain/estoque";
 
 const STORAGE_KEY = "compraschef-db-v1";
@@ -87,6 +87,13 @@ function atualizarComNovidades(db: DB): boolean {
   }
   if (!db.locais.some((l) => l.id === LOCAL_ESTOQUE_SECO.id)) {
     db.locais.push({ ...LOCAL_ESTOQUE_SECO });
+    mudou = true;
+  }
+  const jaTemGeladeira2 = db.locais.some(
+    (l) => l.id === LOCAL_GELADEIRA_2.id || l.nome.trim().toLocaleLowerCase("pt-BR") === "geladeira 2"
+  );
+  if (!jaTemGeladeira2) {
+    db.locais.push({ ...LOCAL_GELADEIRA_2 });
     mudou = true;
   }
   for (const produto of produtosReais()) {

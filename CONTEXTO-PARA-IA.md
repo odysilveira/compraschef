@@ -94,8 +94,10 @@ Modal, Tabela, Vazio, StatCard).
 - **Recebimento**: 3 caminhos — (a) pelo pedido; (b) importar XML da NF-e e confirmar item a
   item; (c) sem XML: ler QR da DANFE (extrai chave/CNPJ/nº) ou preencher à mão (hortifrúti).
   Também lista **DANFEs importadas da Receita** (mock, via `itens_importados` no seed) para
-  escolher qual conferir. Conferência OK libera boletos travados; boleto suspeito (CNPJ
-  divergente) permanece bloqueado.
+  escolher qual conferir. Na conferência do XML, fornecedor e produtos desconhecidos podem
+  ser cadastrados sem sair da nota; o vínculo grava `cProd`, EAN, unidade e conversão para
+  reconhecer as próximas notas automaticamente. Conferência OK libera boletos travados;
+  boleto suspeito (CNPJ divergente) permanece bloqueado.
 - **Estoque**: FEFO/FIFO com aviso ao escanear caixa não prioritária; validade obrigatória
   ao encher; painel de vencimentos com janela configurável (hoje/3/7/15 dias ou data escolhida);
   balanço por QR.

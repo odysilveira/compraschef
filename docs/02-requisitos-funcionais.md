@@ -49,6 +49,7 @@ Módulo: Recebimento
 33. O sistema deve registrar divergências (falta, sobra, produto errado) e validades dos itens recebidos
 34. A conferência OK deve gerar automaticamente a entrada no estoque e registrar o preço pago no histórico
 35. O recebimento pode ser feito por gerente, líderes de cozinha ou responsável pelo caixa
+35a. Fornecedores e produtos não reconhecidos no XML devem poder ser cadastrados durante a conferência, gravando o vínculo de código do fornecedor/EAN para reconhecimento futuro
 
 Módulo: Estoque por Caixas
 36. O sistema deve permitir encher uma caixa (escanear QR da caixa + código de barras do produto + informar quantidade e validade) e esvaziá-la para reuso; uma caixa ativa não mistura produtos ou validades

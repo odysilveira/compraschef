@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { DB } from "../types";
-import { converterParaUnidadeUso, identificarProduto, precoPorUnidadeUso } from "./produtos";
+import {
+  codigoDeBarrasValido,
+  converterParaUnidadeUso,
+  identificarProduto,
+  precoPorUnidadeUso,
+  registrarVinculoDaNota,
+} from "./produtos";
 
 const db = {
   unidades: [
@@ -96,5 +102,36 @@ describe("identificação de produto na NF-e", () => {
       criterio: "ean_produto",
       produto: { id: "arroz" },
     });
+  });
+
+  it("aprende o cProd do fornecedor para reconhecer a próxima nota", () => {
+    const copia = structuredClone(db);
+    copia.fornecedor_produtos = [];
+    registrarVinculoDaNota(copia, {
+      idNovo: "fp-novo",
+      fornecedorId: "fornecedor-a",
+      produtoId: "arroz",
+      codigoFornecedor: "ITEM-998",
+      ean: "SEM GTIN",
+      unidadeCompraId: "cx",
+      fatorConversao: 6,
+      ultimoPreco: 60,
+      atualizadoEm: "2026-07-22T12:00:00.000Z",
+    });
+
+    expect(
+      identificarProduto(copia, { fornecedorId: "fornecedor-a", codigoFornecedor: "ITEM-998" })
+    ).toMatchObject({ criterio: "codigo_fornecedor", produto: { id: "arroz" } });
+    expect(copia.fornecedor_produtos[0]).toMatchObject({
+      unidade_compra_id: "cx",
+      fator_conversao: 6,
+      ultimo_preco: 60,
+    });
+    expect(copia.fornecedor_produtos[0]).not.toHaveProperty("codigo_barras_fornecedor");
+  });
+
+  it("ignora os marcadores SEM GTIN como código de barras", () => {
+    expect(codigoDeBarrasValido("SEM GTIN")).toBeUndefined();
+    expect(codigoDeBarrasValido("789123")).toBe("789123");
   });
 });

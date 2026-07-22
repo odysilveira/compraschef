@@ -20,6 +20,59 @@ export function unidadePorSigla(db: DB, sigla?: string): Unidade | undefined {
   return db.unidades.find((u) => normalizarIdentificador(u.sigla) === procurada);
 }
 
+/** Ignora marcadores da NF-e que significam ausência de GTIN/EAN. */
+export function codigoDeBarrasValido(valor?: string): string | undefined {
+  const codigo = valor?.trim();
+  if (!codigo || /^(SEM\s*GTIN|SEM\s*EAN)$/i.test(codigo)) return undefined;
+  return codigo;
+}
+
+export interface DadosVinculoNota {
+  idNovo: string;
+  fornecedorId: string;
+  produtoId: string;
+  codigoFornecedor?: string;
+  ean?: string;
+  unidadeCompraId?: string;
+  fatorConversao?: number;
+  ultimoPreco?: number;
+  atualizadoEm: string;
+}
+
+/**
+ * Aprende a correspondência fornecedor × produto durante a conferência da NF-e.
+ * Se o vínculo já existir, preserva conversões cadastradas e completa os códigos
+ * que permitirão reconhecer automaticamente as próximas notas.
+ */
+export function registrarVinculoDaNota(db: DB, dados: DadosVinculoNota): FornecedorProduto {
+  let vinculo = db.fornecedor_produtos.find(
+    (fp) => fp.fornecedor_id === dados.fornecedorId && fp.produto_id === dados.produtoId
+  );
+  if (!vinculo) {
+    vinculo = {
+      id: dados.idNovo,
+      fornecedor_id: dados.fornecedorId,
+      produto_id: dados.produtoId,
+    };
+    db.fornecedor_produtos.push(vinculo);
+  }
+
+  const codigoFornecedor = dados.codigoFornecedor?.trim();
+  const ean = codigoDeBarrasValido(dados.ean);
+  if (codigoFornecedor) vinculo.codigo_produto_fornecedor = codigoFornecedor;
+  if (ean) vinculo.codigo_barras_fornecedor = ean;
+  if (dados.unidadeCompraId) vinculo.unidade_compra_id = dados.unidadeCompraId;
+  if (dados.fatorConversao !== undefined && Number.isFinite(dados.fatorConversao) && dados.fatorConversao > 0) {
+    vinculo.fator_conversao = dados.fatorConversao;
+  }
+  if (dados.ultimoPreco !== undefined && Number.isFinite(dados.ultimoPreco) && dados.ultimoPreco >= 0) {
+    vinculo.ultimo_preco = dados.ultimoPreco;
+    vinculo.ultimo_preco_unidade_id = dados.unidadeCompraId;
+  }
+  vinculo.atualizado_em = dados.atualizadoEm;
+  return vinculo;
+}
+
 export function vinculoFornecedorProduto(
   db: DB,
   fornecedorId: string | undefined,
@@ -141,7 +194,7 @@ export function identificarProduto(
   dados: { fornecedorId?: string; codigoFornecedor?: string; ean?: string; nome?: string }
 ): IdentificacaoProduto {
   const codigo = normalizarIdentificador(dados.codigoFornecedor);
-  const ean = normalizarIdentificador(dados.ean);
+  const ean = normalizarIdentificador(codigoDeBarrasValido(dados.ean));
 
   if (dados.fornecedorId && codigo) {
     const vinculo = db.fornecedor_produtos.find(

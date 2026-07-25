@@ -5,10 +5,13 @@
 // mantendo as mesmas assinaturas.
 
 import { useEffect, useSyncExternalStore } from "react";
-import type { Caixa, DB, Produto } from "@/lib/types";
+import type { Caixa, ContaPagar, ContaPagarHistorico, DB, Produto, StatusContaPagar } from "@/lib/types";
 import { seedDB } from "./seed";
 import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_SACO } from "./catalogo";
-import { compararPrioridadeConsumo, saldoDosLotes } from "@/lib/domain/estoque";
+import { compararPrioridadeConsumo, saldoDosLotes } from "../domain/estoque";
+import { extrairCnpjEmitenteDaChaveAcesso } from "../domain/nfe-parcelas";
+import { associarCategoriasProdutos } from "../domain/produtos";
+import { recuperarVinculosLegadosBoletos } from "../domain/recuperacao-boleto-legado";
 
 const STORAGE_KEY = "compraschef-db-v1";
 
@@ -29,7 +32,7 @@ function persist() {
 }
 
 /** Acrescenta ao banco salvo itens novos do catálogo (idempotente — nada é sobrescrito). */
-function atualizarComNovidades(db: DB): boolean {
+export function atualizarComNovidades(db: DB): boolean {
   let mudou = false;
   // Migração do mock anterior: transforma cada caixa ocupada em um lote canônico,
   // preservando exatamente o saldo que já estava salvo no navegador.
@@ -81,6 +84,129 @@ function atualizarComNovidades(db: DB): boolean {
     }
     mudou = true;
   }
+  if (!Array.isArray(db.categorias_produtos)) {
+    db.categorias_produtos = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.produto_codigos_barras)) {
+    db.produto_codigos_barras = [];
+    for (const produto of db.produtos) {
+      if (produto.codigo_barras) {
+        db.produto_codigos_barras.push({
+          id: uid("pcb"),
+          produto_id: produto.id,
+          codigo_barras: produto.codigo_barras,
+          principal: true,
+        });
+      }
+    }
+    mudou = true;
+  } else {
+    const existente = new Set(db.produto_codigos_barras.map((codigo) => `${codigo.produto_id}|${codigo.codigo_barras}`));
+    for (const produto of db.produtos) {
+      if (produto.codigo_barras && !existente.has(`${produto.id}|${produto.codigo_barras}`)) {
+        db.produto_codigos_barras.push({
+          id: uid("pcb"),
+          produto_id: produto.id,
+          codigo_barras: produto.codigo_barras,
+          principal: true,
+        });
+        mudou = true;
+      }
+    }
+  }
+  if (!Array.isArray(db.contas_pagar)) {
+    db.contas_pagar = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.conta_pagar_historico)) {
+    db.conta_pagar_historico = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.documentos_boleto)) {
+    db.documentos_boleto = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.boleto_pagamentos_historico)) {
+    db.boleto_pagamentos_historico = [];
+    mudou = true;
+  }
+  for (const boleto of db.boletos) {
+    if (boleto.documento_boleto_id) {
+      continue;
+    }
+    if (!boleto.status_conferencia) {
+      boleto.status_conferencia = "aguardando_documento";
+      mudou = true;
+    }
+  }
+  const recuperacaoLegado = recuperarVinculosLegadosBoletos(db, {
+    responsavelPadrao: "migração legado",
+    gerarIdDocumento: () => uid("docbol"),
+  });
+  if (recuperacaoLegado.alteracoes > 0) {
+    mudou = true;
+  }
+  const boletosPorNota = new Map<string, Array<{ boleto: (typeof db.boletos)[number]; ordemOriginal: number }>>();
+  db.boletos.forEach((boleto, indice) => {
+    const grupo = boletosPorNota.get(boleto.nota_id) ?? [];
+    grupo.push({ boleto, ordemOriginal: indice });
+    boletosPorNota.set(boleto.nota_id, grupo);
+  });
+
+  for (const grupo of Array.from(boletosPorNota.values())) {
+    const numerosExistentes = new Set<number>();
+    for (const { boleto } of grupo) {
+      const numeroAtual = boleto.numero_parcela?.trim();
+      if (!numeroAtual) continue;
+      if (/^\d+$/.test(numeroAtual)) {
+        numerosExistentes.add(Number(numeroAtual));
+      }
+    }
+
+    const semNumero: Array<{ boleto: (typeof db.boletos)[number]; ordemOriginal: number }> = grupo
+      .filter(({ boleto }) => !boleto.numero_parcela?.trim())
+      .sort((a, b) => {
+        const porVencimento = (a.boleto.vencimento || "").localeCompare(b.boleto.vencimento || "");
+        if (porVencimento !== 0) return porVencimento;
+        return a.ordemOriginal - b.ordemOriginal;
+      });
+
+    let proximoNumero = 1;
+    for (const { boleto } of semNumero) {
+      while (numerosExistentes.has(proximoNumero)) {
+        proximoNumero += 1;
+      }
+      boleto.numero_parcela = String(proximoNumero).padStart(3, "0");
+      numerosExistentes.add(proximoNumero);
+      proximoNumero += 1;
+      mudou = true;
+    }
+  }
+
+  for (const nota of db.notas_fiscais) {
+    if (!Array.isArray(nota.correcoes_fornecedor)) {
+      nota.correcoes_fornecedor = [];
+      mudou = true;
+    }
+    if (!nota.cnpj_emitente?.trim()) {
+      const cnpjDaChave = extrairCnpjEmitenteDaChaveAcesso(nota.chave_acesso);
+      if (cnpjDaChave) {
+        nota.cnpj_emitente = cnpjDaChave;
+        mudou = true;
+      }
+    }
+  }
+  for (const produto of db.produtos) {
+    if (produto.controla_lote === undefined) {
+      produto.controla_lote = false;
+      mudou = true;
+    }
+    if (produto.controla_validade === undefined) {
+      produto.controla_validade = false;
+      mudou = true;
+    }
+  }
   if (!db.unidades.some((u) => u.id === UNIDADE_SACO.id)) {
     db.unidades.push({ ...UNIDADE_SACO });
     mudou = true;
@@ -101,6 +227,10 @@ function atualizarComNovidades(db: DB): boolean {
       db.produtos.push(produto);
       mudou = true;
     }
+  }
+  const categoriasAssociadas = associarCategoriasProdutos(db);
+  if (categoriasAssociadas.categorias.length > 0) {
+    mudou = true;
   }
   // Notas de demonstração que ganharam itens importados/origem depois de salvas:
   // completa nas cópias antigas sem tocar no resto dos dados do usuário.
@@ -153,6 +283,60 @@ export function mutate(fn: (db: DB) => void): DB {
   persist();
   emit();
   return current;
+}
+
+export function calcularValorFinal(valorOriginal: number, juros = 0, desconto = 0): number {
+  return Number((valorOriginal + (juros || 0) - (desconto || 0)).toFixed(2));
+}
+
+export function criarContaManual(db: DB, conta: Omit<ContaPagar, "id" | "criado_em" | "atualizado_em" | "valor_final">): ContaPagar {
+  const criadoEm = new Date().toISOString();
+  const novaConta: ContaPagar = {
+    ...conta,
+    id: uid("cp"),
+    valor_final: calcularValorFinal(conta.valor_original, conta.juros, conta.desconto),
+    criado_em: criadoEm,
+    atualizado_em: criadoEm,
+  };
+  db.contas_pagar.push(novaConta);
+  db.conta_pagar_historico.push({
+    id: uid("cph"),
+    conta_pagar_id: novaConta.id,
+    acao: "Conta criada manualmente",
+    status_anterior: null,
+    status_novo: novaConta.status,
+    data: criadoEm,
+    responsavel: "usuário local",
+  });
+  return novaConta;
+}
+
+export function registrarHistorico(db: DB, contaPagarId: string, acao: string, statusAnterior: StatusContaPagar | null, statusNovo: StatusContaPagar, observacao?: string) {
+  db.conta_pagar_historico.push({
+    id: uid("cph"),
+    conta_pagar_id: contaPagarId,
+    acao,
+    status_anterior: statusAnterior,
+    status_novo: statusNovo,
+    data: new Date().toISOString(),
+    responsavel: "usuário local",
+    observacao,
+  });
+}
+
+export function alterarStatusConta(db: DB, contaPagarId: string, status: StatusContaPagar, observacao?: string): ContaPagar | undefined {
+  const conta = db.contas_pagar.find((c) => c.id === contaPagarId);
+  if (!conta) return undefined;
+  const statusAnterior = conta.status;
+  conta.status = status;
+  conta.observacoes = observacao ?? conta.observacoes;
+  conta.atualizado_em = new Date().toISOString();
+  registrarHistorico(db, conta.id, `Status alterado para ${status}`, statusAnterior, status, observacao);
+  return conta;
+}
+
+export function informarPagamento(db: DB, contaPagarId: string, observacao?: string): ContaPagar | undefined {
+  return alterarStatusConta(db, contaPagarId, "aguardando_conciliacao", observacao ?? "Pagamento informado e aguardando conciliação");
 }
 
 /** Volta o banco aos dados de demonstração originais. */

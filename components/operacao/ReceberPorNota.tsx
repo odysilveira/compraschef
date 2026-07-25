@@ -6,9 +6,11 @@
 // financeiro (boletos liberados se tudo OK) e vínculo com o pedido do fornecedor.
 
 import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Building2, CircleCheck, CircleX, FileUp, FlaskConical, PackagePlus, ReceiptText } from "lucide-react";
 import { Badge, Campo, Card, Modal, Vazio } from "@/components/ui";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
+import CodeScanner from "@/components/scanner/CodeScanner";
 import { estoqueAtual, mutate, nomeFornecedor, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
 import {
@@ -19,9 +21,15 @@ import {
   registrarVinculoDaNota,
   unidadePorSigla,
 } from "@/lib/domain/produtos";
+import {
+  localizarNotaFiscalPorChave,
+  normalizarDuplicatasLidas,
+  registrarNotaEParcelasIdempotente,
+} from "@/lib/domain/nfe-parcelas";
+import { avaliarCompletudeNfeEntrada } from "@/lib/domain/nfe-completude";
 import { criarLote } from "@/lib/domain/estoque";
 import { moeda, dataBR, qtd } from "@/lib/format";
-import type { DB, Fornecedor, StatusRecebimento } from "@/lib/types";
+import type { DB, DuplicataNotaTemporaria, Fornecedor, StatusRecebimento } from "@/lib/types";
 
 interface ItemNota {
   indice: number;
@@ -39,7 +47,7 @@ interface NotaLida {
   numero: string;
   chave: string;
   valorTotal: number;
-  duplicatas: { vencimento: string; valor: number }[];
+  duplicatas: DuplicataNotaTemporaria[];
   itens: ItemNota[];
 }
 
@@ -54,13 +62,23 @@ interface CadastroProdutoNota {
   indice: number;
   nome: string;
   codigoExterno: string;
+  categoriaId?: string;
   categoria: string;
   codigoBarras: string;
   unidadeCompraId: string;
   unidadeUsoId: string;
-  fatorConversao: number;
-  estoqueMinimo: number;
-  validadePadraoDias: number;
+  fatorConversao: number | "";
+  estoqueMinimo: number | "";
+  validadePadraoDias: number | "";
+  controla_lote?: boolean;
+  controla_validade?: boolean;
+  ncm?: string;
+  cest?: string;
+  origemMercadoria?: string;
+  cfopPadrao?: string;
+  pontoPedido?: number | "";
+  estoqueMaximo?: number | "";
+  consumoMedioMensal?: number | "";
 }
 
 export interface ResultadoNota {
@@ -121,10 +139,13 @@ function lerNFe(xmlTexto: string): NotaLida | null {
     }));
     if (itens.length === 0) return null;
 
-    const duplicatas = Array.from(doc.querySelectorAll("dup")).map((dup) => ({
-      vencimento: texto("dVenc", dup),
-      valor: Number(texto("vDup", dup)) || 0,
-    }));
+    const duplicatas = normalizarDuplicatasLidas(
+      Array.from(doc.querySelectorAll("dup")).map((dup) => ({
+        numero_parcela: texto("nDup", dup) || undefined,
+        vencimento: texto("dVenc", dup),
+        valor: Number(texto("vDup", dup)) || 0,
+      }))
+    );
 
     return {
       emitCnpj: texto("CNPJ", emit),
@@ -162,10 +183,21 @@ const XML_EXEMPLO = `<?xml version="1.0" encoding="UTF-8"?>
 </infNFe></NFe></nfeProc>`;
 
 /** Converte uma nota já importada (Receita) para o formato de leitura + decisões iniciais. */
-function daNotaImportada(db: DB, notaId: string): { lida: NotaLida; decisoes: Record<number, DecisaoItem> } | null {
+function daNotaImportada(db: DB, notaId: string): {
+  lida: NotaLida;
+  decisoes: Record<number, DecisaoItem>;
+  semDuplicatasConfirmado: boolean;
+} | null {
   const nf = db.notas_fiscais.find((n) => n.id === notaId);
   if (!nf || !nf.itens_importados) return null;
   const forn = db.fornecedores.find((f) => f.id === nf.fornecedor_id);
+  const duplicatas = db.boletos
+    .filter((boleto) => boleto.nota_id === nf.id)
+    .map((boleto) => ({
+      numero_parcela: boleto.numero_parcela,
+      vencimento: boleto.vencimento,
+      valor: boleto.valor,
+    }));
   const itens: ItemNota[] = nf.itens_importados.map((it, indice) => ({
     indice,
     cProd: it.codigo ?? "",
@@ -176,12 +208,12 @@ function daNotaImportada(db: DB, notaId: string): { lida: NotaLida; decisoes: Re
     vUnCom: it.preco_unitario,
   }));
   const lida: NotaLida = {
-    emitCnpj: forn ? somenteDigitos(forn.cnpj) : "",
-    emitNome: forn?.nome ?? "",
+    emitCnpj: nf.cnpj_emitente ?? (forn ? somenteDigitos(forn.cnpj) : ""),
+    emitNome: nf.razao_social_emitente ?? "",
     numero: nf.numero,
     chave: nf.chave_acesso,
     valorTotal: nf.valor_total,
-    duplicatas: [],
+    duplicatas,
     itens,
   };
   const decisoes: Record<number, DecisaoItem> = {};
@@ -195,7 +227,11 @@ function daNotaImportada(db: DB, notaId: string): { lida: NotaLida; decisoes: Re
       produtoId,
     };
   }
-  return { lida, decisoes };
+  return {
+    lida,
+    decisoes,
+    semDuplicatasConfirmado: Boolean(nf.sem_duplicatas_confirmado_em && nf.sem_duplicatas_confirmado_por),
+  };
 }
 
 export default function ReceberPorNota({
@@ -216,8 +252,11 @@ export default function ReceberPorNota({
   const [nota, setNota] = useState<NotaLida | null>(inicial?.lida ?? null);
   const [decisoes, setDecisoes] = useState<Record<number, DecisaoItem>>(inicial?.decisoes ?? {});
   const [erro, setErro] = useState<string | null>(null);
+  const [alertaCompletude, setAlertaCompletude] = useState<string | null>(null);
   const [fornecedorForm, setFornecedorForm] = useState<Fornecedor | null>(null);
   const [produtoForm, setProdutoForm] = useState<CadastroProdutoNota | null>(null);
+  const [confirmacaoSemDuplicatas, setConfirmacaoSemDuplicatas] = useState<boolean>(inicial?.semDuplicatasConfirmado ?? false);
+  const router = useRouter();
 
   const fornecedor = nota
     ? db.fornecedores.find((f) => somenteDigitos(f.cnpj) === somenteDigitos(nota.emitCnpj))
@@ -235,6 +274,8 @@ export default function ReceberPorNota({
       return;
     }
     setErro(null);
+    setAlertaCompletude(null);
+    setConfirmacaoSemDuplicatas(false);
     const iniciais: Record<number, DecisaoItem> = {};
     const fornecedorLido = db.fornecedores.find(
       (f) => somenteDigitos(f.cnpj) === somenteDigitos(lida.emitCnpj)
@@ -306,10 +347,13 @@ export default function ReceberPorNota({
   function abrirCadastroProduto(item: ItemNota) {
     const unidadeXml = unidadePorSigla(db, item.uCom);
     const unidadePadrao = unidadeXml?.id ?? db.unidades[0]?.id ?? "";
+    const categorias = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
+    const categoriaPadrao = categorias.find((c) => c.codigo === "sem-categoria")?.id;
     setProdutoForm({
       indice: item.indice,
       nome: item.xProd,
       codigoExterno: "",
+      categoriaId: categoriaPadrao,
       categoria: "",
       codigoBarras: codigoDeBarrasValido(item.cEAN) ?? "",
       unidadeCompraId: unidadePadrao,
@@ -317,31 +361,64 @@ export default function ReceberPorNota({
       fatorConversao: 1,
       estoqueMinimo: 0,
       validadePadraoDias: 30,
+      controla_lote: false,
+      controla_validade: false,
+      ncm: undefined,
+      cest: undefined,
+      origemMercadoria: undefined,
+      cfopPadrao: undefined,
+      pontoPedido: "",
+      estoqueMaximo: "",
+      consumoMedioMensal: "",
     });
   }
 
-  function salvarProduto(e: FormEvent) {
-    e.preventDefault();
-    if (!nota || !produtoForm) return;
+  function salvarProdutoInterno(): string | undefined {
+    if (!nota || !produtoForm) return undefined;
     const item = nota.itens.find((i) => i.indice === produtoForm.indice);
-    if (!item) return;
+    if (!item) return undefined;
     const produtoId = uid("prod");
     const agora = new Date().toISOString();
+    const fatorConversao = typeof produtoForm.fatorConversao === "number" ? produtoForm.fatorConversao : 0;
+    const estoqueMinimo = typeof produtoForm.estoqueMinimo === "number" ? produtoForm.estoqueMinimo : 0;
+    const validadePadraoDias = typeof produtoForm.validadePadraoDias === "number" ? produtoForm.validadePadraoDias : 0;
     mutate((d) => {
       d.produtos.push({
         id: produtoId,
         codigo_externo: produtoForm.codigoExterno.trim() || undefined,
         nome: produtoForm.nome.trim(),
-        categoria: produtoForm.categoria.trim() || undefined,
+        categoria: undefined,
+        categoria_id: produtoForm.categoriaId || undefined,
         tipo: "comprado",
         unidade_compra_id: produtoForm.unidadeCompraId || undefined,
         unidade_uso_id: produtoForm.unidadeUsoId,
-        fator_conversao: produtoForm.fatorConversao,
+        fator_conversao: fatorConversao,
         codigo_barras: produtoForm.codigoBarras.trim() || undefined,
-        estoque_minimo: produtoForm.estoqueMinimo,
-        validade_padrao_dias: produtoForm.validadePadraoDias,
+        estoque_minimo: estoqueMinimo,
+        validade_padrao_dias: validadePadraoDias,
+        controla_lote: produtoForm.controla_lote,
+        controla_validade: produtoForm.controla_validade,
+        ncm: produtoForm.ncm?.trim() || undefined,
+        cest: produtoForm.cest?.trim() || undefined,
+        origem_mercadoria: produtoForm.origemMercadoria?.trim() || undefined,
+        cfop_padrao: produtoForm.cfopPadrao?.trim() || undefined,
+        ponto_pedido: typeof produtoForm.pontoPedido === "number" ? produtoForm.pontoPedido : undefined,
+        estoque_maximo: typeof produtoForm.estoqueMaximo === "number" ? produtoForm.estoqueMaximo : undefined,
+        consumo_medio_mensal:
+          typeof produtoForm.consumoMedioMensal === "number" ? produtoForm.consumoMedioMensal : undefined,
         ativo: true,
       });
+      if (!Array.isArray(d.produto_codigos_barras)) {
+        d.produto_codigos_barras = [];
+      }
+      if (produtoForm.codigoBarras.trim()) {
+        d.produto_codigos_barras.push({
+          id: uid("pcb"),
+          produto_id: produtoId,
+          codigo_barras: produtoForm.codigoBarras.trim(),
+          principal: true,
+        });
+      }
       const fornecedorAtual = d.fornecedores.find(
         (f) => somenteDigitos(f.cnpj) === somenteDigitos(nota.emitCnpj)
       );
@@ -353,7 +430,7 @@ export default function ReceberPorNota({
           codigoFornecedor: item.cProd,
           ean: item.cEAN,
           unidadeCompraId: produtoForm.unidadeCompraId || undefined,
-          fatorConversao: produtoForm.fatorConversao,
+          fatorConversao,
           ultimoPreco: item.vUnCom,
           atualizadoEm: agora,
         });
@@ -361,16 +438,73 @@ export default function ReceberPorNota({
     });
     alterar(item.indice, {
       produtoId,
-      validade: hojeMais(produtoForm.validadePadraoDias),
+      validade: hojeMais(validadePadraoDias),
       decisao: "pendente",
     });
     setProdutoForm(null);
+    return produtoId;
+  }
+
+  function salvarProduto(e: FormEvent) {
+    e.preventDefault();
+    if (!nota || !produtoForm) return;
+    const form = e.currentTarget as HTMLFormElement;
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+    salvarProdutoInterno();
+  }
+
+  function salvarECompletarCadastro() {
+    if (!nota || !produtoForm) return;
+    if (
+      !produtoForm.nome.trim() ||
+      !produtoForm.unidadeCompraId ||
+      !produtoForm.unidadeUsoId ||
+      produtoForm.fatorConversao === "" ||
+      produtoForm.estoqueMinimo === "" ||
+      produtoForm.validadePadraoDias === ""
+    ) {
+      return;
+    }
+    const produtoId = salvarProdutoInterno();
+    if (produtoId) {
+      router.push(`/cadastros?aba=produtos&produtoId=${produtoId}`);
+    }
   }
 
   function finalizar() {
     if (!nota) return;
+
+    if (!notaImportadaId) {
+      const existente = localizarNotaFiscalPorChave(db, nota.chave || "");
+      if (existente) {
+        setErro("NF-e já importada");
+        return;
+      }
+    }
+
     const agora = new Date().toISOString();
     const hoje = agora.slice(0, 10);
+
+    const completude = avaliarCompletudeNfeEntrada(db, {
+      nota_id: notaImportadaId ?? "nfe-em-recebimento",
+      fornecedor_id: fornecedor?.id,
+      chave_acesso: nota.chave,
+      cnpj_emitente: nota.emitCnpj,
+      valor_total: nota.valorTotal,
+      parcelas: nota.duplicatas,
+      sem_duplicatas_confirmado_em: nota.duplicatas.length === 0 && confirmacaoSemDuplicatas ? agora : undefined,
+      sem_duplicatas_confirmado_por: nota.duplicatas.length === 0 && confirmacaoSemDuplicatas ? "usuário local" : undefined,
+    });
+
+    if (!completude.completa) {
+      setErro(completude.pendencias.map((pendencia) => pendencia.mensagem).join(" "));
+      return;
+    }
+    setErro(null);
+    setAlertaCompletude(completude.alertas[0] ?? null);
 
     const confirmados = nota.itens.filter((i) => decisoes[i.indice]?.decisao === "confirmado");
     const recusados = nota.itens.filter((i) => decisoes[i.indice]?.decisao === "recusado");
@@ -389,12 +523,25 @@ export default function ReceberPorNota({
     const notaId = notaImportadaId ?? uid("nf");
     const recebimentoId = uid("rec");
     let boletosLiberados = 0;
+    let falhaImportacao: string | null = null;
 
     const dbNovo = mutate((d) => {
       if (notaImportadaId) {
         // Nota já existe (baixada da Receita): só atualiza o status e libera os boletos.
         const nf = d.notas_fiscais.find((n) => n.id === notaImportadaId);
-        if (nf) nf.status = tudoOk ? "conferida" : "divergente";
+        if (nf) {
+          nf.status = tudoOk ? "conferida" : "divergente";
+          if (nota.emitCnpj?.trim()) {
+            nf.cnpj_emitente = nota.emitCnpj.trim();
+          }
+          if (nota.emitNome?.trim()) {
+            nf.razao_social_emitente = nota.emitNome.trim();
+          }
+          if (nota.duplicatas.length === 0 && confirmacaoSemDuplicatas) {
+            nf.sem_duplicatas_confirmado_em = agora;
+            nf.sem_duplicatas_confirmado_por = "usuário local";
+          }
+        }
         d.boletos.forEach((b) => {
           if (b.nota_id !== notaImportadaId || b.status !== "travado") return;
           if (tudoOk) {
@@ -406,34 +553,54 @@ export default function ReceberPorNota({
           }
         });
       } else {
-        d.notas_fiscais.unshift({
-          id: notaId,
-          fornecedor_id: fornecedor?.id ?? "",
-          pedido_id: pedido?.id,
-          numero: nota.numero || "s/n",
-          chave_acesso: nota.chave || uid("chave"),
-          valor_total: nota.valorTotal,
-          emitida_em: hoje,
-          importada_em: agora,
-          status: tudoOk ? "conferida" : "divergente",
-          origem: "manual",
-        });
-
-        for (const dup of nota.duplicatas) {
-          const liberado = tudoOk;
-          if (liberado) boletosLiberados += 1;
-          d.boletos.push({
-            id: uid("bol"),
-            nota_id: notaId,
-            valor: dup.valor,
-            vencimento: dup.vencimento || hojeMais(fornecedor?.prazo_boleto_dias ?? 28),
+        const resultadoRegistro = registrarNotaEParcelasIdempotente(
+          d,
+          {
+            fornecedor_id: fornecedor?.id ?? "",
+            pedido_id: pedido?.id,
+            numero: nota.numero || "s/n",
+            chave_acesso: nota.chave || uid("chave"),
+            cnpj_emitente: nota.emitCnpj || undefined,
+            razao_social_emitente: nota.emitNome || undefined,
+            valor_total: nota.valorTotal,
+            emitida_em: hoje,
+            importada_em: agora,
+            status: tudoOk ? "conferida" : "divergente",
+            origem: "manual",
+            itens_importados: nota.itens.map((item) => ({
+              descricao: item.xProd,
+              codigo: item.cProd || undefined,
+              ean: codigoDeBarrasValido(item.cEAN) || undefined,
+              unidade: item.uCom,
+              quantidade: item.qCom,
+              preco_unitario: item.vUnCom,
+            })),
+            parcelas: nota.duplicatas,
+            status_boleto: tudoOk ? "liberado" : "travado",
             cnpj_beneficiario: nota.emitCnpj,
-            status: liberado ? "liberado" : "travado",
-            observacao: liberado
+            observacao_boleto: tudoOk
               ? "Liberado após conferência OK da mercadoria (nota importada no recebimento)"
               : "Divergência no recebimento — liberação proporcional pendente de acerto com o fornecedor",
-          });
+            vencimento_padrao: hojeMais(fornecedor?.prazo_boleto_dias ?? 28),
+            sem_duplicatas_confirmado_em: nota.duplicatas.length === 0 && confirmacaoSemDuplicatas ? agora : undefined,
+            sem_duplicatas_confirmado_por: nota.duplicatas.length === 0 && confirmacaoSemDuplicatas ? "usuário local" : undefined,
+            sem_duplicatas_justificativa:
+              nota.duplicatas.length === 0 && confirmacaoSemDuplicatas
+                ? "Operador confirmou ausência de duplicatas no recebimento da NF-e."
+                : undefined,
+          },
+          {
+            notaId,
+            gerarIdBoleto: () => uid("bol"),
+          }
+        );
+
+        if (!resultadoRegistro.sucesso) {
+          falhaImportacao = resultadoRegistro.mensagem ?? "NF-e já importada";
+          return;
         }
+
+        boletosLiberados += resultadoRegistro.boletosCriados;
       }
 
       d.recebimentos.unshift({
@@ -534,6 +701,11 @@ export default function ReceberPorNota({
     });
 
     // Novo total ao ERP parceiro
+    if (falhaImportacao) {
+      setErro(falhaImportacao);
+      return;
+    }
+
     for (const item of nota.itens) {
       const dec = decisoes[item.indice];
       if (!dec?.produtoId || dec.decisao !== "confirmado" || dec.quantidade <= 0) continue;
@@ -596,8 +768,11 @@ export default function ReceberPorNota({
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-lg font-bold">
-              Nota nº {nota.numero} — {fornecedor ? nomeFornecedor(db, fornecedor.id) : nota.emitNome}
+            <p className="text-lg font-bold">Nota nº {nota.numero}</p>
+            <p className="text-sm text-slate-700">Emitente fiscal (XML): {nota.emitNome || "—"}</p>
+            <p className="text-sm text-slate-700">CNPJ emitente (XML): {nota.emitCnpj || "—"}</p>
+            <p className="text-sm text-slate-600">
+              Fornecedor vinculado: {fornecedor ? nomeFornecedor(db, fornecedor.id) : "não cadastrado"}
             </p>
             <p className="text-sm text-slate-600">
               {nota.itens.length} {nota.itens.length === 1 ? "item" : "itens"} · total {moeda(nota.valorTotal)}
@@ -617,6 +792,24 @@ export default function ReceberPorNota({
           )}
         </div>
       </Card>
+
+      {alertaCompletude && (
+        <p className="rounded-card border border-destaque bg-destaque-clara px-3 py-2 text-sm text-destaque">{alertaCompletude}</p>
+      )}
+
+      {nota.duplicatas.length === 0 && (
+        <Card className="space-y-2 border border-destaque py-3">
+          <p className="text-sm font-semibold text-destaque">Esta NF-e não possui duplicatas importadas.</p>
+          <label className="flex items-start gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={confirmacaoSemDuplicatas}
+              onChange={(event) => setConfirmacaoSemDuplicatas(event.target.checked)}
+            />
+            Confirmo que revisei a NF-e e que esta operação deve seguir sem criação de parcelas/boletos.
+          </label>
+        </Card>
+      )}
 
       {semProduto.length > 0 && (
         <p className="rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
@@ -731,7 +924,11 @@ export default function ReceberPorNota({
           Recusar em cada um.
         </p>
       ) : (
-        <button className="btn-gigante" onClick={finalizar}>
+        <button
+          className="btn-gigante"
+          onClick={finalizar}
+          disabled={nota.duplicatas.length === 0 && !confirmacaoSemDuplicatas}
+        >
           <CircleCheck size={28} /> Finalizar recebimento da nota
         </button>
       )}
@@ -804,7 +1001,7 @@ export default function ReceberPorNota({
               </Campo>
             )}
             <p className="text-xs text-slate-500 sm:col-span-2">
-              Nome e CNPJ vieram do XML. O código do EaseEat pode ficar vazio e ser informado depois.
+              Nome e CNPJ vieram do XML. WhatsApp, telefone, e-mail, contato e demais dados podem ser completados depois em Cadastros &gt; Fornecedores.
             </p>
             <div className="flex justify-end gap-2 sm:col-span-2">
               <button type="button" className="btn-secundario" onClick={() => setFornecedorForm(null)}>
@@ -818,9 +1015,17 @@ export default function ReceberPorNota({
         )}
       </Modal>
 
-      <Modal aberto={produtoForm !== null} titulo="Cadastrar produto da nota" onFechar={() => setProdutoForm(null)}>
+      <Modal aberto={produtoForm !== null} titulo="Cadastrar produto da nota" onFechar={() => setProdutoForm(null)} fecharAoClicarFundo={false}>
         {produtoForm && (
-          <form onSubmit={salvarProduto} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              salvarProduto(e);
+            }}
+            onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
             <div className="sm:col-span-2">
               <Campo rotulo="Nome *">
                 <input
@@ -828,16 +1033,22 @@ export default function ReceberPorNota({
                   required
                   value={produtoForm.nome}
                   onChange={(e) => setProdutoForm({ ...produtoForm, nome: e.target.value })}
+                  onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
                 />
               </Campo>
             </div>
             <Campo rotulo="Categoria">
-              <input
+              <select
                 className="campo"
-                placeholder="ex.: mercearia"
-                value={produtoForm.categoria}
-                onChange={(e) => setProdutoForm({ ...produtoForm, categoria: e.target.value })}
-              />
+                value={produtoForm.categoriaId ?? ""}
+                onChange={(e) => setProdutoForm({ ...produtoForm, categoriaId: e.target.value || undefined, categoria: "" })}
+              >
+                {(Array.isArray(db.categorias_produtos) ? db.categorias_produtos : []).map((categoria) => (
+                  <option key={categoria.id} value={categoria.id}>
+                    {categoria.nome}
+                  </option>
+                ))}
+              </select>
             </Campo>
             <Campo rotulo="Código no EaseEat">
               <input
@@ -845,6 +1056,7 @@ export default function ReceberPorNota({
                 placeholder="opcional"
                 value={produtoForm.codigoExterno}
                 onChange={(e) => setProdutoForm({ ...produtoForm, codigoExterno: e.target.value })}
+                onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
               />
             </Campo>
             <Campo rotulo="Código de barras">
@@ -852,14 +1064,25 @@ export default function ReceberPorNota({
                 className="campo"
                 value={produtoForm.codigoBarras}
                 onChange={(e) => setProdutoForm({ ...produtoForm, codigoBarras: e.target.value })}
+                onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
               />
             </Campo>
+            {!produtoForm.codigoBarras && (
+              <div className="sm:col-span-2 rounded-card border border-dashed border-slate-300 p-3">
+                <p className="mb-2 text-sm text-slate-600">Se o XML não trouxe um EAN válido, você pode ler o código de barras agora.</p>
+                <CodeScanner
+                  rotulo="Ler código de barras"
+                  onLeitura={(codigo) => setProdutoForm({ ...produtoForm, codigoBarras: codigo })}
+                />
+              </div>
+            )}
             <Campo rotulo={`Unidade de compra (XML: ${nota.itens.find((i) => i.indice === produtoForm.indice)?.uCom || "—"}) *`}>
               <select
                 className="campo"
                 required
                 value={produtoForm.unidadeCompraId}
                 onChange={(e) => setProdutoForm({ ...produtoForm, unidadeCompraId: e.target.value })}
+                onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
               >
                 {db.unidades.map((u) => (
                   <option key={u.id} value={u.id}>{u.nome} ({u.sigla})</option>
@@ -886,7 +1109,12 @@ export default function ReceberPorNota({
                 required
                 className="campo"
                 value={produtoForm.fatorConversao}
-                onChange={(e) => setProdutoForm({ ...produtoForm, fatorConversao: Number(e.target.value) })}
+                onChange={(e) =>
+                  setProdutoForm({
+                    ...produtoForm,
+                    fatorConversao: e.target.value === "" ? "" : Number(e.target.value),
+                  })
+                }
               />
             </Campo>
             <Campo rotulo="Estoque mínimo *">
@@ -897,7 +1125,12 @@ export default function ReceberPorNota({
                 required
                 className="campo"
                 value={produtoForm.estoqueMinimo}
-                onChange={(e) => setProdutoForm({ ...produtoForm, estoqueMinimo: Number(e.target.value) })}
+                onChange={(e) =>
+                  setProdutoForm({
+                    ...produtoForm,
+                    estoqueMinimo: e.target.value === "" ? "" : Number(e.target.value),
+                  })
+                }
               />
             </Campo>
             <Campo rotulo="Validade padrão (dias) *">
@@ -907,17 +1140,119 @@ export default function ReceberPorNota({
                 required
                 className="campo"
                 value={produtoForm.validadePadraoDias}
-                onChange={(e) => setProdutoForm({ ...produtoForm, validadePadraoDias: Number(e.target.value) })}
+                onChange={(e) =>
+                  setProdutoForm({
+                    ...produtoForm,
+                    validadePadraoDias: e.target.value === "" ? "" : Number(e.target.value),
+                  })
+                }
+              />
+            </Campo>
+            <Campo rotulo="Dados fiscais">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input
+                  className="campo"
+                  placeholder="NCM"
+                  value={produtoForm.ncm ?? ""}
+                  onChange={(e) => setProdutoForm({ ...produtoForm, ncm: e.target.value || undefined })}
+                />
+                <input
+                  className="campo"
+                  placeholder="CEST"
+                  value={produtoForm.cest ?? ""}
+                  onChange={(e) => setProdutoForm({ ...produtoForm, cest: e.target.value || undefined })}
+                />
+                <input
+                  className="campo"
+                  placeholder="Origem da mercadoria"
+                  value={produtoForm.origemMercadoria ?? ""}
+                  onChange={(e) => setProdutoForm({ ...produtoForm, origemMercadoria: e.target.value || undefined })}
+                />
+                <input
+                  className="campo"
+                  placeholder="CFOP padrão"
+                  value={produtoForm.cfopPadrao ?? ""}
+                  onChange={(e) => setProdutoForm({ ...produtoForm, cfopPadrao: e.target.value || undefined })}
+                />
+              </div>
+            </Campo>
+            <Campo rotulo="Controle de lote e validade">
+              <div className="space-y-2">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={produtoForm.controla_lote ?? false}
+                    onChange={(e) => setProdutoForm({ ...produtoForm, controla_lote: e.target.checked })}
+                  />
+                  Controla lote
+                </label>
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={produtoForm.controla_validade ?? false}
+                    onChange={(e) => setProdutoForm({ ...produtoForm, controla_validade: e.target.checked })}
+                  />
+                  Controla validade
+                </label>
+              </div>
+            </Campo>
+            <Campo rotulo="Ponto de pedido">
+              <input
+                type="number"
+                min={0}
+                className="campo"
+                value={produtoForm.pontoPedido ?? ""}
+                onChange={(e) =>
+                  setProdutoForm({
+                    ...produtoForm,
+                    pontoPedido: e.target.value === "" ? "" : Number(e.target.value),
+                  })
+                }
+              />
+            </Campo>
+            <Campo rotulo="Estoque máximo">
+              <input
+                type="number"
+                min={0}
+                className="campo"
+                value={produtoForm.estoqueMaximo ?? ""}
+                onChange={(e) =>
+                  setProdutoForm({
+                    ...produtoForm,
+                    estoqueMaximo: e.target.value === "" ? "" : Number(e.target.value),
+                  })
+                }
+              />
+            </Campo>
+            <Campo rotulo="Consumo médio mensal">
+              <input
+                type="number"
+                min={0}
+                className="campo"
+                value={produtoForm.consumoMedioMensal ?? ""}
+                onChange={(e) =>
+                  setProdutoForm({
+                    ...produtoForm,
+                    consumoMedioMensal: e.target.value === "" ? "" : Number(e.target.value),
+                  })
+                }
               />
             </Campo>
             <p className="text-xs text-slate-500 sm:col-span-2">
               O código do item no fornecedor ({nota.itens.find((i) => i.indice === produtoForm.indice)?.cProd || "não informado"}) será vinculado automaticamente. O fator indica quantas unidades de uso entram no estoque para cada unidade comprada.
             </p>
-            <div className="flex justify-end gap-2 sm:col-span-2">
-              <button type="button" className="btn-secundario" onClick={() => setProdutoForm(null)}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end sm:col-span-2">
+              <button type="button" className="btn-secundario w-full sm:w-auto" onClick={() => setProdutoForm(null)}>
                 Cancelar
               </button>
-              <button type="submit" className="btn-primario">
+              <button
+                type="button"
+                className="btn-secundario w-full sm:w-auto"
+                onClick={salvarECompletarCadastro}
+              >
+                <PackagePlus size={18} /> Salvar e completar cadastro
+              </button>
+              <button type="submit" className="btn-primario w-full sm:w-auto">
                 <PackagePlus size={18} /> Salvar produto
               </button>
             </div>

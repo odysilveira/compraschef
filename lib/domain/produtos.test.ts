@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DB } from "../types";
 import {
+  associarCategoriasProdutos,
   codigoDeBarrasValido,
   converterParaUnidadeUso,
   identificarProduto,
@@ -133,5 +134,19 @@ describe("identificação de produto na NF-e", () => {
   it("ignora os marcadores SEM GTIN como código de barras", () => {
     expect(codigoDeBarrasValido("SEM GTIN")).toBeUndefined();
     expect(codigoDeBarrasValido("789123")).toBe("789123");
+  });
+
+  it("inicializa categorias em um DB antigo sem categorias_produtos e preserva as categorias dos produtos", () => {
+    const copia = structuredClone(db) as DB;
+    const copiaLegada = ({ ...copia, categorias_produtos: undefined } as unknown) as DB & { categorias_produtos?: unknown };
+    copiaLegada.produtos[0].categoria = "hortifrúti";
+    const resultado = associarCategoriasProdutos(copiaLegada);
+
+    expect(resultado.categorias).toEqual(
+      expect.arrayContaining([expect.objectContaining({ nome: "Hortifrúti", codigo: "hortifruti" })])
+    );
+    expect(copiaLegada.categorias_produtos).toEqual(expect.any(Array));
+    expect(copiaLegada.produtos[0].categoria_id).toBeTruthy();
+    expect(copiaLegada.produtos[0].categoria).toBeUndefined();
   });
 });

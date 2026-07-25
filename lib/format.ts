@@ -23,6 +23,12 @@ export function dataHoraBR(iso?: string): string {
   return `${d.toLocaleDateString("pt-BR")} ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+export function cnpjBR(valor?: string): string {
+  const digitos = (valor ?? "").replace(/\D+/g, "");
+  if (digitos.length !== 14) return "—";
+  return digitos.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+}
+
 /** Dias entre hoje e a data (negativo = já passou). */
 export function diasAte(isoData?: string): number | undefined {
   if (!isoData) return undefined;

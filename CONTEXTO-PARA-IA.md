@@ -102,6 +102,7 @@ Modal, Tabela, Vazio, StatCard).
   ao encher; painel de vencimentos com janela configurável (hoje/3/7/15 dias ou data escolhida);
   balanço por QR.
 - **Financeiro**: agenda de boletos, proteção anti-golpe do boleto.
+  Regra de negócio: "pagamento informado" não significa "pago" definitivo; a baixa final depende da conciliação bancária.
 
 ## 6. Como rodar
 

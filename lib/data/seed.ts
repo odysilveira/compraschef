@@ -37,6 +37,15 @@ export const seedDB: DB = {
     UNIDADE_SACO,
   ],
 
+  categorias_produtos: [
+    { id: "cat-sem-categoria", nome: "Sem categoria", codigo: "sem-categoria", ativo: true },
+    { id: "cat-hortifruti", nome: "Hortifrúti", codigo: "hortifruti", ativo: true },
+    { id: "cat-carnes", nome: "Carnes", codigo: "carnes", ativo: true },
+    { id: "cat-laticinios", nome: "Laticínios", codigo: "laticinios", ativo: true },
+    { id: "cat-mercearia", nome: "Mercearia", codigo: "mercearia", ativo: true },
+    { id: "cat-producao", nome: "Produção", codigo: "producao", ativo: true },
+  ],
+
   fornecedores: [
     {
       id: "forn-hortifruti",
@@ -123,6 +132,11 @@ export const seedDB: DB = {
     ...produtosReais(),
   ],
 
+  produto_codigos_barras: [
+    { id: "pcb-prod-tomate", produto_id: "prod-tomate", codigo_barras: "7891000100101", principal: true },
+    { id: "pcb-prod-file", produto_id: "prod-file", codigo_barras: "7891000200201", principal: true },
+    { id: "pcb-prod-mucarela", produto_id: "prod-mucarela", codigo_barras: "7891000300301", principal: true },
+  ],
   fornecedor_produtos: [
     { id: "fp-1", fornecedor_id: "forn-hortifruti", produto_id: "prod-tomate", ultimo_preco: 7.9, atualizado_em: diasAtras(3) },
     { id: "fp-2", fornecedor_id: "forn-hortifruti", produto_id: "prod-cebola", ultimo_preco: 4.5, atualizado_em: diasAtras(3) },
@@ -282,6 +296,11 @@ export const seedDB: DB = {
     // Liberado: conferência OK
     { id: "bol-3", nota_id: "nf-1", valor: 318.4, vencimento: soData(diasAFrente(2)), cnpj_beneficiario: "12.345.678/0001-90", status: "liberado" },
   ],
+
+  contas_pagar: [],
+  conta_pagar_historico: [],
+  documentos_boleto: [],
+  boleto_pagamentos_historico: [],
 
   recebimentos: [
     // Recebimento OK do pedido hortifrúti — com uma divergência parcial no tomate

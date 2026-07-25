@@ -2,18 +2,21 @@
 
 // Cadastros — requisitos 1 a 6: fornecedores, produtos, unidades, locais e caixas.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { TituloPagina } from "@/components/ui";
+import { AbaCategorias } from "@/components/cadastros/AbaCategorias";
 import { AbaFornecedores } from "@/components/cadastros/AbaFornecedores";
 import { AbaProdutos } from "@/components/cadastros/AbaProdutos";
 import { AbaUnidades } from "@/components/cadastros/AbaUnidades";
 import { AbaLocais } from "@/components/cadastros/AbaLocais";
 import { AbaCaixas } from "@/components/cadastros/AbaCaixas";
 
-type Aba = "fornecedores" | "produtos" | "unidades" | "locais" | "caixas";
+type Aba = "fornecedores" | "categorias" | "produtos" | "unidades" | "locais" | "caixas";
 
 const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "fornecedores", rotulo: "Fornecedores" },
+  { id: "categorias", rotulo: "Categorias" },
   { id: "produtos", rotulo: "Produtos" },
   { id: "unidades", rotulo: "Unidades" },
   { id: "locais", rotulo: "Locais" },
@@ -21,7 +24,18 @@ const ABAS: { id: Aba; rotulo: string }[] = [
 ];
 
 export default function CadastrosPage() {
-  const [aba, setAba] = useState<Aba>("fornecedores");
+  const searchParams = useSearchParams();
+  const abaParam = searchParams.get("aba");
+  const produtoParaAbrirId = searchParams.get("produtoId") ?? undefined;
+  const [aba, setAba] = useState<Aba>(
+    ABAS.some((item) => item.id === (abaParam as Aba)) ? (abaParam as Aba) : "fornecedores"
+  );
+
+  useEffect(() => {
+    if (abaParam && ABAS.some((item) => item.id === (abaParam as Aba))) {
+      setAba(abaParam as Aba);
+    }
+  }, [abaParam]);
 
   return (
     <div>
@@ -45,7 +59,8 @@ export default function CadastrosPage() {
       </div>
 
       {aba === "fornecedores" && <AbaFornecedores />}
-      {aba === "produtos" && <AbaProdutos />}
+      {aba === "categorias" && <AbaCategorias />}
+      {aba === "produtos" && <AbaProdutos produtoParaAbrirId={produtoParaAbrirId} />}
       {aba === "unidades" && <AbaUnidades />}
       {aba === "locais" && <AbaLocais />}
       {aba === "caixas" && <AbaCaixas />}

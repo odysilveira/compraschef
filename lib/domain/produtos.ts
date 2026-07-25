@@ -1,4 +1,4 @@
-import type { DB, FornecedorProduto, Produto, Unidade } from "../types";
+import type { CategoriaProduto, DB, FornecedorProduto, Produto, Unidade } from "../types";
 
 /** Normalização usada somente para comparar identificadores vindos de sistemas diferentes. */
 export function normalizarIdentificador(valor?: string): string {
@@ -18,6 +18,63 @@ export function unidadePorSigla(db: DB, sigla?: string): Unidade | undefined {
   const procurada = normalizarIdentificador(sigla);
   if (!procurada) return undefined;
   return db.unidades.find((u) => normalizarIdentificador(u.sigla) === procurada);
+}
+
+function slugCategoria(valor?: string): string {
+  return normalizarTexto(valor ?? "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function nomeCategoria(valor?: string): string {
+  const base = (valor ?? "").trim();
+  if (!base) return "Sem categoria";
+  return base
+    .split(/\s+/)
+    .map((palavra) => palavra.charAt(0).toUpperCase() + palavra.slice(1).toLowerCase())
+    .join(" ");
+}
+
+export function associarCategoriasProdutos(db: DB): { categorias: CategoriaProduto[]; categoriasMapeadas: Map<string, string> } {
+  const categoriasExistentes = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
+  const categorias = [...categoriasExistentes];
+  const categoriasMapeadas = new Map<string, string>();
+
+  for (const produto of db.produtos) {
+    if (!produto.ativo) continue;
+
+    const categoriaAntiga = produto.categoria?.trim();
+    if (!categoriaAntiga) {
+      if (!produto.categoria_id) {
+        const semCategoria = categorias.find((c) => c.codigo === "sem-categoria");
+        if (semCategoria) {
+          produto.categoria_id = semCategoria.id;
+          produto.categoria = undefined;
+        }
+      }
+      continue;
+    }
+
+    const codigo = slugCategoria(categoriaAntiga) || "sem-categoria";
+    if (!categorias.some((c) => c.codigo === codigo)) {
+      categorias.push({
+        id: `cat-${codigo}-${categorias.length + 1}`,
+        nome: nomeCategoria(categoriaAntiga),
+        codigo,
+        ativo: true,
+      });
+    }
+
+    const categoria = categorias.find((c) => c.codigo === codigo);
+    if (categoria) {
+      categoriasMapeadas.set(produto.id, categoria.id);
+      produto.categoria_id = categoria.id;
+      produto.categoria = undefined;
+    }
+  }
+
+  db.categorias_produtos = categorias;
+  return { categorias, categoriasMapeadas };
 }
 
 /** Ignora marcadores da NF-e que significam ausência de GTIN/EAN. */
@@ -217,6 +274,12 @@ export function identificarProduto(
   }
 
   if (ean) {
+    const codigos = Array.isArray(db.produto_codigos_barras) ? db.produto_codigos_barras : [];
+    const codigo = codigos.find((c) => normalizarIdentificador(c.codigo_barras) === ean);
+    if (codigo) {
+      const produto = db.produtos.find((p) => p.ativo && p.id === codigo.produto_id);
+      if (produto) return { produto, criterio: "ean_produto" };
+    }
     const produto = db.produtos.find(
       (p) => p.ativo && normalizarIdentificador(p.codigo_barras) === ean
     );

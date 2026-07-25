@@ -63,6 +63,8 @@ export function produtosReais(): Produto[] {
         unidade_uso_id: UNIDADE_SACO.id,
         fator_conversao: 1,
         estoque_minimo: 0,
+        controla_lote: false,
+        controla_validade: false,
         validade_padrao_dias: VALIDADE_FREEZER_DIAS,
         ativo: true,
       });
@@ -79,6 +81,8 @@ export function produtosReais(): Produto[] {
         unidade_uso_id: UNIDADE_SACO.id,
         fator_conversao: 1,
         estoque_minimo: 0,
+        controla_lote: false,
+        controla_validade: false,
         validade_padrao_dias: VALIDADE_GELADEIRA_DIAS,
         ativo: true,
       });
@@ -94,6 +98,8 @@ export function produtosReais(): Produto[] {
       unidade_uso_id: "un-un",
       fator_conversao: 1,
       estoque_minimo: 0,
+      controla_lote: false,
+      controla_validade: false,
       validade_padrao_dias: VALIDADE_ESTOQUE_SECO_DIAS,
       ativo: true,
     });

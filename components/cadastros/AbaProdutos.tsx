@@ -2,13 +2,15 @@
 
 // Aba Produtos — requisitos 2 e 3 (vínculo fornecedor × produto).
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link2, Plus, X } from "lucide-react";
+import CodeScanner from "@/components/scanner/CodeScanner";
 import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
-import { estoqueAtual, mutate, nomeFornecedor, siglaUnidadeUso, uid, useDB } from "@/lib/data";
+import { estoqueAtual, mutate, nomeFornecedor, precoMedioHistorico, siglaUnidadeUso, uid, useDB } from "@/lib/data";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { dataBR, moeda, qtd } from "@/lib/format";
-import type { Produto, TipoProduto } from "@/lib/types";
+import type { CategoriaProduto, Produto, TipoProduto, ProdutoCodigoBarras } from "@/lib/types";
+import { associarCategoriasProdutos } from "@/lib/domain/produtos";
 import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
 
 function produtoVazio(unidadePadraoId: string): Produto {
@@ -19,21 +21,39 @@ function produtoVazio(unidadePadraoId: string): Produto {
     unidade_uso_id: unidadePadraoId,
     fator_conversao: 1,
     estoque_minimo: 0,
+    controla_lote: false,
+    controla_validade: false,
+    validade_padrao_dias: 30,
     ativo: true,
   };
 }
 
-export function AbaProdutos() {
+export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: string } = {}) {
   const db = useDB();
   const { papel } = usePapel();
   const mostrarPrecos = podeVerValores(papel);
   const [busca, setBusca] = useState("");
   const [form, setForm] = useState<Produto | null>(null);
+  const [codigoBarrasForm, setCodigoBarrasForm] = useState<ProdutoCodigoBarras[]>([]);
+  const [novoCodigoBarras, setNovoCodigoBarras] = useState("");
   const [fornecedorParaVincular, setFornecedorParaVincular] = useState("");
 
+  useEffect(() => {
+    if (!produtoParaAbrirId) return;
+    const produto = db.produtos.find((p) => p.id === produtoParaAbrirId);
+    if (produto) abrir(produto);
+  }, [produtoParaAbrirId, db.produtos]);
+
+  const categorias = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
   const lista = db.produtos
     .filter((p) => p.ativo)
-    .filter((p) => contem(busca, p.nome, p.categoria, p.codigo_externo, p.codigo_barras))
+    .filter((p) => {
+      const codigos = (Array.isArray(db.produto_codigos_barras) ? db.produto_codigos_barras : [])
+        .filter((c) => c.produto_id === p.id)
+        .map((c) => c.codigo_barras)
+        .join(" ");
+      return contem(busca, p.nome, p.categoria, p.codigo_externo, p.codigo_barras, codigos);
+    })
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
   function alterar(mudanca: Partial<Produto>) {
@@ -41,20 +61,69 @@ export function AbaProdutos() {
   }
 
   function abrir(p: Produto | null) {
+    if (!p) {
+      const categoriaPadrao = categorias.find((c) => c.codigo === "sem-categoria")?.id;
+      setForm({ ...produtoVazio(db.unidades[0]?.id ?? ""), categoria_id: categoriaPadrao });
+      setCodigoBarrasForm([]);
+      setNovoCodigoBarras("");
+      return;
+    }
+    const codigos = (Array.isArray(db.produto_codigos_barras) ? db.produto_codigos_barras : []).filter((c) => c.produto_id === p.id);
+    const codigoPadrao = codigos.length
+      ? codigos
+      : p.codigo_barras
+      ? [{ id: `pcb-${p.id}`, produto_id: p.id, codigo_barras: p.codigo_barras, principal: true }]
+      : [];
+    const principalCodigo = codigoPadrao.find((c) => c.principal)?.codigo_barras;
     setFornecedorParaVincular("");
-    setForm(p ? { ...p } : produtoVazio(db.unidades[0]?.id ?? ""));
+    setForm({ ...p, codigo_barras: principalCodigo ?? p.codigo_barras });
+    setCodigoBarrasForm(codigoPadrao);
+    setNovoCodigoBarras("");
   }
 
   function salvar(e: FormEvent) {
     e.preventDefault();
     if (!form) return;
     mutate((banco) => {
+      const categoriaSelecionada = form.categoria_id
+        ? banco.categorias_produtos.find((c) => c.id === form.categoria_id)
+        : undefined;
+      const produtoId = form.id || uid("prod");
+      const codigos = codigoBarrasForm.length
+        ? codigoBarrasForm
+        : form.codigo_barras
+        ? [{ id: `pcb-${produtoId}-${Date.now()}`, produto_id: produtoId, codigo_barras: form.codigo_barras, principal: true }]
+        : [];
+      const principalCodigo = codigos.find((c) => c.principal)?.codigo_barras ?? form.codigo_barras;
+      const produtoParaSalvar = {
+        ...form,
+        categoria: undefined,
+        categoria_id: categoriaSelecionada ? categoriaSelecionada.id : undefined,
+        codigo_barras: principalCodigo,
+        id: produtoId,
+      } as Produto;
       if (form.id) {
         const i = banco.produtos.findIndex((p) => p.id === form.id);
-        if (i >= 0) banco.produtos[i] = form;
+        if (i >= 0) banco.produtos[i] = produtoParaSalvar;
       } else {
-        banco.produtos.push({ ...form, id: uid("prod") });
+        banco.produtos.push(produtoParaSalvar);
       }
+
+      banco.produto_codigos_barras = banco.produto_codigos_barras.filter((c) => c.produto_id !== produtoId);
+      if (codigos.length > 0) {
+        const principalExists = codigos.some((c) => c.principal);
+        if (!principalExists) codigos[0].principal = true;
+        for (const codigo of codigos) {
+          banco.produto_codigos_barras.push({
+            id: codigo.id || uid("pcb"),
+            produto_id: produtoId,
+            codigo_barras: codigo.codigo_barras,
+            principal: codigo.principal,
+          });
+        }
+      }
+
+      associarCategoriasProdutos(banco);
     });
     setForm(null);
   }
@@ -123,7 +192,7 @@ export function AbaProdutos() {
                   onClick={() => abrir(p)}
                 >
                   <td className="px-3 py-2.5 font-medium">{p.nome}</td>
-                  <td className="px-3 py-2.5">{p.categoria ?? "—"}</td>
+                  <td className="px-3 py-2.5">{categorias.find((c) => c.id === p.categoria_id)?.nome ?? p.categoria ?? "—"}</td>
                   <td className="px-3 py-2.5">
                     {p.tipo === "comprado" ? <Badge cor="azul">Comprado</Badge> : <Badge cor="verde">Produzido</Badge>}
                   </td>
@@ -163,12 +232,17 @@ export function AbaProdutos() {
               />
             </Campo>
             <Campo rotulo="Categoria">
-              <input
+              <select
                 className="campo"
-                placeholder="ex.: hortifrúti"
-                value={form.categoria ?? ""}
-                onChange={(e) => alterar({ categoria: e.target.value || undefined })}
-              />
+                value={form.categoria_id ?? ""}
+                onChange={(e) => alterar({ categoria_id: e.target.value || undefined, categoria: undefined })}
+              >
+                {categorias.map((categoria) => (
+                  <option key={categoria.id} value={categoria.id}>
+                    {categoria.nome}
+                  </option>
+                ))}
+              </select>
             </Campo>
             <Campo rotulo="Tipo *">
               <select
@@ -180,12 +254,77 @@ export function AbaProdutos() {
                 <option value="produzido">Produzido na casa</option>
               </select>
             </Campo>
-            <Campo rotulo="Código de barras">
+            <Campo rotulo="Código de barras principal">
               <input
                 className="campo"
                 value={form.codigo_barras ?? ""}
                 onChange={(e) => alterar({ codigo_barras: e.target.value || undefined })}
               />
+            </Campo>
+            <Campo rotulo="Códigos de barras adicionais">
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,auto]">
+                  <input
+                    className="campo"
+                    placeholder="Adicionar código"
+                    value={novoCodigoBarras}
+                    onChange={(e) => setNovoCodigoBarras(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={() => {
+                      const codigo = novoCodigoBarras.trim();
+                      if (!codigo) return;
+                      setCodigoBarrasForm((atual) =>
+                        atual.some((item) => item.codigo_barras === codigo)
+                          ? atual
+                          : [...atual, { id: uid("pcb"), produto_id: form.id, codigo_barras: codigo, principal: false }]
+                      );
+                      setNovoCodigoBarras("");
+                    }}
+                  >
+                    Adicionar
+                  </button>
+                </div>
+                <CodeScanner
+                  rotulo="Ler código de barras"
+                  onLeitura={(codigo) => {
+                    if (!codigo) return;
+                    setCodigoBarrasForm((atual) =>
+                      atual.some((item) => item.codigo_barras === codigo)
+                        ? atual
+                        : [...atual, { id: uid("pcb"), produto_id: form.id, codigo_barras: codigo, principal: false }]
+                    );
+                  }}
+                />
+                <div className="space-y-2">
+                  {codigoBarrasForm.map((codigo) => (
+                    <div key={codigo.id} className="flex items-center gap-2 rounded-card border border-slate-200 p-2">
+                      <input
+                        type="radio"
+                        name="principal-codigo"
+                        checked={codigo.principal}
+                        onChange={() =>
+                          setCodigoBarrasForm((atual) =>
+                            atual.map((item) => ({ ...item, principal: item.id === codigo.id }))
+                          )
+                        }
+                      />
+                      <span className="flex-1 text-sm">{codigo.codigo_barras}</span>
+                      <button
+                        type="button"
+                        className="btn-perigo px-2 py-1 text-xs"
+                        onClick={() =>
+                          setCodigoBarrasForm((atual) => atual.filter((item) => item.id !== codigo.id))
+                        }
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </Campo>
             <Campo rotulo="Unidade de compra">
               <select
@@ -226,6 +365,48 @@ export function AbaProdutos() {
                 onChange={(e) => alterar({ fator_conversao: numOpcional(e.target.value) ?? 1 })}
               />
             </Campo>
+            <Campo rotulo="Fator de correção">
+              <input
+                type="number"
+                min={0}
+                step="any"
+                className="campo"
+                value={form.fator_correcao ?? ""}
+                onChange={(e) => alterar({ fator_correcao: numOpcional(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Rendimento (%)">
+              <input
+                type="number"
+                min={0}
+                step="any"
+                className="campo"
+                value={form.rendimento ?? ""}
+                onChange={(e) => alterar({ rendimento: numOpcional(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Custo unitário">
+              <input
+                type="number"
+                min={0}
+                step="any"
+                className="campo"
+                value={form.custo_unitario ?? ""}
+                onChange={(e) => alterar({ custo_unitario: numOpcional(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Saldo atual">
+              <div className="campo h-11 leading-11 text-slate-700">
+                {form.id ? qtd(estoqueAtual(db, form.id), siglaUnidadeUso(db, form.id)) : "—"}
+              </div>
+            </Campo>
+            <Campo rotulo="Preço médio histórico">
+              <div className="campo h-11 leading-11 text-slate-700">
+                {form.id && precoMedioHistorico(db, form.id) !== undefined
+                  ? moeda(precoMedioHistorico(db, form.id) ?? 0)
+                  : "—"}
+              </div>
+            </Campo>
             <Campo rotulo="Estoque mínimo (na unid. de uso) *">
               <input
                 type="number"
@@ -245,6 +426,95 @@ export function AbaProdutos() {
                 value={form.validade_padrao_dias ?? ""}
                 onChange={(e) => alterar({ validade_padrao_dias: numOpcional(e.target.value) })}
               />
+            </Campo>
+            <Campo rotulo="Controla lote">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.controla_lote ?? false}
+                  onChange={(e) => alterar({ controla_lote: e.target.checked })}
+                />
+                Sim
+              </label>
+            </Campo>
+            <Campo rotulo="Controla validade">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.controla_validade ?? false}
+                  onChange={(e) => alterar({ controla_validade: e.target.checked })}
+                />
+                Sim
+              </label>
+            </Campo>
+            <Campo rotulo="Ponto de pedido">
+              <input
+                type="number"
+                min={0}
+                className="campo"
+                value={form.ponto_pedido ?? ""}
+                onChange={(e) => alterar({ ponto_pedido: numOpcional(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Estoque máximo">
+              <input
+                type="number"
+                min={0}
+                className="campo"
+                value={form.estoque_maximo ?? ""}
+                onChange={(e) => alterar({ estoque_maximo: numOpcional(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Consumo médio mensal">
+              <input
+                type="number"
+                min={0}
+                className="campo"
+                value={form.consumo_medio_mensal ?? ""}
+                onChange={(e) => alterar({ consumo_medio_mensal: numOpcional(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Fornecedor padrão">
+              <select
+                className="campo"
+                value={form.fornecedor_padrao_id ?? ""}
+                onChange={(e) => alterar({ fornecedor_padrao_id: e.target.value || undefined })}
+              >
+                <option value="">— nenhum —</option>
+                {db.fornecedores.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.nome}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <Campo rotulo="Dados fiscais">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input
+                  className="campo"
+                  placeholder="NCM"
+                  value={form.ncm ?? ""}
+                  onChange={(e) => alterar({ ncm: e.target.value || undefined })}
+                />
+                <input
+                  className="campo"
+                  placeholder="CEST"
+                  value={form.cest ?? ""}
+                  onChange={(e) => alterar({ cest: e.target.value || undefined })}
+                />
+                <input
+                  className="campo"
+                  placeholder="Origem da mercadoria"
+                  value={form.origem_mercadoria ?? ""}
+                  onChange={(e) => alterar({ origem_mercadoria: e.target.value || undefined })}
+                />
+                <input
+                  className="campo"
+                  placeholder="CFOP padrão"
+                  value={form.cfop_padrao ?? ""}
+                  onChange={(e) => alterar({ cfop_padrao: e.target.value || undefined })}
+                />
+              </div>
             </Campo>
             <p className="text-xs text-slate-500 sm:col-span-2">
               1 unidade de compra = {form.fator_conversao || "?"} unidade(s) de uso.

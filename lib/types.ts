@@ -38,19 +38,49 @@ export interface Fornecedor {
 
 export type TipoProduto = "comprado" | "produzido";
 
+export interface CategoriaProduto {
+  id: string;
+  nome: string;
+  codigo: string;
+  ativo: boolean;
+}
+
 export interface Produto {
   id: string;
   codigo_externo?: string;
   nome: string;
+  descricao?: string;
+  foto_url?: string;
   categoria?: string;
+  categoria_id?: string;
   tipo: TipoProduto;
   unidade_compra_id?: string;
   unidade_uso_id: string;
   fator_conversao: number; // 1 unid. de compra = X unid. de uso
+  fator_correcao?: number;
+  rendimento?: number;
   codigo_barras?: string;
   estoque_minimo: number; // na unidade de uso
+  ponto_pedido?: number;
+  estoque_maximo?: number;
+  consumo_medio_mensal?: number;
+  controla_lote?: boolean;
+  controla_validade?: boolean;
   validade_padrao_dias?: number;
+  fornecedor_padrao_id?: string;
+  ncm?: string;
+  cest?: string;
+  origem_mercadoria?: string;
+  cfop_padrao?: string;
+  custo_unitario?: number;
   ativo: boolean;
+}
+
+export interface ProdutoCodigoBarras {
+  id: string;
+  produto_id: string;
+  codigo_barras: string;
+  principal: boolean;
 }
 
 export interface FornecedorProduto {
@@ -207,12 +237,24 @@ export interface ItemNotaImportada {
   preco_unitario: number;
 }
 
+export interface HistoricoCorrecaoFornecedorNfe {
+  id: string;
+  nota_id: string;
+  fornecedor_anterior_id?: string;
+  fornecedor_novo_id: string;
+  corrigido_em: string;
+  corrigido_por: string;
+  justificativa?: string;
+}
+
 export interface NotaFiscal {
   id: string;
   fornecedor_id: string;
   pedido_id?: string;
   numero: string;
   chave_acesso: string;
+  cnpj_emitente?: string;
+  razao_social_emitente?: string;
   xml_url?: string;
   valor_total: number;
   emitida_em: string;
@@ -220,19 +262,123 @@ export interface NotaFiscal {
   status: StatusNota;
   origem?: "manual" | "receita"; // 'receita' = baixada automaticamente pelo certificado
   itens_importados?: ItemNotaImportada[];
+  sem_duplicatas_confirmado_em?: string;
+  sem_duplicatas_confirmado_por?: string;
+  sem_duplicatas_justificativa?: string;
+  correcoes_fornecedor?: HistoricoCorrecaoFornecedorNfe[];
 }
 
-export type StatusBoleto = "travado" | "liberado" | "pago" | "suspeito";
+export type FormatoBoleto = "codigo_barras_bancario_44" | "linha_digitavel_bancaria_47" | "linha_digitavel_arrecadacao_48" | "invalido";
+
+export type StatusBoleto = "travado" | "liberado" | "aguardando_conciliacao" | "pago" | "suspeito";
 
 export interface Boleto {
   id: string;
   nota_id: string;
+  numero_parcela?: string;
   valor: number;
   vencimento: string; // ISO date
   cnpj_beneficiario?: string;
   linha_digitavel?: string;
   status: StatusBoleto;
+  documento_boleto_id?: string;
+  status_conferencia?: "aguardando_documento" | "conferido" | "em_analise";
+  conferido_em?: string;
+  conferido_por?: string;
+  pagamento_data?: string;
+  pagamento_valor?: number;
+  pagamento_banco_conta?: string;
+  pagamento_responsavel?: string;
+  pagamento_observacao?: string;
+  pagamento_informado_em?: string;
   observacao?: string;
+}
+
+export interface HistoricoPagamentoBoleto {
+  id: string;
+  boleto_id: string;
+  nota_id: string;
+  acao: "pagamento_informado";
+  status_anterior: StatusBoleto;
+  status_novo: StatusBoleto;
+  data_pagamento: string;
+  valor_pago: number;
+  banco_conta: string;
+  responsavel: string;
+  observado_em: string;
+  observacao?: string;
+}
+
+export interface DuplicataNotaTemporaria {
+  numero_parcela?: string;
+  vencimento: string;
+  valor: number;
+}
+
+export type StatusContaPagar =
+  | "aguardando_boleto"
+  | "boleto_recebido"
+  | "em_conferencia"
+  | "compativel"
+  | "divergente"
+  | "bloqueado"
+  | "aguardando_conciliacao"
+  | "conciliado"
+  | "cancelado";
+
+export type OrigemContaPagar = "nfe" | "manual" | "recorrente";
+
+export interface ContaPagar {
+  id: string;
+  fornecedor_id?: string;
+  descricao: string;
+  origem: OrigemContaPagar;
+  documento_id?: string;
+  categoria: string;
+  centro_custo?: string;
+  data_emissao: string;
+  data_vencimento: string;
+  valor_original: number;
+  juros?: number;
+  desconto?: number;
+  valor_final: number;
+  observacoes?: string;
+  status: StatusContaPagar;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface ContaPagarHistorico {
+  id: string;
+  conta_pagar_id: string;
+  acao: string;
+  status_anterior: StatusContaPagar | null;
+  status_novo: StatusContaPagar;
+  data: string;
+  responsavel: string;
+  observacao?: string;
+}
+
+export interface DocumentoBoleto {
+  id: string;
+  conta_pagar_id?: string;
+  nota_id?: string;
+  boleto_id?: string;
+  nome_arquivo: string;
+  tipo_arquivo: string;
+  tamanho_bytes: number;
+  hash_sha256: string;
+  linha_informada?: string;
+  codigo_canonico?: string;
+  formato_boleto?: Exclude<FormatoBoleto, "invalido">;
+  resultado_confronto?: "exata" | "parcial" | "divergente" | "sem_correspondencia" | "duplicada" | "multiplas_possibilidades";
+  criterios_conferidos?: string[];
+  divergencias?: string[];
+  confirmado_em?: string;
+  confirmado_por?: string;
+  justificativa_confirmacao?: string;
+  criado_em: string;
+  criado_por: string;
 }
 
 export type StatusRecebimento = "ok" | "parcial" | "divergente";
@@ -317,7 +463,9 @@ export interface DB {
   perfis: Perfil[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
+  categorias_produtos: CategoriaProduto[];
   produtos: Produto[];
+  produto_codigos_barras: ProdutoCodigoBarras[];
   fornecedor_produtos: FornecedorProduto[];
   locais: Local[];
   caixas: Caixa[];
@@ -331,6 +479,10 @@ export interface DB {
   pedido_itens: PedidoItem[];
   notas_fiscais: NotaFiscal[];
   boletos: Boleto[];
+  boleto_pagamentos_historico: HistoricoPagamentoBoleto[];
+  contas_pagar: ContaPagar[];
+  conta_pagar_historico: ContaPagarHistorico[];
+  documentos_boleto: DocumentoBoleto[];
   recebimentos: Recebimento[];
   recebimento_itens: RecebimentoItem[];
   movimentos_estoque: MovimentoEstoque[];

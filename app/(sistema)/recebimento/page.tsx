@@ -10,12 +10,13 @@ import {
   ArrowLeft,
   Camera,
   CircleCheck,
+  RefreshCcw,
   PackageCheck,
   PackagePlus,
   ReceiptText,
   TriangleAlert,
 } from "lucide-react";
-import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
+import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import ReceberPorNota from "@/components/operacao/ReceberPorNota";
@@ -32,8 +33,14 @@ import {
 import { enviarEstoqueTotal } from "@/lib/integracao";
 import { converterParaUnidadeUso, precoPorUnidadeUso } from "@/lib/domain/produtos";
 import { criarLote } from "@/lib/domain/estoque";
+import {
+  avaliarCompletudeNotaFiscal,
+  boletosNaoConferidosDaNota,
+  corrigirFornecedorNotaFiscal,
+  indicadorCompletudeNota,
+} from "@/lib/domain/nfe-completude";
 import { podeVerValores, usePapel } from "@/lib/roles";
-import { dataBR, moeda, qtd } from "@/lib/format";
+import { cnpjBR, dataBR, moeda, qtd } from "@/lib/format";
 import type { StatusRecebimento } from "@/lib/types";
 
 interface ConferenciaItem {
@@ -95,19 +102,125 @@ export default function RecebimentoPage() {
   const [modoNota, setModoNota] = useState(false);
   const [modoAvulso, setModoAvulso] = useState(false);
   const [notaConferirId, setNotaConferirId] = useState<string | null>(null);
+  const [notaCorrecaoId, setNotaCorrecaoId] = useState<string | null>(null);
+  const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | "pendentes" | "completas">("todas");
+  const [fornecedorCorrecaoId, setFornecedorCorrecaoId] = useState("");
+  const [justificativaCorrecao, setJustificativaCorrecao] = useState("");
+  const [mensagemCorrecaoNfe, setMensagemCorrecaoNfe] = useState<string | null>(null);
+  const [erroCorrecaoNfe, setErroCorrecaoNfe] = useState<string | null>(null);
+  const [salvandoCorrecaoNfe, setSalvandoCorrecaoNfe] = useState(false);
   const [conferencia, setConferencia] = useState<Record<string, ConferenciaItem>>({});
   const [destaqueItem, setDestaqueItem] = useState<string | null>(null);
   const [avisoScanner, setAvisoScanner] = useState<string | null>(null);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const timerDestaque = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const salvandoCorrecaoNfeRef = useRef(false);
 
   const pedidosParaReceber = db.pedidos.filter((p) => p.status === "enviado" || p.status === "confirmado");
   // DANFEs baixadas da Receita (via certificado) aguardando conferência
   const notasImportadas = db.notas_fiscais.filter(
     (n) => n.status === "aguardando_conferencia" && n.itens_importados && n.itens_importados.length > 0
   );
+  const notasImportadasCompletude = notasImportadas.map((nota) => ({
+    nota,
+    completude: avaliarCompletudeNotaFiscal(db, nota),
+    indicador: indicadorCompletudeNota(db, nota),
+  }));
+  const notasImportadasFiltradas = notasImportadasCompletude.filter((item) => {
+    if (filtroCompletudeNfe === "todas") return true;
+    if (filtroCompletudeNfe === "pendentes") return item.indicador === "pendente";
+    return item.indicador === "completa";
+  });
+  const notaCorrecao = notaCorrecaoId ? db.notas_fiscais.find((n) => n.id === notaCorrecaoId) ?? null : null;
+  const correcaoSemMudanca = Boolean(notaCorrecao && fornecedorCorrecaoId === notaCorrecao.fornecedor_id);
+  const completudeNotaCorrecao = notaCorrecao ? avaliarCompletudeNotaFiscal(db, notaCorrecao) : null;
+  const boletosPendentesReconferencia = notaCorrecao ? boletosNaoConferidosDaNota(db, notaCorrecao.id) : [];
   const pedido = db.pedidos.find((p) => p.id === pedidoId);
   const itensPedido = pedido ? db.pedido_itens.filter((i) => i.pedido_id === pedido.id) : [];
+
+  function abrirCorrecaoNfe(notaId: string) {
+    const nota = db.notas_fiscais.find((n) => n.id === notaId);
+    if (!nota) return;
+    setNotaCorrecaoId(notaId);
+    setFornecedorCorrecaoId(nota.fornecedor_id || "");
+    setJustificativaCorrecao("");
+    setMensagemCorrecaoNfe(null);
+    setErroCorrecaoNfe(null);
+  }
+
+  function fecharCorrecaoNfe() {
+    setNotaCorrecaoId(null);
+    setFornecedorCorrecaoId("");
+    setJustificativaCorrecao("");
+    setMensagemCorrecaoNfe(null);
+    setErroCorrecaoNfe(null);
+    setSalvandoCorrecaoNfe(false);
+    salvandoCorrecaoNfeRef.current = false;
+  }
+
+  function salvarCorrecaoFornecedorNfe() {
+    if (salvandoCorrecaoNfeRef.current) return;
+    if (!notaCorrecao) return;
+    if (!fornecedorCorrecaoId) {
+      setErroCorrecaoNfe("Selecione um fornecedor válido.");
+      return;
+    }
+    if (correcaoSemMudanca) {
+      setErroCorrecaoNfe("Selecione um fornecedor diferente do já vinculado para salvar a correção.");
+      return;
+    }
+
+    salvandoCorrecaoNfeRef.current = true;
+    setSalvandoCorrecaoNfe(true);
+
+    try {
+      const proximo = structuredClone(db);
+      const resultado = corrigirFornecedorNotaFiscal(proximo, {
+        notaId: notaCorrecao.id,
+        fornecedorIdNovo: fornecedorCorrecaoId,
+        responsavel: "usuário local",
+        justificativa: justificativaCorrecao,
+        gerarIdRegistro: () => uid("nfe-corr"),
+      });
+
+      if (!resultado.sucesso) {
+        setErroCorrecaoNfe(resultado.mensagem ?? "Não foi possível corrigir fornecedor da NF-e.");
+        setMensagemCorrecaoNfe(null);
+        return;
+      }
+
+      mutate((d) => {
+        Object.assign(d, proximo);
+      });
+
+      setErroCorrecaoNfe(null);
+      setMensagemCorrecaoNfe(resultado.alterou ? "Fornecedor da NF-e corrigido com sucesso." : resultado.mensagem ?? "Nenhuma alteração necessária.");
+    } finally {
+      setSalvandoCorrecaoNfe(false);
+      salvandoCorrecaoNfeRef.current = false;
+    }
+  }
+
+  function reconferirBoletosPendentesNfe() {
+    if (!notaCorrecao) return;
+    let atualizados = 0;
+    mutate((d) => {
+      const pendentes = boletosNaoConferidosDaNota(d, notaCorrecao.id);
+      for (const boleto of pendentes) {
+        if (boleto.status_conferencia === "conferido") {
+          continue;
+        }
+        boleto.status_conferencia = "em_analise";
+        atualizados += 1;
+      }
+    });
+    setErroCorrecaoNfe(null);
+    setMensagemCorrecaoNfe(
+      atualizados > 0
+        ? `${atualizados} boleto${atualizados === 1 ? "" : "s"} não confirmado${atualizados === 1 ? "" : "s"} marcado${atualizados === 1 ? "" : "s"} para reconferência.`
+        : "Nenhum boleto pendente para reconferência."
+    );
+  }
 
   function escolherPedido(id: string) {
     const itens = db.pedido_itens.filter((i) => i.pedido_id === id);
@@ -419,9 +532,10 @@ export default function RecebimentoPage() {
   // ---------- Passo 1: escolher pedido ----------
   if (!pedido) {
     return (
-      <div className="space-y-4">
-        <TituloPagina titulo="Recebimento" />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <>
+        <div className="space-y-4">
+          <TituloPagina titulo="Recebimento" />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <button
             className="card flex items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara"
             onClick={() => setModoNota(true)}
@@ -446,69 +560,209 @@ export default function RecebimentoPage() {
               </span>
             </span>
           </button>
-        </div>
+          </div>
 
-        {notasImportadas.length > 0 && (
-          <section>
+          {notasImportadas.length > 0 && (
+            <section>
             <h2 className="mb-2 flex items-center gap-2">
               <ReceiptText size={20} className="text-primaria" /> Notas importadas da Receita
             </h2>
             <p className="mb-3 text-sm text-slate-600">
               Baixadas automaticamente pelo certificado digital. Toque para conferir os itens.
             </p>
+            <div className="mb-3 flex items-center gap-2">
+              <label className="text-sm text-slate-700">Completude:</label>
+              <select
+                className="campo w-full max-w-56"
+                value={filtroCompletudeNfe}
+                onChange={(event) => setFiltroCompletudeNfe(event.target.value as "todas" | "pendentes" | "completas")}
+              >
+                <option value="todas">Todas</option>
+                <option value="pendentes">Com pendências</option>
+                <option value="completas">Completas</option>
+              </select>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {notasImportadas.map((n) => {
+              {notasImportadasFiltradas.map(({ nota: n, completude, indicador }) => {
                 const numItens = n.itens_importados?.length ?? 0;
                 return (
-                  <button
-                    key={n.id}
-                    className="card flex flex-col items-start gap-2 border-2 border-transparent p-5 text-left transition-colors hover:border-primaria"
-                    onClick={() => setNotaConferirId(n.id)}
-                  >
+                  <Card key={n.id} className="space-y-3 border-2 border-transparent p-5">
                     <span className="flex w-full items-center justify-between gap-2">
                       <span className="text-lg font-bold">{nomeFornecedor(db, n.fornecedor_id)}</span>
-                      <Badge cor="laranja">a conferir</Badge>
+                      <span className="flex items-center gap-2">
+                        <Badge cor="laranja">a conferir</Badge>
+                        <Badge cor={indicador === "completa" ? "verde" : "laranja"}>
+                          {indicador === "completa" ? "completa" : "pendente"}
+                        </Badge>
+                      </span>
                     </span>
                     <span className="text-sm text-slate-600">
                       Nota nº {n.numero} · {numItens} {numItens === 1 ? "item" : "itens"}
                     </span>
                     {verValores && <span className="text-sm font-semibold">{moeda(n.valor_total)}</span>}
+
+                    {completude.pendencias.length > 0 && (
+                      <p className="text-xs text-destaque">
+                        {completude.pendencias.length} pendência{completude.pendencias.length === 1 ? "" : "s"} de completude.
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        type="button"
+                        className="btn-secundario"
+                        onClick={() => abrirCorrecaoNfe(n.id)}
+                      >
+                        Completar ou corrigir dados
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-primario"
+                        onClick={() => setNotaConferirId(n.id)}
+                      >
+                        Conferir itens
+                      </button>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+            </section>
+          )}
+
+          <p className="text-sm text-slate-600">Ou toque no pedido que chegou para começar a conferência.</p>
+          {pedidosParaReceber.length === 0 ? (
+            <Vazio mensagem="Nenhum pedido aguardando entrega no momento." />
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {pedidosParaReceber.map((p) => {
+                const numItens = db.pedido_itens.filter((i) => i.pedido_id === p.id).length;
+                return (
+                  <button
+                    key={p.id}
+                    className="card flex flex-col items-start gap-2 border-2 border-transparent p-5 text-left transition-colors hover:border-primaria"
+                    onClick={() => escolherPedido(p.id)}
+                  >
+                    <span className="text-xl font-bold">{nomeFornecedor(db, p.fornecedor_id)}</span>
+                    <span className="text-sm text-slate-600">
+                      {numItens} {numItens === 1 ? "item" : "itens"} · pedido de {dataBR(p.criado_em)}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Badge cor={p.status === "confirmado" ? "verde" : "azul"}>
+                        {p.status === "confirmado" ? "confirmado" : "enviado"}
+                      </Badge>
+                      {verValores && <span className="text-sm font-semibold">{moeda(p.valor_total)}</span>}
+                    </span>
                   </button>
                 );
               })}
             </div>
-          </section>
-        )}
+          )}
+        </div>
 
-        <p className="text-sm text-slate-600">Ou toque no pedido que chegou para começar a conferência.</p>
-        {pedidosParaReceber.length === 0 ? (
-          <Vazio mensagem="Nenhum pedido aguardando entrega no momento." />
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {pedidosParaReceber.map((p) => {
-              const numItens = db.pedido_itens.filter((i) => i.pedido_id === p.id).length;
-              return (
-                <button
-                  key={p.id}
-                  className="card flex flex-col items-start gap-2 border-2 border-transparent p-5 text-left transition-colors hover:border-primaria"
-                  onClick={() => escolherPedido(p.id)}
-                >
-                  <span className="text-xl font-bold">{nomeFornecedor(db, p.fornecedor_id)}</span>
-                  <span className="text-sm text-slate-600">
-                    {numItens} {numItens === 1 ? "item" : "itens"} · pedido de {dataBR(p.criado_em)}
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <Badge cor={p.status === "confirmado" ? "verde" : "azul"}>
-                      {p.status === "confirmado" ? "confirmado" : "enviado"}
-                    </Badge>
-                    {verValores && <span className="text-sm font-semibold">{moeda(p.valor_total)}</span>}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        <Modal aberto={Boolean(notaCorrecao)} titulo="Completar ou corrigir dados da NF-e" onFechar={fecharCorrecaoNfe}>
+          {notaCorrecao && (
+            <div className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="text-sm font-semibold text-slate-800">Dados fiscais importados (somente leitura)</p>
+              <p className="text-sm text-slate-700">Nota: {notaCorrecao.numero || "—"}</p>
+              <p className="text-sm text-slate-700">Razão social emitente: {notaCorrecao.razao_social_emitente || "Não disponível na importação original"}</p>
+              <p className="text-sm text-slate-700">Chave de acesso: {notaCorrecao.chave_acesso || "—"}</p>
+              <p className="text-sm text-slate-700">CNPJ emitente: {cnpjBR(notaCorrecao.cnpj_emitente)}</p>
+              <p className="text-sm text-slate-700">Valor total: {moeda(notaCorrecao.valor_total)}</p>
+            </Card>
+
+            <Campo rotulo="Fornecedor vinculado no ComprasChef">
+              <select
+                className="campo"
+                value={fornecedorCorrecaoId}
+                onChange={(event) => {
+                  setFornecedorCorrecaoId(event.target.value);
+                  setErroCorrecaoNfe(null);
+                }}
+              >
+                <option value="">Selecione</option>
+                {db.fornecedores
+                  .filter((fornecedor) => fornecedor.ativo)
+                  .map((fornecedor) => (
+                    <option key={fornecedor.id} value={fornecedor.id}>
+                      {fornecedor.nome}
+                    </option>
+                  ))}
+              </select>
+            </Campo>
+
+            <Campo rotulo="Justificativa da correção (opcional)">
+              <textarea
+                className="campo min-h-20"
+                value={justificativaCorrecao}
+                onChange={(event) => setJustificativaCorrecao(event.target.value)}
+              />
+            </Campo>
+
+            {completudeNotaCorrecao && completudeNotaCorrecao.pendencias.length > 0 && (
+              <Card className="space-y-1 border border-destaque bg-destaque-clara py-3">
+                <p className="text-sm font-semibold text-destaque">Pendências de completude</p>
+                {completudeNotaCorrecao.pendencias.map((pendencia, index) => (
+                  <p key={`${pendencia.codigo}-${index}`} className="text-sm text-destaque">{pendencia.mensagem}</p>
+                ))}
+              </Card>
+            )}
+
+            {completudeNotaCorrecao && completudeNotaCorrecao.alertas.length > 0 && (
+              <Card className="space-y-1 border border-slate-300 bg-white py-3">
+                <p className="text-sm font-semibold text-slate-700">Avisos</p>
+                {completudeNotaCorrecao.alertas.map((alerta, index) => (
+                  <p key={`alerta-${index}`} className="text-sm text-slate-600">{alerta}</p>
+                ))}
+              </Card>
+            )}
+
+            <Card className="space-y-2 border border-slate-200 py-3">
+              <p className="text-sm font-semibold text-slate-800">Reconferência de boletos</p>
+              <p className="text-sm text-slate-600">
+                Boletos não confirmados desta NF-e: {boletosPendentesReconferencia.length}
+              </p>
+              <button type="button" className="btn-secundario" onClick={reconferirBoletosPendentesNfe}>
+                <RefreshCcw size={16} /> Reconferir somente boletos não confirmados
+              </button>
+            </Card>
+
+            {erroCorrecaoNfe && <p className="rounded-card bg-erro-clara px-3 py-2 text-sm text-erro">{erroCorrecaoNfe}</p>}
+            {mensagemCorrecaoNfe && (
+              <p className="rounded-card border border-sucesso bg-sucesso-clara px-3 py-2 text-sm text-primaria-escura">
+                {mensagemCorrecaoNfe}
+              </p>
+            )}
+
+            {Array.isArray(notaCorrecao.correcoes_fornecedor) && notaCorrecao.correcoes_fornecedor.length > 0 && (
+              <Card className="space-y-1 border border-slate-200 py-3">
+                <p className="text-sm font-semibold text-slate-800">Histórico de correções de fornecedor</p>
+                {notaCorrecao.correcoes_fornecedor.map((correcao) => (
+                  <p key={correcao.id} className="text-xs text-slate-600">
+                    {dataBR(correcao.corrigido_em)} · {nomeFornecedor(db, correcao.fornecedor_anterior_id)} para {nomeFornecedor(db, correcao.fornecedor_novo_id)} · {correcao.corrigido_por}
+                  </p>
+                ))}
+              </Card>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn-secundario" onClick={fecharCorrecaoNfe}>
+                Fechar
+              </button>
+              <button
+                type="button"
+                className="btn-primario"
+                onClick={salvarCorrecaoFornecedorNfe}
+                disabled={salvandoCorrecaoNfe || correcaoSemMudanca || !fornecedorCorrecaoId}
+              >
+                {salvandoCorrecaoNfe ? "Salvando..." : "Salvar correção"}
+              </button>
+            </div>
+            </div>
+          )}
+        </Modal>
+      </>
     );
   }
 

@@ -65,6 +65,8 @@ export function migrarColecoesFichasTecnicas(db: DB): boolean {
         nome: fichaLegada.nome,
         descricao: fichaLegada.descricao,
         versao_vigente_id: fichaLegada.status === "publicada" ? fichaLegada.id : undefined,
+        criado_por: "migração-legado",
+        atualizado_por: "migração-legado",
         criado_em: fichaLegada.criado_em,
         atualizado_em: fichaLegada.atualizado_em,
       });
@@ -78,10 +80,39 @@ export function migrarColecoesFichasTecnicas(db: DB): boolean {
         receita_id: receitaId,
         numero_versao: fichaLegada.versao,
         status: fichaLegada.status,
+        rendimento_total: fichaLegada.rendimento_quantidade,
+        unidade_rendimento: fichaLegada.rendimento_unidade_id,
+        configuracoes_porcionamento: fichaLegada.porcoes_config?.quantidade_porcoes
+          ? [
+              {
+                id: "config-legado",
+                nome: "Porção padrão",
+                quantidade_por_porcao:
+                  fichaLegada.rendimento_quantidade / fichaLegada.porcoes_config.quantidade_porcoes,
+                unidade:
+                  fichaLegada.porcoes_config.unidade_porcao_id ?? fichaLegada.rendimento_unidade_id,
+                quantidade_porcoes_teorica: fichaLegada.porcoes_config.quantidade_porcoes,
+                ativa: true,
+              },
+            ]
+          : [],
         ficha: structuredClone(fichaLegada),
+        criado_por: "migração-legado",
+        atualizado_por: "migração-legado",
+        publicado_por: fichaLegada.status === "publicada" ? "migração-legado" : undefined,
         publicada_em: fichaLegada.status === "publicada" ? fichaLegada.atualizado_em : undefined,
         criado_em: fichaLegada.criado_em,
         atualizado_em: fichaLegada.atualizado_em,
+        historico: [
+          {
+            id: `hist-legado-${fichaLegada.id}`,
+            versao_id: fichaLegada.id,
+            acao: "criacao",
+            responsavel: "migração-legado",
+            em: fichaLegada.criado_em,
+            detalhes: "Registro importado do formato legado.",
+          },
+        ],
       });
       mudou = true;
     }

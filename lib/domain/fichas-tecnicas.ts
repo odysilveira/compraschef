@@ -24,6 +24,12 @@ export interface OpcoesConsolidacaoAlergenicos {
   alergenicos_produtos?: Record<string, FichaTecnicaAlergenicos>;
 }
 
+export interface SeletorConfiguracaoPorcionamento {
+  id?: string;
+  codigo?: string;
+  nome?: string;
+}
+
 const RANK_ALERGENICO: Record<PresencaAlergenico, number> = {
   NAO_INFORMADO: 0,
   PODE_CONTER: 1,
@@ -75,6 +81,15 @@ function assertQuantidadePositiva(quantidade: number, contexto: string): void {
 function assertRendimentoPositivo(rendimento: number, contexto: string): void {
   if (!Number.isFinite(rendimento) || rendimento <= 0) {
     throw new Error(`${contexto} inválido: ${rendimento}. Deve ser maior que zero.`);
+  }
+}
+
+function assertResponsavelInformado(responsavel: string | undefined, acao: string): void {
+  if (responsavel === undefined) {
+    return;
+  }
+  if (!responsavel.trim()) {
+    throw new Error(`Responsável é obrigatório para ${acao}.`);
   }
 }
 
@@ -222,6 +237,136 @@ function obterAlergenicosProduto(
   throw new Error(`Produto com id ${produto.id} sem alergênicos informados para consolidação.`);
 }
 
+function validarItensIngredientesDosPassos(ficha: FichaTecnica): void {
+  const ingredientesDaFicha = new Set(ficha.ingredientes.map((ing) => ing.id));
+
+  for (const passo of ficha.passos) {
+    if (!passo.itens_ingredientes) {
+      continue;
+    }
+
+    for (const item of passo.itens_ingredientes) {
+      if (!ingredientesDaFicha.has(item.ingrediente_receita_id)) {
+        throw new Error(
+          `Passo ${passo.ordem} referencia ingrediente ${item.ingrediente_receita_id} inexistente na versão ${ficha.id}.`
+        );
+      }
+    }
+  }
+}
+
+function normalizarChaveComparacao(valor: string): string {
+  return valor.trim().toLocaleLowerCase("pt-BR");
+}
+
+export function listarConfiguracoesPorcionamento(ficha: FichaTecnica): Array<{
+  id: string;
+  codigo?: string;
+  nome: string;
+  quantidade_por_porcao: number;
+  unidade: string;
+  quantidade_porcoes_teorica: number;
+  ativa: boolean;
+}> {
+  const rendimentoTotal = ficha.rendimento_quantidade;
+  const unidadeRendimento = ficha.rendimento_unidade_id;
+
+  if (Array.isArray(ficha.configuracoes_porcionamento)) {
+    const configs = ficha.configuracoes_porcionamento;
+    const ids = new Set<string>();
+    const nomes = new Set<string>();
+    const codigos = new Set<string>();
+
+    return configs.map((config) => {
+      const idNormalizado = normalizarChaveComparacao(config.id);
+      if (!idNormalizado) {
+        throw new Error("Configuração de porcionamento com id vazio.");
+      }
+      if (ids.has(idNormalizado)) {
+        throw new Error(`Configuração de porcionamento duplicada por id: ${config.id}.`);
+      }
+      ids.add(idNormalizado);
+
+      const nomeNormalizado = normalizarChaveComparacao(config.nome);
+      if (!nomeNormalizado) {
+        throw new Error(`Configuração de porcionamento ${config.id} com nome vazio.`);
+      }
+      if (nomes.has(nomeNormalizado)) {
+        throw new Error(`Configuração de porcionamento duplicada por nome: ${config.nome}.`);
+      }
+      nomes.add(nomeNormalizado);
+
+      const codigoNormalizado = config.codigo ? normalizarChaveComparacao(config.codigo) : undefined;
+      if (codigoNormalizado) {
+        if (codigos.has(codigoNormalizado)) {
+          throw new Error(`Configuração de porcionamento duplicada por código: ${config.codigo}.`);
+        }
+        codigos.add(codigoNormalizado);
+      }
+
+      assertQuantidadePositiva(config.quantidade_por_porcao, `Quantidade por porção da configuração ${config.id}`);
+      return {
+        ...config,
+        id: config.id.trim(),
+        codigo: config.codigo?.trim() || undefined,
+        nome: config.nome.trim(),
+        quantidade_porcoes_teorica: rendimentoTotal / config.quantidade_por_porcao,
+      };
+    });
+  }
+
+  if (ficha.porcoes_config?.quantidade_porcoes && ficha.porcoes_config.quantidade_porcoes > 0) {
+    const quantidadePorPorcao = rendimentoTotal / ficha.porcoes_config.quantidade_porcoes;
+    return [
+      {
+        id: "config-legado",
+        nome: "Porção padrão",
+        quantidade_por_porcao: quantidadePorPorcao,
+        unidade: ficha.porcoes_config.unidade_porcao_id ?? unidadeRendimento,
+        quantidade_porcoes_teorica: ficha.porcoes_config.quantidade_porcoes,
+        ativa: true,
+      },
+    ];
+  }
+
+  return [];
+}
+
+export function calcularCustoPorConfiguracaoPorcionamento(
+  snapshot: FichaTecnicaCustoSnapshot,
+  seletor: SeletorConfiguracaoPorcionamento
+): number {
+  const custos = snapshot.custos_por_configuracao_porcionamento ?? [];
+  if (custos.length === 0) {
+    throw new Error("Snapshot sem configurações de porcionamento para cálculo por configuração.");
+  }
+
+  const temSeletor = Boolean(seletor.id?.trim() || seletor.codigo?.trim() || seletor.nome?.trim());
+  if (!temSeletor) {
+    throw new Error("Seleção ambígua: informe id, código ou nome da configuração de porcionamento.");
+  }
+
+  const id = seletor.id ? normalizarChaveComparacao(seletor.id) : undefined;
+  const codigo = seletor.codigo ? normalizarChaveComparacao(seletor.codigo) : undefined;
+  const nome = seletor.nome ? normalizarChaveComparacao(seletor.nome) : undefined;
+
+  const candidatas = custos.filter((item) => {
+    if (id && normalizarChaveComparacao(item.configuracao_id) !== id) return false;
+    if (codigo && normalizarChaveComparacao(item.configuracao_codigo ?? "") !== codigo) return false;
+    if (nome && normalizarChaveComparacao(item.nome) !== nome) return false;
+    return true;
+  });
+
+  if (candidatas.length === 0) {
+    throw new Error("Configuração de porcionamento não encontrada para o seletor informado.");
+  }
+  if (candidatas.length > 1) {
+    throw new Error("Seleção ambígua: mais de uma configuração atende ao seletor informado.");
+  }
+
+  return candidatas[0].custo_por_porcao;
+}
+
 /**
  * Obtém a sigla de uma unidade a partir do seu ID.
  */
@@ -364,6 +509,7 @@ export function calcularCustoFicha(
   unidades: Unidade[]
 ): ResultadoCalculoCusto {
   assertRendimentoPositivo(ficha.rendimento_quantidade, `Rendimento da ficha ${ficha.id}`);
+  validarItensIngredientesDosPassos(ficha);
 
   const cicloRes = detectarCiclos(todasFichas);
   if (cicloRes.temCiclo) {
@@ -468,11 +614,16 @@ export function publicarFicha(
   ficha: FichaTecnica,
   todasFichas: FichaTecnica[],
   produtos: Produto[],
-  unidades: Unidade[]
+  unidades: Unidade[],
+  responsavel?: string
 ): FichaTecnica {
+  assertResponsavelInformado(responsavel, "publicação");
+
   if (ficha.status === "publicada") {
     throw new Error(`A versão ${ficha.versao} da ficha ${ficha.id} já está publicada e é imutável.`);
   }
+
+  validarItensIngredientesDosPassos(ficha);
 
   const cicloRes = detectarCiclos(todasFichas);
   if (cicloRes.temCiclo) {
@@ -505,8 +656,11 @@ export function publicarFicha(
  */
 export function atualizarFichaRascunho(
   fichaAtual: FichaTecnica,
-  atualizacoes: Partial<Omit<FichaTecnica, "id" | "versao" | "criado_em">>
+  atualizacoes: Partial<Omit<FichaTecnica, "id" | "versao" | "criado_em">>,
+  responsavel?: string
 ): FichaTecnica {
+  assertResponsavelInformado(responsavel, "alteração de rascunho");
+
   if (fichaAtual.status === "publicada") {
     throw new Error(`A versão ${fichaAtual.versao} da ficha ${fichaAtual.id} é imutável.`);
   }
@@ -519,6 +673,8 @@ export function atualizarFichaRascunho(
     criado_em: fichaAtual.criado_em,
     atualizado_em: new Date().toISOString(),
   };
+
+  validarItensIngredientesDosPassos(proxima);
 
   return proxima;
 }
@@ -611,6 +767,7 @@ export function criarSnapshotCusto(
   unidades: Unidade[]
 ): FichaTecnicaCustoSnapshot {
   assertRendimentoPositivo(ficha.rendimento_quantidade, `Rendimento da ficha ${ficha.id}`);
+  validarItensIngredientesDosPassos(ficha);
 
   const cicloRes = detectarCiclos(todasFichas);
   if (cicloRes.temCiclo) {
@@ -687,9 +844,20 @@ export function criarSnapshotCusto(
     }
   }
 
+  const custosPorConfiguracaoPorcionamento = listarConfiguracoesPorcionamento(ficha)
+    .filter((config) => config.ativa)
+    .map((config) => ({
+      configuracao_id: config.id,
+      configuracao_codigo: config.codigo,
+      nome: config.nome,
+      custo_por_porcao: Math.round(custoTotalCentavos / config.quantidade_porcoes_teorica),
+      quantidade_porcoes_teorica: config.quantidade_porcoes_teorica,
+      unidade: config.unidade,
+    }));
+
   const custoPorPorcao =
-    ficha.porcoes_config && ficha.porcoes_config.quantidade_porcoes > 0
-      ? Math.round(custoTotalCentavos / ficha.porcoes_config.quantidade_porcoes)
+    custosPorConfiguracaoPorcionamento.length === 1
+      ? custosPorConfiguracaoPorcionamento[0].custo_por_porcao
       : 0;
 
   const custoPorUnidadeRendimento =
@@ -703,6 +871,7 @@ export function criarSnapshotCusto(
     versao: ficha.versao,
     custo_total: custoTotalCentavos,
     custo_por_porcao: custoPorPorcao,
+    custos_por_configuracao_porcionamento: custosPorConfiguracaoPorcionamento,
     custo_por_unidade_rendimento: custoPorUnidadeRendimento,
     calculado_em: new Date().toISOString(),
     detalhes_ingredientes,

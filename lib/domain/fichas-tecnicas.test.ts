@@ -682,3 +682,22 @@ describe("Pureza e Não Mutação de Entradas", () => {
     expect(() => consolidarAlergenicosFicha(ficha, fichas, produtos)).not.toThrow();
   });
 });
+
+describe("Passos com Ingredientes", () => {
+  it("rejeita passo que referencia ingrediente inexistente na mesma versão", () => {
+    const ficha: FichaTecnica = {
+      ...fichaBaseSobremesa(),
+      passos: [
+        {
+          ordem: 1,
+          descricao: "Separar",
+          itens_ingredientes: [{ ingrediente_receita_id: "ing-nao-existe" }],
+        },
+      ],
+    };
+
+    expect(() => publicarFicha(ficha, [ficha], produtosBase, unidades)).toThrow(
+      /referencia ingrediente ing-nao-existe inexistente/i
+    );
+  });
+});

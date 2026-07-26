@@ -73,6 +73,7 @@ export interface Produto {
   origem_mercadoria?: string;
   cfop_padrao?: string;
   custo_unitario?: number;
+  alergenicos?: FichaTecnicaAlergenicos;
   ativo: boolean;
 }
 
@@ -490,4 +491,104 @@ export interface DB {
   balanco_itens: BalancoItem[];
   precos_historico: PrecoHistorico[];
   integracao_eventos: IntegracaoEvento[];
+  fichas_tecnicas?: FichaTecnica[];
+  ficha_tecnica_custo_snapshots?: FichaTecnicaCustoSnapshot[];
+}
+
+export type FichaTecnicaStatus = "rascunho" | "publicada" | "arquivada";
+
+export type TipoIngrediente = "PRODUTO" | "SUB_RECEITA";
+
+export type PresencaAlergenico = "CONTEM" | "PODE_CONTER" | "NAO_INFORMADO";
+
+export interface FichaTecnicaAlergenicos {
+  gluten: PresencaAlergenico;
+  lactose: PresencaAlergenico;
+  ovos: PresencaAlergenico;
+  peixes: PresencaAlergenico;
+  crustaceos: PresencaAlergenico;
+  soja: PresencaAlergenico;
+  castanhas: PresencaAlergenico;
+  amendoim: PresencaAlergenico;
+  outros?: { nome: string; presenca: PresencaAlergenico }[];
+}
+
+export interface InformacaoNutricional {
+  valor_energetico_kcal?: number;
+  carboidratos_g?: number;
+  proteinas_g?: number;
+  gorduras_totais_g?: number;
+  gorduras_saturadas_g?: number;
+  gorduras_trans_g?: number;
+  fibra_alimentar_g?: number;
+  sodio_mg?: number;
+}
+
+export interface PegadaCarbono {
+  co2_equivalente_g?: number; // CO2 equivalente em gramas
+  categoria_impacto?: "baixo" | "medio" | "alto";
+}
+
+export interface FichaTecnicaPorcoesConfig {
+  quantidade_porcoes: number; // rendimento em porções
+  peso_por_porcao?: number; // peso ou volume por porção
+  unidade_porcao_id?: string; // id da unidade da porção (ex: g, ml)
+}
+
+export interface FichaTecnicaIngrediente {
+  id: string;
+  tipo: TipoIngrediente;
+  produto_id?: string; // FK -> produtos.id (se tipo === 'PRODUTO')
+  sub_receita_id?: string; // FK -> fichas_tecnicas.id (se tipo === 'SUB_RECEITA')
+  sub_receita_versao?: string; // versão esperada da sub-receita (opcional)
+  quantidade: number; // na unidade informada abaixo
+  unidade_id: string; // FK -> unidades.id
+  custo_historico_snapshot?: number; // custo do ingrediente em centavos no momento em que a ficha foi publicada
+}
+
+export interface FichaTecnicaPasso {
+  ordem: number; // 1, 2, 3...
+  descricao: string;
+  foto_url?: string;
+  tempo_minutos?: number;
+}
+
+export interface FichaTecnica {
+  id: string;
+  codigo_externo?: string; // código para integração com ERP EaseEat
+  nome: string;
+  descricao?: string;
+  status: FichaTecnicaStatus;
+  versao: string; // ex: "1.0.0"
+  rendimento_quantidade: number; // ex: 1.5 (quilos)
+  rendimento_unidade_id: string; // FK -> unidades.id (ex: id de 'kg' ou 'L')
+  porcoes_config?: FichaTecnicaPorcoesConfig;
+  ingredientes: FichaTecnicaIngrediente[];
+  passos: FichaTecnicaPasso[];
+  alergenicos: FichaTecnicaAlergenicos;
+  informacao_nutricional?: InformacaoNutricional;
+  pegada_carbono?: PegadaCarbono;
+  criado_em: string; // ISO datetime
+  atualizado_em: string; // ISO datetime
+}
+
+export interface IngredienteCustoDetalhe {
+  tipo: TipoIngrediente;
+  id: string; // produto_id ou sub_receita_id
+  nome: string;
+  quantidade: number;
+  unidade_sigla: string;
+  custo_unitario_periodo: number; // em centavos
+  custo_calculado: number; // em centavos
+}
+
+export interface FichaTecnicaCustoSnapshot {
+  id: string;
+  ficha_tecnica_id: string;
+  versao: string;
+  custo_total: number; // custo total em centavos
+  custo_por_porcao: number; // custo por porção em centavos (0 se não configurado)
+  custo_por_unidade_rendimento: number; // custo por unidade de rendimento em centavos
+  calculado_em: string; // ISO datetime
+  detalhes_ingredientes: IngredienteCustoDetalhe[];
 }

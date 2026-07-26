@@ -1,5 +1,5 @@
 import type { DB } from "@/lib/types";
-import { LOCAL_ESTOQUE_SECO, produtosReais, UNIDADE_SACO } from "./catalogo";
+import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_SACO } from "./catalogo";
 
 // Datas relativas a "hoje" para a demonstração ficar sempre atual.
 // Horário fixado ao meio-dia para servidor e navegador gerarem o MESMO valor
@@ -29,11 +29,11 @@ export const seedDB: DB = {
   ],
 
   unidades: [
-    { id: "un-kg", nome: "quilograma", sigla: "kg" },
-    { id: "un-l", nome: "litro", sigla: "L" },
-    { id: "un-un", nome: "unidade", sigla: "un" },
-    { id: "un-cx", nome: "caixa", sigla: "cx" },
-    { id: "un-fd", nome: "fardo", sigla: "fd" },
+    { id: "un-kg", codigo_externo: "KG", nome: "quilograma", sigla: "kg" },
+    { id: "un-l", codigo_externo: "L", nome: "litro", sigla: "L" },
+    { id: "un-un", codigo_externo: "UN", nome: "unidade", sigla: "un" },
+    { id: "un-cx", codigo_externo: "CX", nome: "caixa", sigla: "cx" },
+    { id: "un-fd", codigo_externo: "FD", nome: "fardo", sigla: "fd" },
     UNIDADE_SACO,
   ],
 
@@ -127,11 +127,11 @@ export const seedDB: DB = {
     { id: "fp-1", fornecedor_id: "forn-hortifruti", produto_id: "prod-tomate", ultimo_preco: 7.9, atualizado_em: diasAtras(3) },
     { id: "fp-2", fornecedor_id: "forn-hortifruti", produto_id: "prod-cebola", ultimo_preco: 4.5, atualizado_em: diasAtras(3) },
     { id: "fp-3", fornecedor_id: "forn-hortifruti", produto_id: "prod-alface", ultimo_preco: 2.8, atualizado_em: diasAtras(3) },
-    { id: "fp-4", fornecedor_id: "forn-frigorifico", produto_id: "prod-file", ultimo_preco: 62.0, atualizado_em: diasAtras(10) },
+    { id: "fp-4", fornecedor_id: "forn-frigorifico", produto_id: "prod-file", codigo_produto_fornecedor: "FBF-0101", codigo_barras_fornecedor: "7891000200201", unidade_compra_id: "un-kg", fator_conversao: 1, ultimo_preco: 62.0, ultimo_preco_unidade_id: "un-kg", atualizado_em: diasAtras(10) },
     { id: "fp-5", fornecedor_id: "forn-frigorifico", produto_id: "prod-frango", ultimo_preco: 16.5, atualizado_em: diasAtras(10) },
     { id: "fp-6", fornecedor_id: "forn-laticinios", produto_id: "prod-mucarela", ultimo_preco: 38.0, atualizado_em: diasAtras(7) },
     { id: "fp-7", fornecedor_id: "forn-laticinios", produto_id: "prod-creme", ultimo_preco: 9.8, atualizado_em: diasAtras(7) },
-    { id: "fp-8", fornecedor_id: "forn-distribuidora", produto_id: "prod-azeite", ultimo_preco: 42.0, atualizado_em: diasAtras(15) },
+    { id: "fp-8", fornecedor_id: "forn-distribuidora", produto_id: "prod-azeite", codigo_produto_fornecedor: "AZ-500", unidade_compra_id: "un-cx", fator_conversao: 6, ultimo_preco: 42.0, ultimo_preco_unidade_id: "un-cx", atualizado_em: diasAtras(15) },
     { id: "fp-9", fornecedor_id: "forn-distribuidora", produto_id: "prod-farinha", ultimo_preco: 4.2, atualizado_em: diasAtras(15) },
     { id: "fp-10", fornecedor_id: "forn-distribuidora", produto_id: "prod-arroz-arboreo", ultimo_preco: 12.5, atualizado_em: diasAtras(15) },
     // Distribuidora também vende creme de leite e muçarela (concorrência p/ cotação)
@@ -143,6 +143,7 @@ export const seedDB: DB = {
     { id: "loc-freezer1", nome: "Freezer 1", tipo: "freezer" },
     { id: "loc-freezer2", nome: "Freezer 2", tipo: "freezer" },
     { id: "loc-geladeira1", nome: "Geladeira 1", tipo: "geladeira" },
+    LOCAL_GELADEIRA_2,
     { id: "loc-prateleira", nome: "Prateleira seca", tipo: "prateleira" },
     { id: "loc-despensa", nome: "Despensa", tipo: "despensa" },
     LOCAL_ESTOQUE_SECO,
@@ -170,6 +171,31 @@ export const seedDB: DB = {
     // Vazias, prontas para reuso
     { id: "cx-13", numero: 13, qr_code: "CXCHEF-013", status: "vazia", atualizado_em: diasAtras(2) },
     { id: "cx-14", numero: 14, qr_code: "CXCHEF-014", status: "vazia", atualizado_em: diasAtras(1) },
+  ],
+
+  // Um lote pode ser dividido entre várias caixas. As alocações abaixo guardam
+  // quanto daquele lote está em cada recipiente físico.
+  lotes_estoque: [
+    { id: "lote-cx-3", produto_id: "prod-file", origem: "manual", quantidade_inicial: 8, quantidade_atual: 8, data_entrada: soData(diasAtras(6)), validade: soData(diasAFrente(84)), criado_em: diasAtras(6), atualizado_em: diasAtras(6) },
+    { id: "lote-cx-7", produto_id: "prod-file", origem: "manual", quantidade_inicial: 10, quantidade_atual: 10, data_entrada: soData(diasAtras(2)), validade: soData(diasAFrente(88)), criado_em: diasAtras(2), atualizado_em: diasAtras(2) },
+    { id: "lote-cx-4", produto_id: "prod-frango", origem: "manual", quantidade_inicial: 12, quantidade_atual: 12, data_entrada: soData(diasAtras(4)), validade: soData(diasAFrente(86)), criado_em: diasAtras(4), atualizado_em: diasAtras(4) },
+    { id: "lote-cx-9", produto_id: "prod-frango", origem: "manual", quantidade_inicial: 4, quantidade_atual: 4, data_entrada: soData(diasAtras(8)), validade: soData(diasAFrente(82)), criado_em: diasAtras(8), atualizado_em: diasAtras(1) },
+    { id: "lote-cx-1", produto_id: "prod-tomate", origem: "manual", quantidade_inicial: 6, quantidade_atual: 6, data_entrada: soData(diasAtras(3)), validade: soData(diasAFrente(4)), criado_em: diasAtras(3), atualizado_em: diasAtras(3) },
+    { id: "lote-cx-2", produto_id: "prod-cebola", origem: "manual", quantidade_inicial: 9, quantidade_atual: 9, data_entrada: soData(diasAtras(5)), validade: soData(diasAFrente(15)), criado_em: diasAtras(5), atualizado_em: diasAtras(5) },
+    { id: "lote-cx-5", produto_id: "prod-mucarela", origem: "manual", quantidade_inicial: 7, quantidade_atual: 7, data_entrada: soData(diasAtras(9)), validade: soData(diasAFrente(21)), criado_em: diasAtras(9), atualizado_em: diasAtras(9) },
+    { id: "lote-cx-6", produto_id: "prod-creme", origem: "manual", quantidade_inicial: 6, quantidade_atual: 6, data_entrada: soData(diasAtras(12)), validade: soData(diasAFrente(48)), criado_em: diasAtras(12), atualizado_em: diasAtras(12) },
+    { id: "lote-cx-8", produto_id: "prod-farinha", origem: "manual", quantidade_inicial: 18, quantidade_atual: 18, data_entrada: soData(diasAtras(20)), validade: soData(diasAFrente(160)), criado_em: diasAtras(20), atualizado_em: diasAtras(20) },
+    { id: "lote-cx-10", produto_id: "prod-arroz-arboreo", origem: "manual", quantidade_inicial: 8, quantidade_atual: 8, data_entrada: soData(diasAtras(18)), validade: soData(diasAFrente(162)), criado_em: diasAtras(18), atualizado_em: diasAtras(18) },
+    { id: "lote-cx-11", produto_id: "prod-bolonhesa", origem: "producao", porcionado_por_id: "perfil-lider", quantidade_inicial: 5, quantidade_atual: 5, data_entrada: soData(diasAtras(4)), validade: soData(diasAFrente(1)), criado_em: diasAtras(4), atualizado_em: diasAtras(4) },
+    { id: "lote-cx-12", produto_id: "prod-massa", origem: "producao", porcionado_por_id: "perfil-lider", quantidade_inicial: 6, quantidade_atual: 6, data_entrada: soData(diasAtras(1)), validade: soData(diasAFrente(2)), criado_em: diasAtras(1), atualizado_em: diasAtras(1) },
+  ],
+
+  alocacoes_caixa: [
+    ...[3, 7, 4, 9, 1, 2, 5, 6, 8, 10, 11, 12].map((numero) => {
+      const caixa = `cx-${numero}`;
+      const quantidades: Record<number, number> = { 3: 8, 7: 10, 4: 12, 9: 4, 1: 6, 2: 9, 5: 7, 6: 6, 8: 18, 10: 8, 11: 5, 12: 6 };
+      return { id: `aloc-${caixa}`, lote_id: `lote-${caixa}`, caixa_id: caixa, quantidade_inicial: quantidades[numero], quantidade_atual: quantidades[numero], criado_em: diasAtras(1), atualizado_em: diasAtras(1) };
+    }),
   ],
 
   listas_compras: [

@@ -14,6 +14,7 @@ import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import CampoMoeda from "@/components/operacao/CampoMoeda";
 import { estoqueAtual, mutate, nomeFornecedor, nomeProduto, siglaUnidadeUso, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
+import { criarLote } from "@/lib/domain/estoque";
 import { moeda, qtd } from "@/lib/format";
 import type { DB, StatusRecebimento } from "@/lib/types";
 import type { ResultadoNota } from "@/components/operacao/ReceberPorNota";
@@ -150,13 +151,25 @@ export default function ReceberAvulso({
       });
 
       for (const item of itens) {
+        const recebimentoItemId = uid("ri");
         d.recebimento_itens.push({
-          id: uid("ri"),
+          id: recebimentoItemId,
           recebimento_id: recebimentoId,
           produto_id: item.produtoId,
           qtd_esperada: item.quantidade,
           qtd_recebida: item.quantidade,
           validade: item.validade || undefined,
+        });
+        criarLote(d, {
+          id: uid("lote"),
+          produto_id: item.produtoId,
+          recebimento_item_id: recebimentoItemId,
+          origem: "recebimento",
+          quantidade: item.quantidade,
+          data_entrada: hoje,
+          validade: item.validade || undefined,
+          criado_em: agora,
+          atualizado_em: agora,
         });
         d.movimentos_estoque.unshift({
           id: uid("mov"),
@@ -188,7 +201,7 @@ export default function ReceberAvulso({
 
     for (const item of itens) {
       const produto = dbNovo.produtos.find((p) => p.id === item.produtoId);
-      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, item.produtoId) + item.quantidade);
+      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, item.produtoId));
     }
 
     aoFinalizar({

@@ -10,12 +10,13 @@ tabela: perfis
 
 tabela: unidades
   - id: uuid, PK, default gen_random_uuid()
+  - codigo_externo: text, opcional, único (código da unidade no EaseEat)
   - nome: text, obrigatório (ex: quilograma, litro, caixa, fardo, unidade)
   - sigla: text, obrigatório, único (kg, L, cx, fd, un)
 
 tabela: fornecedores
   - id: uuid, PK, default gen_random_uuid()
-  - codigo_externo: text, opcional (código no ERP parceiro)
+  - codigo_externo: text, opcional, único (código do fornecedor no EaseEat)
   - nome: text, obrigatório
   - cnpj: text, obrigatório, único
   - whatsapp: text, opcional
@@ -50,9 +51,15 @@ tabela: fornecedor_produtos          (quem vende o quê)
   - id: uuid, PK
   - fornecedor_id: uuid, FK → fornecedores.id
   - produto_id: uuid, FK → produtos.id
-  - ultimo_preco: numeric, opcional
+  - codigo_produto_fornecedor: text, opcional (cProd/código no catálogo deste fornecedor)
+  - codigo_barras_fornecedor: text, opcional (EAN/GTIN da embalagem deste fornecedor)
+  - unidade_compra_id: uuid, FK → unidades.id, opcional
+  - fator_conversao: numeric, opcional (1 embalagem do fornecedor = X unidades de uso)
+  - ultimo_preco: numeric, opcional (na unidade informada abaixo)
+  - ultimo_preco_unidade_id: uuid, FK → unidades.id, opcional
   - atualizado_em: timestamptz
   - único: (fornecedor_id, produto_id)
+  - único: (fornecedor_id, codigo_produto_fornecedor)
 
 tabela: locais
   - id: uuid, PK
@@ -70,6 +77,30 @@ tabela: caixas
   - validade: date, opcional
   - local_id: uuid, FK → locais.id, opcional
   - atualizado_em: timestamptz, default now()
+
+tabela: lotes_estoque                 (saldo canônico e rastreabilidade)
+  - id: uuid, PK
+  - produto_id: uuid, FK → produtos.id
+  - recebimento_item_id: uuid, FK → recebimento_itens.id, opcional, único
+  - origem: text ('recebimento' | 'producao' | 'manual')
+  - porcionado_por_id: uuid, FK → perfis.id, opcional (obrigatório na interface para produção)
+  - quantidade_inicial: numeric, obrigatório, maior que zero
+  - quantidade_atual: numeric, obrigatório, maior ou igual a zero
+  - data_entrada: date, obrigatório
+  - validade: date, opcional
+  - criado_em / atualizado_em: timestamptz
+
+tabela: alocacoes_caixa               (distribuição física do lote)
+  - id: uuid, PK
+  - lote_id: uuid, FK → lotes_estoque.id
+  - caixa_id: uuid, FK → caixas.id
+  - quantidade_inicial: numeric, obrigatório
+  - quantidade_atual: numeric, obrigatório
+  - criado_em / atualizado_em: timestamptz
+  - finalizado_em: timestamptz, opcional
+
+O recebimento ou a produção cria o lote e a movimentação de entrada uma única vez. O lote pode
+ser dividido entre várias caixas por `alocacoes_caixa`; essa distribuição não altera o saldo.
 
 tabela: listas_compras
   - id: uuid, PK

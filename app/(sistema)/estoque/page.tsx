@@ -11,6 +11,7 @@ import {
   ClipboardList,
   MapPin,
   PackageOpen,
+  Plus,
   Timer,
   TriangleAlert,
 } from "lucide-react";
@@ -22,12 +23,22 @@ import {
   estoqueAtual,
   mutate,
   nomeLocal,
+  nomePerfil,
   nomeProduto,
   siglaUnidadeUso,
   uid,
   useDB,
 } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
+import {
+  ajustarLoteDaCaixa,
+  alocarLoteEmCaixa,
+  baixarLoteDaCaixa,
+  criarLote,
+  loteDaCaixa,
+  lotesPendentesDeAlocacao,
+  quantidadePendenteLote,
+} from "@/lib/domain/estoque";
 import { usePapel } from "@/lib/roles";
 import { dataBR, diasAte, qtd, rotuloValidade } from "@/lib/format";
 import type { Caixa, DB, StatusCaixa } from "@/lib/types";
@@ -78,8 +89,23 @@ function FormEncher({
   const [envase, setEnvase] = useState(hoje());
   const [validade, setValidade] = useState("");
   const [localId, setLocalId] = useState("");
+  const [lotePendenteId, setLotePendenteId] = useState("");
+  const [avisoProduto, setAvisoProduto] = useState<string | null>(null);
+  const lotesPendentes = lotesPendentesDeAlocacao(db);
+  const saldoPendenteSelecionado = lotePendenteId ? quantidadePendenteLote(db, lotePendenteId) : undefined;
+
+  function escolherLote(id: string) {
+    setLotePendenteId(id);
+    const lote = db.lotes_estoque.find((l) => l.id === id);
+    if (!lote) return;
+    setProdutoId(lote.produto_id);
+    setQuantidade(quantidadePendenteLote(db, lote.id));
+    setEnvase(lote.data_entrada);
+    setValidade(lote.validade ?? "");
+  }
 
   function escolherProduto(id: string) {
+    setLotePendenteId("");
     setProdutoId(id);
     const produto = db.produtos.find((p) => p.id === id);
     if (produto?.validade_padrao_dias !== undefined) {
@@ -87,10 +113,36 @@ function FormEncher({
     }
   }
 
+  function aoLerProduto(codigo: string) {
+    const limpo = codigo.trim();
+    const vinculoFornecedor = db.fornecedor_produtos.find((fp) => fp.codigo_barras_fornecedor === limpo);
+    const produto = db.produtos.find(
+      (p) => p.ativo && (p.codigo_barras === limpo || p.id === vinculoFornecedor?.produto_id)
+    );
+    if (!produto) {
+      setAvisoProduto(`Código "${limpo}" não corresponde a um produto cadastrado.`);
+      return;
+    }
+    const pendentesDoProduto = lotesPendentes.filter((l) => l.produto_id === produto.id);
+    if (pendentesDoProduto.length === 1) {
+      escolherLote(pendentesDoProduto[0].id);
+    } else if (pendentesDoProduto.length > 1) {
+      setAvisoProduto(`Há ${pendentesDoProduto.length} lotes deste produto. Escolha o lote pela validade.`);
+      return;
+    } else if (produto.tipo === "produzido") {
+      setAvisoProduto("Registre primeiro o lote completo em “Registrar produção” e depois distribua as porções nas caixas.");
+      return;
+    } else {
+      escolherProduto(produto.id);
+    }
+    setAvisoProduto(null);
+  }
+
   // Regra da casa: o vencimento sugerido depende do destino do saco —
   // freezer = 3 meses, geladeira = 5 dias (o produto dá a sugestão inicial).
   function escolherLocal(id: string) {
     setLocalId(id);
+    if (lotePendenteId) return;
     const local = db.locais.find((l) => l.id === id);
     if (!local) return;
     const base = envase || hoje();
@@ -105,7 +157,7 @@ function FormEncher({
   }
 
   const categorias = new Map<string, typeof db.produtos>();
-  for (const p of db.produtos.filter((x) => x.ativo)) {
+  for (const p of db.produtos.filter((x) => x.ativo && x.tipo === "comprado")) {
     const cat = p.categoria ?? "outros";
     categorias.set(cat, [...(categorias.get(cat) ?? []), p]);
   }
@@ -115,15 +167,35 @@ function FormEncher({
     const produto = db.produtos.find((p) => p.id === produtoId);
     const agora = new Date().toISOString();
     const dbNovo = mutate((d) => {
-      const c = d.caixas.find((x) => x.id === caixa.id);
-      if (!c) return;
-      c.status = "cheia";
-      c.produto_id = produtoId;
-      c.quantidade = quantidade;
-      c.data_envase = envase || hoje();
-      c.validade = validade || undefined;
-      c.local_id = localId || undefined;
-      c.atualizado_em = agora;
+      if (lotePendenteId) {
+        alocarLoteEmCaixa(d, {
+          id: uid("aloc"),
+          loteId: lotePendenteId,
+          caixaId: caixa.id,
+          quantidade,
+          localId: localId || undefined,
+          agora,
+        });
+        return;
+      }
+      const lote = criarLote(d, {
+        id: uid("lote"),
+        produto_id: produtoId,
+        origem: produto?.tipo === "produzido" ? "producao" : "manual",
+        quantidade,
+        data_entrada: envase || hoje(),
+        validade: validade || undefined,
+        criado_em: agora,
+        atualizado_em: agora,
+      });
+      alocarLoteEmCaixa(d, {
+        id: uid("aloc"),
+        loteId: lote.id,
+        caixaId: caixa.id,
+        quantidade,
+        localId: localId || undefined,
+        agora,
+      });
       d.movimentos_estoque.unshift({
         id: uid("mov"),
         produto_id: produtoId,
@@ -144,8 +216,30 @@ function FormEncher({
       <p className="flex items-center gap-2 text-lg font-bold">
         <PackageOpen size={22} className="text-primaria" /> Caixa nº {caixa.numero} está vazia — encher agora
       </p>
+      {lotesPendentes.length > 0 && (
+        <Campo rotulo="Lote recebido aguardando caixa">
+          <select className="campo" value={lotePendenteId} onChange={(e) => escolherLote(e.target.value)}>
+            <option value="">— criar uma entrada manual —</option>
+            {lotesPendentes.map((lote) => (
+              <option key={lote.id} value={lote.id}>
+                {nomeProduto(db, lote.produto_id)} · {qtd(quantidadePendenteLote(db, lote.id), siglaUnidadeUso(db, lote.produto_id))} aguardando · {lote.validade ? `vence ${dataBR(lote.validade)}` : `entrada ${dataBR(lote.data_entrada)}`}
+              </option>
+            ))}
+          </select>
+        </Campo>
+      )}
+      {lotePendenteId && (
+        <p className="rounded-card bg-sucesso-clara px-3 py-2 text-sm text-primaria-escura">
+          Este lote já entrou no estoque no recebimento ou na produção. Agora parte dele será vinculada à caixa, sem
+          somar a quantidade novamente.
+        </p>
+      )}
+      <CodeScanner rotulo="Ler código de barras do produto" onLeitura={aoLerProduto} />
+      {avisoProduto && (
+        <p className="rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">{avisoProduto}</p>
+      )}
       <Campo rotulo="Produto">
-        <select className="campo" value={produtoId} onChange={(e) => escolherProduto(e.target.value)}>
+        <select className="campo" value={produtoId} disabled={Boolean(lotePendenteId)} onChange={(e) => escolherProduto(e.target.value)}>
           <option value="">Escolha o produto…</option>
           {Array.from(categorias.entries()).map(([categoria, produtos]) => (
             <optgroup key={categoria} label={categoria}>
@@ -163,10 +257,10 @@ function FormEncher({
       </Campo>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Campo rotulo="Data de envase">
-          <input type="date" className="campo" value={envase} onChange={(e) => setEnvase(e.target.value)} />
+          <input type="date" className="campo" disabled={Boolean(lotePendenteId)} value={envase} onChange={(e) => setEnvase(e.target.value)} />
         </Campo>
         <Campo rotulo="Validade (obrigatória)">
-          <input type="date" className="campo" value={validade} onChange={(e) => setValidade(e.target.value)} />
+          <input type="date" className="campo" disabled={Boolean(lotePendenteId)} value={validade} onChange={(e) => setValidade(e.target.value)} />
         </Campo>
       </div>
       <Campo rotulo="Local de armazenagem">
@@ -187,11 +281,113 @@ function FormEncher({
       )}
       {!validade && produtoId && (
         <p className="rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
-          Informe a validade — é ela que alimenta os alertas de vencimento e o uso na ordem certa (FIFO).
+          Informe a validade — o sistema recomenda primeiro a caixa que vence antes e, em empate, a mais antiga.
         </p>
       )}
-      <button className="btn-gigante" onClick={salvar} disabled={!produtoId || quantidade <= 0 || !validade}>
+      {saldoPendenteSelecionado !== undefined && quantidade > saldoPendenteSelecionado && (
+        <p className="rounded-card bg-erro-clara px-3 py-2 text-sm text-erro">
+          Este lote tem somente {qtd(saldoPendenteSelecionado, siglaUnidadeUso(db, produtoId))} aguardando caixa.
+        </p>
+      )}
+      <button
+        className="btn-gigante"
+        onClick={salvar}
+        disabled={!produtoId || quantidade <= 0 || !validade || (saldoPendenteSelecionado !== undefined && quantidade > saldoPendenteSelecionado)}
+      >
         Salvar caixa cheia
+      </button>
+    </div>
+  );
+}
+
+function FormRegistrarProducao({
+  db,
+  usuarioId,
+  aoConcluir,
+}: {
+  db: DB;
+  usuarioId: string;
+  aoConcluir: () => void;
+}) {
+  const [produtoId, setProdutoId] = useState("");
+  const [quantidade, setQuantidade] = useState(0);
+  const [dataProducao, setDataProducao] = useState(hoje());
+  const [validade, setValidade] = useState("");
+  const [porcionadoPorId, setPorcionadoPorId] = useState(usuarioId);
+  const produzidos = db.produtos
+    .filter((p) => p.ativo && p.tipo === "produzido")
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+  function escolherProduto(id: string) {
+    setProdutoId(id);
+    const produto = db.produtos.find((p) => p.id === id);
+    if (produto?.validade_padrao_dias !== undefined) {
+      const base = new Date(`${dataProducao || hoje()}T12:00:00`);
+      base.setDate(base.getDate() + produto.validade_padrao_dias);
+      setValidade(base.toISOString().slice(0, 10));
+    }
+  }
+
+  function salvar() {
+    if (!produtoId || quantidade <= 0 || !validade) return;
+    const agora = new Date().toISOString();
+    const produto = db.produtos.find((p) => p.id === produtoId);
+    const dbNovo = mutate((d) => {
+      criarLote(d, {
+        id: uid("lote"),
+        produto_id: produtoId,
+        origem: "producao",
+        porcionado_por_id: porcionadoPorId,
+        quantidade,
+        data_entrada: dataProducao || hoje(),
+        validade,
+        criado_em: agora,
+        atualizado_em: agora,
+      });
+      d.movimentos_estoque.unshift({
+        id: uid("mov"),
+        produto_id: produtoId,
+        tipo: "producao",
+        quantidade,
+        usuario_id: usuarioId,
+        criado_em: agora,
+        sincronizado: false,
+      });
+    });
+    enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, produtoId));
+    aoConcluir();
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-stone-600">
+        Registre o total de sacos/porções preparados neste lote. Depois distribua esse total entre as caixas
+        vazias usando o QR de cada caixa.
+      </p>
+      <Campo rotulo="Produto preparado">
+        <select className="campo" value={produtoId} onChange={(e) => escolherProduto(e.target.value)}>
+          <option value="">Escolha o produto…</option>
+          {produzidos.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+        </select>
+      </Campo>
+      <Campo rotulo={`Total produzido${produtoId ? ` (${siglaUnidadeUso(db, produtoId)})` : ""}`}>
+        <CampoQuantidade valor={quantidade} onChange={setQuantidade} />
+      </Campo>
+      <Campo rotulo="Quem porcionou">
+        <select className="campo" value={porcionadoPorId} onChange={(e) => setPorcionadoPorId(e.target.value)}>
+          {db.perfis.filter((p) => p.ativo).map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+        </select>
+      </Campo>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Campo rotulo="Data de preparo">
+          <input type="date" className="campo" value={dataProducao} onChange={(e) => setDataProducao(e.target.value)} />
+        </Campo>
+        <Campo rotulo="Validade">
+          <input type="date" className="campo" value={validade} onChange={(e) => setValidade(e.target.value)} />
+        </Campo>
+      </div>
+      <button className="btn-gigante" disabled={!produtoId || quantidade <= 0 || !validade} onClick={salvar}>
+        Registrar lote de produção
       </button>
     </div>
   );
@@ -211,6 +407,7 @@ export default function EstoquePage() {
   const [baixaQtd, setBaixaQtd] = useState(1);
   const [filtroTexto, setFiltroTexto] = useState("");
   const [filtroLocal, setFiltroLocal] = useState("");
+  const [registrandoProducao, setRegistrandoProducao] = useState(false);
 
   // Balanço
   const [tipoNovoBalanco, setTipoNovoBalanco] = useState<"insumos" | "produzidos">("insumos");
@@ -220,6 +417,7 @@ export default function EstoquePage() {
 
   const balancoAtivo = db.balancos.find((b) => b.status === "em_andamento");
   const caixaAtiva = db.caixas.find((c) => c.id === caixaAtivaId);
+  const loteCaixaAtiva = caixaAtiva ? loteDaCaixa(db, caixaAtiva.id) : undefined;
 
   // Janela de vencimentos configurável: atalhos (hoje/3/7/15 dias) ou data escolhida
   const [dataAlvoVencimento, setDataAlvoVencimento] = useState(() => hojeMais(3));
@@ -261,6 +459,7 @@ export default function EstoquePage() {
     const dbNovo = mutate((d) => {
       const c = d.caixas.find((x) => x.id === caixaAtiva.id);
       if (!c) return;
+      baixarLoteDaCaixa(d, caixaAtiva.id, quantidadeBaixa, agora);
       const nova = (c.quantidade ?? 0) - quantidadeBaixa;
       if (nova <= 0) {
         esvaziarCampos(c);
@@ -300,6 +499,7 @@ export default function EstoquePage() {
     const dbNovo = mutate((d) => {
       const c = d.caixas.find((x) => x.id === caixaAtiva.id);
       if (!c) return;
+      baixarLoteDaCaixa(d, caixaAtiva.id, restante, agora);
       esvaziarCampos(c);
       if (restante > 0) {
         d.movimentos_estoque.unshift({
@@ -344,8 +544,14 @@ export default function EstoquePage() {
   function salvarConferencia() {
     if (!balancoAtivo || !conferindoCaixaId) return;
     const caixa = db.caixas.find((c) => c.id === conferindoCaixaId);
-    if (!caixa) return;
-    mutate((d) => {
+    if (!caixa || !caixa.produto_id) return;
+    const produtoId = caixa.produto_id;
+    const agora = new Date().toISOString();
+    const dbNovo = mutate((d) => {
+      const caixaAtual = d.caixas.find((c) => c.id === conferindoCaixaId);
+      if (!caixaAtual) return;
+      const quantidadeAnterior = caixaAtual.quantidade ?? 0;
+      const delta = qtdEncontrada - quantidadeAnterior;
       const existente = d.balanco_itens.find(
         (i) => i.balanco_id === balancoAtivo.id && i.caixa_id === conferindoCaixaId
       );
@@ -360,40 +566,38 @@ export default function EstoquePage() {
           qtd_encontrada: qtdEncontrada,
         });
       }
-    });
-    setConferindoCaixaId(null);
-  }
-
-  function concluirBalanco() {
-    if (!balancoAtivo) return;
-    const agora = new Date().toISOString();
-    const itens = db.balanco_itens.filter((i) => i.balanco_id === balancoAtivo.id);
-    const diferencas = itens.filter((i) => i.qtd_encontrada !== i.qtd_esperada);
-    const produtosAfetados = new Set<string>();
-
-    const dbNovo = mutate((d) => {
-      diferencas.forEach((item) => {
-        const caixa = d.caixas.find((c) => c.id === item.caixa_id);
-        if (!caixa || !caixa.produto_id) return;
-        const delta = item.qtd_encontrada - item.qtd_esperada;
-        produtosAfetados.add(caixa.produto_id);
+      ajustarLoteDaCaixa(d, conferindoCaixaId, qtdEncontrada, agora);
+      caixaAtual.quantidade = qtdEncontrada;
+      caixaAtual.status = qtdEncontrada < quantidadeAnterior ? "em_uso" : caixaAtual.status;
+      caixaAtual.atualizado_em = agora;
+      if (delta !== 0) {
         d.movimentos_estoque.unshift({
           id: uid("mov"),
-          produto_id: caixa.produto_id,
-          caixa_id: caixa.id,
+          produto_id: produtoId,
+          caixa_id: conferindoCaixaId,
           tipo: "ajuste_balanco",
           quantidade: delta,
           usuario_id: usuarioId,
           criado_em: agora,
           sincronizado: false,
         });
-        if (item.qtd_encontrada <= 0) {
-          esvaziarCampos(caixa);
-        } else {
-          caixa.quantidade = item.qtd_encontrada;
-          caixa.atualizado_em = agora;
-        }
-      });
+      }
+    });
+    const produto = dbNovo.produtos.find((p) => p.id === produtoId);
+    enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, produtoId));
+    setConferindoCaixaId(null);
+  }
+
+  function concluirBalanco() {
+    if (!balancoAtivo) return;
+    const agora = new Date().toISOString();
+    mutate((d) => {
+      d.balanco_itens
+        .filter((i) => i.balanco_id === balancoAtivo.id && i.qtd_encontrada <= 0)
+        .forEach((item) => {
+          const caixa = d.caixas.find((c) => c.id === item.caixa_id);
+          if (caixa) esvaziarCampos(caixa);
+        });
       const bal = d.balancos.find((b) => b.id === balancoAtivo.id);
       if (bal) {
         bal.status = "concluido";
@@ -401,10 +605,6 @@ export default function EstoquePage() {
       }
     });
 
-    produtosAfetados.forEach((produtoId) => {
-      const produto = dbNovo.produtos.find((p) => p.id === produtoId);
-      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, produtoId));
-    });
     setResumoBalancoId(balancoAtivo.id);
   }
 
@@ -430,6 +630,7 @@ export default function EstoquePage() {
   const itensBalanco = balancoAtivo ? db.balanco_itens.filter((i) => i.balanco_id === balancoAtivo.id) : [];
   const diferencasBalanco = itensBalanco.filter((i) => i.qtd_encontrada !== i.qtd_esperada);
   const caixaConferindo = db.caixas.find((c) => c.id === conferindoCaixaId);
+  const lotesPendentes = lotesPendentesDeAlocacao(db);
 
   const resumoBalanco = resumoBalancoId ? db.balancos.find((b) => b.id === resumoBalancoId) : undefined;
   const resumoDiferencas = resumoBalancoId
@@ -456,6 +657,24 @@ export default function EstoquePage() {
           {balancoAtivo && <Badge cor="laranja">em andamento</Badge>}
         </button>
       </div>
+
+      {aba === "estoque" && (
+        <button className="btn-primario w-full sm:w-auto" onClick={() => setRegistrandoProducao(true)}>
+          <Plus size={18} /> Registrar produção para distribuir
+        </button>
+      )}
+
+      {aba === "estoque" && lotesPendentes.length > 0 && (
+        <Card className="border-2 border-destaque bg-destaque-clara">
+          <p className="flex items-center gap-2 font-bold text-destaque">
+            <TriangleAlert size={20} /> {lotesPendentes.length} {lotesPendentes.length === 1 ? "lote aguarda" : "lotes aguardam"} distribuição em caixa
+          </p>
+          <p className="mt-1 text-sm text-stone-700">
+            O saldo já está no estoque. Escaneie uma caixa vazia e escolha o lote para registrar sua
+            localização física sem gerar outra entrada.
+          </p>
+        </Card>
+      )}
 
       {/* Scanner — sempre visível */}
       <Card>
@@ -507,16 +726,21 @@ export default function EstoquePage() {
                       </p>
                     </div>
                     <div>
-                      <p className="rotulo">Envase</p>
+                      <p className="rotulo">{loteCaixaAtiva?.origem === "producao" ? "Preparo" : "Entrada"}</p>
                       <p className="font-semibold">{dataBR(caixaAtiva.data_envase)}</p>
                     </div>
                   </div>
+                  {loteCaixaAtiva?.origem === "producao" && (
+                    <p className="rounded-card bg-slate-50 px-3 py-2 text-sm">
+                      Porcionado por <strong>{nomePerfil(db, loteCaixaAtiva.porcionado_por_id)}</strong>
+                    </p>
+                  )}
 
                   {avisoFifo && (
                     <div className="flex items-start gap-2 rounded-card border-2 border-destaque bg-destaque-clara p-3">
                       <TriangleAlert size={24} className="mt-0.5 shrink-0 text-destaque" />
                       <p className="font-semibold text-destaque">
-                        Esta não é a caixa mais antiga! Use antes a caixa nº {avisoFifo.numero} —{" "}
+                        Esta não é a caixa prioritária! Use antes a caixa nº {avisoFifo.numero} —{" "}
                         {nomeLocal(db, avisoFifo.local_id)}.
                       </p>
                     </div>
@@ -821,18 +1045,40 @@ export default function EstoquePage() {
       >
         <div className="space-y-3">
           <p className="text-sm text-slate-600">
-            Esperado no sistema:{" "}
+            Quantidade registrada antes desta leitura:{" "}
             <span className="font-bold text-texto">
               {qtd(caixaConferindo?.quantidade, siglaUnidadeUso(db, caixaConferindo?.produto_id))}
             </span>
           </p>
-          <Campo rotulo="Quantidade encontrada na caixa">
+          <Campo rotulo="Quantidade restante na caixa">
             <CampoQuantidade valor={qtdEncontrada} onChange={setQtdEncontrada} />
           </Campo>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className="btn-secundario"
+              onClick={() => setQtdEncontrada(caixaConferindo?.quantidade ?? 0)}
+            >
+              Sem alteração
+            </button>
+            <button className="btn-secundario" onClick={() => setQtdEncontrada(0)}>
+              Caixa vazia
+            </button>
+          </div>
+          <p className="text-xs text-stone-500">
+            Ao salvar, o saldo da caixa, do lote e do estoque total será atualizado imediatamente.
+          </p>
           <button className="btn-gigante" onClick={salvarConferencia}>
-            <CircleCheck size={26} /> Salvar contagem
+            <CircleCheck size={26} /> Atualizar estoque
           </button>
         </div>
+      </Modal>
+
+      <Modal
+        aberto={registrandoProducao}
+        titulo="Novo lote de produção"
+        onFechar={() => setRegistrandoProducao(false)}
+      >
+        <FormRegistrarProducao db={db} usuarioId={usuarioId} aoConcluir={() => setRegistrandoProducao(false)} />
       </Modal>
     </div>
   );

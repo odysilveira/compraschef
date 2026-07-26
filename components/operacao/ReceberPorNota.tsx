@@ -5,14 +5,23 @@
 // toca ✓ Confirmar ou ✗ Recusar em cada item → entrada no estoque, nota no
 // financeiro (boletos liberados se tudo OK) e vínculo com o pedido do fornecedor.
 
-import { useState } from "react";
-import { ArrowLeft, CircleCheck, CircleX, FileUp, FlaskConical, ReceiptText } from "lucide-react";
-import { Badge, Campo, Card, Vazio } from "@/components/ui";
+import { useState, type FormEvent } from "react";
+import { ArrowLeft, Building2, CircleCheck, CircleX, FileUp, FlaskConical, PackagePlus, ReceiptText } from "lucide-react";
+import { Badge, Campo, Card, Modal, Vazio } from "@/components/ui";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import { estoqueAtual, mutate, nomeFornecedor, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
+import {
+  converterParaUnidadeUso,
+  codigoDeBarrasValido,
+  identificarProduto,
+  precoPorUnidadeUso,
+  registrarVinculoDaNota,
+  unidadePorSigla,
+} from "@/lib/domain/produtos";
+import { criarLote } from "@/lib/domain/estoque";
 import { moeda, dataBR, qtd } from "@/lib/format";
-import type { DB, StatusRecebimento } from "@/lib/types";
+import type { DB, Fornecedor, StatusRecebimento } from "@/lib/types";
 
 interface ItemNota {
   indice: number;
@@ -41,6 +50,19 @@ interface DecisaoItem {
   produtoId: string; // "" = não reconhecido / ignorar
 }
 
+interface CadastroProdutoNota {
+  indice: number;
+  nome: string;
+  codigoExterno: string;
+  categoria: string;
+  codigoBarras: string;
+  unidadeCompraId: string;
+  unidadeUsoId: string;
+  fatorConversao: number;
+  estoqueMinimo: number;
+  validadePadraoDias: number;
+}
+
 export interface ResultadoNota {
   status: StatusRecebimento;
   fornecedorNome: string;
@@ -53,12 +75,19 @@ function somenteDigitos(s: string): string {
   return s.replace(/\D/g, "");
 }
 
-function normalizar(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .trim();
+function formatarCnpj(valor: string): string {
+  const n = somenteDigitos(valor).slice(0, 14);
+  if (n.length !== 14) return valor;
+  return n.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+}
+
+function diasAte(data?: string): number | undefined {
+  if (!data) return undefined;
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const vencimento = new Date(`${data}T00:00:00`);
+  const dias = Math.round((vencimento.getTime() - hoje.getTime()) / 86_400_000);
+  return Number.isFinite(dias) && dias >= 0 ? dias : undefined;
 }
 
 function hojeMais(dias: number): string {
@@ -111,19 +140,14 @@ function lerNFe(xmlTexto: string): NotaLida | null {
   }
 }
 
-/** Tenta casar um item do XML com um produto cadastrado (EAN → código externo → nome). */
-function casarProduto(db: DB, item: ItemNota): string {
-  const porEan = item.cEAN && db.produtos.find((p) => p.ativo && p.codigo_barras === item.cEAN);
-  if (porEan) return porEan.id;
-  const porCodigo = item.cProd && db.produtos.find((p) => p.ativo && p.codigo_externo === item.cProd);
-  if (porCodigo) return porCodigo.id;
-  const nomeXml = normalizar(item.xProd);
-  const porNome = db.produtos.find((p) => {
-    if (!p.ativo) return false;
-    const nome = normalizar(p.nome);
-    return nome === nomeXml || nomeXml.includes(nome) || nome.includes(nomeXml);
-  });
-  return porNome?.id ?? "";
+/** Identifica sem confundir o cProd do fornecedor com o código do EaseEat. */
+function casarProduto(db: DB, item: ItemNota, fornecedorId?: string): string {
+  return identificarProduto(db, {
+    fornecedorId,
+    codigoFornecedor: item.cProd,
+    ean: item.cEAN,
+    nome: item.xProd,
+  }).produto?.id ?? "";
 }
 
 // Nota de demonstração: Frigorífico Boi Feliz entregando o filé mignon do pedido em aberto
@@ -162,7 +186,7 @@ function daNotaImportada(db: DB, notaId: string): { lida: NotaLida; decisoes: Re
   };
   const decisoes: Record<number, DecisaoItem> = {};
   for (const item of itens) {
-    const produtoId = casarProduto(db, item);
+    const produtoId = casarProduto(db, item, nf.fornecedor_id);
     const produto = db.produtos.find((p) => p.id === produtoId);
     decisoes[item.indice] = {
       decisao: "pendente",
@@ -192,6 +216,8 @@ export default function ReceberPorNota({
   const [nota, setNota] = useState<NotaLida | null>(inicial?.lida ?? null);
   const [decisoes, setDecisoes] = useState<Record<number, DecisaoItem>>(inicial?.decisoes ?? {});
   const [erro, setErro] = useState<string | null>(null);
+  const [fornecedorForm, setFornecedorForm] = useState<Fornecedor | null>(null);
+  const [produtoForm, setProdutoForm] = useState<CadastroProdutoNota | null>(null);
 
   const fornecedor = nota
     ? db.fornecedores.find((f) => somenteDigitos(f.cnpj) === somenteDigitos(nota.emitCnpj))
@@ -210,8 +236,11 @@ export default function ReceberPorNota({
     }
     setErro(null);
     const iniciais: Record<number, DecisaoItem> = {};
+    const fornecedorLido = db.fornecedores.find(
+      (f) => somenteDigitos(f.cnpj) === somenteDigitos(lida.emitCnpj)
+    );
     for (const item of lida.itens) {
-      const produtoId = casarProduto(db, item);
+      const produtoId = casarProduto(db, item, fornecedorLido?.id);
       const produto = db.produtos.find((p) => p.id === produtoId);
       iniciais[item.indice] = {
         decisao: "pendente",
@@ -231,6 +260,111 @@ export default function ReceberPorNota({
 
   function alterar(indice: number, mudanca: Partial<DecisaoItem>) {
     setDecisoes((atual) => ({ ...atual, [indice]: { ...atual[indice], ...mudanca } }));
+  }
+
+  function abrirCadastroFornecedor() {
+    if (!nota) return;
+    setFornecedorForm({
+      id: "",
+      nome: nota.emitNome,
+      cnpj: formatarCnpj(nota.emitCnpj),
+      forma_pagamento: "boleto",
+      prazo_boleto_dias: diasAte(nota.duplicatas[0]?.vencimento),
+      ativo: true,
+    });
+  }
+
+  function salvarFornecedor(e: FormEvent) {
+    e.preventDefault();
+    if (!nota || !fornecedorForm) return;
+    const fornecedorId = uid("forn");
+    const agora = new Date().toISOString();
+    mutate((d) => {
+      d.fornecedores.push({ ...fornecedorForm, id: fornecedorId });
+      for (const item of nota.itens) {
+        const produtoId = decisoes[item.indice]?.produtoId;
+        if (!produtoId) continue;
+        const unidadeOrigem = unidadePorSigla(d, item.uCom);
+        const produto = d.produtos.find((p) => p.id === produtoId);
+        registrarVinculoDaNota(d, {
+          idNovo: uid("fp"),
+          fornecedorId,
+          produtoId,
+          codigoFornecedor: item.cProd,
+          ean: item.cEAN,
+          unidadeCompraId: unidadeOrigem?.id,
+          fatorConversao:
+            produto && produto.unidade_compra_id === unidadeOrigem?.id ? produto.fator_conversao : undefined,
+          ultimoPreco: item.vUnCom,
+          atualizadoEm: agora,
+        });
+      }
+    });
+    setFornecedorForm(null);
+  }
+
+  function abrirCadastroProduto(item: ItemNota) {
+    const unidadeXml = unidadePorSigla(db, item.uCom);
+    const unidadePadrao = unidadeXml?.id ?? db.unidades[0]?.id ?? "";
+    setProdutoForm({
+      indice: item.indice,
+      nome: item.xProd,
+      codigoExterno: "",
+      categoria: "",
+      codigoBarras: codigoDeBarrasValido(item.cEAN) ?? "",
+      unidadeCompraId: unidadePadrao,
+      unidadeUsoId: unidadePadrao,
+      fatorConversao: 1,
+      estoqueMinimo: 0,
+      validadePadraoDias: 30,
+    });
+  }
+
+  function salvarProduto(e: FormEvent) {
+    e.preventDefault();
+    if (!nota || !produtoForm) return;
+    const item = nota.itens.find((i) => i.indice === produtoForm.indice);
+    if (!item) return;
+    const produtoId = uid("prod");
+    const agora = new Date().toISOString();
+    mutate((d) => {
+      d.produtos.push({
+        id: produtoId,
+        codigo_externo: produtoForm.codigoExterno.trim() || undefined,
+        nome: produtoForm.nome.trim(),
+        categoria: produtoForm.categoria.trim() || undefined,
+        tipo: "comprado",
+        unidade_compra_id: produtoForm.unidadeCompraId || undefined,
+        unidade_uso_id: produtoForm.unidadeUsoId,
+        fator_conversao: produtoForm.fatorConversao,
+        codigo_barras: produtoForm.codigoBarras.trim() || undefined,
+        estoque_minimo: produtoForm.estoqueMinimo,
+        validade_padrao_dias: produtoForm.validadePadraoDias,
+        ativo: true,
+      });
+      const fornecedorAtual = d.fornecedores.find(
+        (f) => somenteDigitos(f.cnpj) === somenteDigitos(nota.emitCnpj)
+      );
+      if (fornecedorAtual) {
+        registrarVinculoDaNota(d, {
+          idNovo: uid("fp"),
+          fornecedorId: fornecedorAtual.id,
+          produtoId,
+          codigoFornecedor: item.cProd,
+          ean: item.cEAN,
+          unidadeCompraId: produtoForm.unidadeCompraId || undefined,
+          fatorConversao: produtoForm.fatorConversao,
+          ultimoPreco: item.vUnCom,
+          atualizadoEm: agora,
+        });
+      }
+    });
+    alterar(item.indice, {
+      produtoId,
+      validade: hojeMais(produtoForm.validadePadraoDias),
+      decisao: "pendente",
+    });
+    setProdutoForm(null);
   }
 
   function finalizar() {
@@ -317,21 +451,61 @@ export default function ReceberPorNota({
         const recusado = dec.decisao === "recusado";
         const quantidade = recusado ? 0 : dec.quantidade;
         if (!dec.produtoId) continue; // item sem produto vinculado e não recusado: ignorado
+        const unidadeOrigem = unidadePorSigla(d, item.uCom);
+        if (fornecedor) {
+          const produto = d.produtos.find((p) => p.id === dec.produtoId);
+          registrarVinculoDaNota(d, {
+            idNovo: uid("fp"),
+            fornecedorId: fornecedor.id,
+            produtoId: dec.produtoId,
+            codigoFornecedor: item.cProd,
+            ean: item.cEAN,
+            unidadeCompraId: unidadeOrigem?.id,
+            fatorConversao:
+              produto && produto.unidade_compra_id === unidadeOrigem?.id ? produto.fator_conversao : undefined,
+            ultimoPreco: item.vUnCom,
+            atualizadoEm: agora,
+          });
+        }
+        const esperadaConvertida = converterParaUnidadeUso(d, dec.produtoId, item.qCom, {
+          unidadeOrigemId: unidadeOrigem?.id,
+          fornecedorId: fornecedor?.id,
+        });
+        const recebidaConvertida = converterParaUnidadeUso(d, dec.produtoId, quantidade, {
+          unidadeOrigemId: unidadeOrigem?.id,
+          fornecedorId: fornecedor?.id,
+        });
+        const recebimentoItemId = uid("ri");
         d.recebimento_itens.push({
-          id: uid("ri"),
+          id: recebimentoItemId,
           recebimento_id: recebimentoId,
           produto_id: dec.produtoId,
-          qtd_esperada: item.qCom,
-          qtd_recebida: quantidade,
+          qtd_esperada: esperadaConvertida.quantidadeUso,
+          qtd_recebida: recebidaConvertida.quantidadeUso,
+          qtd_esperada_origem: item.qCom,
+          qtd_recebida_origem: quantidade,
+          unidade_origem_id: unidadeOrigem?.id,
+          fator_conversao_aplicado: recebidaConvertida.fator,
           validade: recusado ? undefined : dec.validade || undefined,
           divergencia: recusado ? `Recusado no recebimento (${item.xProd})` : undefined,
         });
-        if (quantidade > 0) {
+        if (recebidaConvertida.quantidadeUso > 0) {
+          criarLote(d, {
+            id: uid("lote"),
+            produto_id: dec.produtoId,
+            recebimento_item_id: recebimentoItemId,
+            origem: "recebimento",
+            quantidade: recebidaConvertida.quantidadeUso,
+            data_entrada: hoje,
+            validade: dec.validade || undefined,
+            criado_em: agora,
+            atualizado_em: agora,
+          });
           d.movimentos_estoque.unshift({
             id: uid("mov"),
             produto_id: dec.produtoId,
             tipo: "entrada",
-            quantidade,
+            quantidade: recebidaConvertida.quantidadeUso,
             recebimento_id: recebimentoId,
             usuario_id: usuarioId,
             criado_em: agora,
@@ -342,7 +516,10 @@ export default function ReceberPorNota({
               id: uid("ph"),
               produto_id: dec.produtoId,
               fornecedor_id: fornecedor.id,
-              preco: item.vUnCom,
+              preco: precoPorUnidadeUso(d, dec.produtoId, item.vUnCom, {
+                unidadeOrigemId: unidadeOrigem?.id,
+                fornecedorId: fornecedor.id,
+              }),
               origem: "nota",
               data: hoje,
             });
@@ -361,7 +538,7 @@ export default function ReceberPorNota({
       const dec = decisoes[item.indice];
       if (!dec?.produtoId || dec.decisao !== "confirmado" || dec.quantidade <= 0) continue;
       const produto = dbNovo.produtos.find((p) => p.id === dec.produtoId);
-      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, dec.produtoId) + dec.quantidade);
+      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, dec.produtoId));
     }
 
     const totalBoletos = notaImportadaId
@@ -431,7 +608,12 @@ export default function ReceberPorNota({
             </p>
           </div>
           {!fornecedor && (
-            <Badge cor="laranja">Fornecedor não cadastrado (CNPJ {nota.emitCnpj || "?"})</Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge cor="laranja">Fornecedor não cadastrado (CNPJ {nota.emitCnpj || "?"})</Badge>
+              <button type="button" className="btn-secundario" onClick={abrirCadastroFornecedor}>
+                <Building2 size={17} /> Cadastrar fornecedor
+              </button>
+            </div>
           )}
         </div>
       </Card>
@@ -439,7 +621,7 @@ export default function ReceberPorNota({
       {semProduto.length > 0 && (
         <p className="rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
           {semProduto.length === 1 ? "1 item da nota não foi reconhecido" : `${semProduto.length} itens da nota não foram reconhecidos`}{" "}
-          — escolha o produto correspondente ou recuse o item.
+          — escolha um produto, cadastre-o como novo ou recuse o item.
         </p>
       )}
 
@@ -498,6 +680,12 @@ export default function ReceberPorNota({
                 </select>
               </Campo>
 
+              {!dec.produtoId && !recusado && (
+                <button type="button" className="btn-secundario w-full" onClick={() => abrirCadastroProduto(item)}>
+                  <PackagePlus size={18} /> Cadastrar como novo produto
+                </button>
+              )}
+
               {!recusado && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Campo rotulo="Quantidade recebida">
@@ -551,6 +739,191 @@ export default function ReceberPorNota({
       <button className="btn-secundario w-full" onClick={onVoltar}>
         <ArrowLeft size={18} /> Cancelar
       </button>
+
+      <Modal aberto={fornecedorForm !== null} titulo="Cadastrar fornecedor da nota" onFechar={() => setFornecedorForm(null)}>
+        {fornecedorForm && (
+          <form onSubmit={salvarFornecedor} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <Campo rotulo="Nome *">
+                <input
+                  className="campo"
+                  required
+                  value={fornecedorForm.nome}
+                  onChange={(e) => setFornecedorForm({ ...fornecedorForm, nome: e.target.value })}
+                />
+              </Campo>
+            </div>
+            <Campo rotulo="CNPJ *">
+              <input
+                className="campo"
+                required
+                value={fornecedorForm.cnpj}
+                onChange={(e) => setFornecedorForm({ ...fornecedorForm, cnpj: e.target.value })}
+              />
+            </Campo>
+            <Campo rotulo="Código no EaseEat">
+              <input
+                className="campo"
+                placeholder="opcional"
+                value={fornecedorForm.codigo_externo ?? ""}
+                onChange={(e) =>
+                  setFornecedorForm({ ...fornecedorForm, codigo_externo: e.target.value || undefined })
+                }
+              />
+            </Campo>
+            <Campo rotulo="Forma de pagamento *">
+              <select
+                className="campo"
+                value={fornecedorForm.forma_pagamento}
+                onChange={(e) =>
+                  setFornecedorForm({
+                    ...fornecedorForm,
+                    forma_pagamento: e.target.value as Fornecedor["forma_pagamento"],
+                    ...(e.target.value === "pix" ? { prazo_boleto_dias: undefined } : {}),
+                  })
+                }
+              >
+                <option value="boleto">Boleto</option>
+                <option value="pix">Pix</option>
+              </select>
+            </Campo>
+            {fornecedorForm.forma_pagamento === "boleto" && (
+              <Campo rotulo="Prazo do boleto (dias)">
+                <input
+                  type="number"
+                  min={0}
+                  className="campo"
+                  value={fornecedorForm.prazo_boleto_dias ?? ""}
+                  onChange={(e) =>
+                    setFornecedorForm({
+                      ...fornecedorForm,
+                      prazo_boleto_dias: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                />
+              </Campo>
+            )}
+            <p className="text-xs text-slate-500 sm:col-span-2">
+              Nome e CNPJ vieram do XML. O código do EaseEat pode ficar vazio e ser informado depois.
+            </p>
+            <div className="flex justify-end gap-2 sm:col-span-2">
+              <button type="button" className="btn-secundario" onClick={() => setFornecedorForm(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                <Building2 size={18} /> Salvar fornecedor
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal aberto={produtoForm !== null} titulo="Cadastrar produto da nota" onFechar={() => setProdutoForm(null)}>
+        {produtoForm && (
+          <form onSubmit={salvarProduto} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <Campo rotulo="Nome *">
+                <input
+                  className="campo"
+                  required
+                  value={produtoForm.nome}
+                  onChange={(e) => setProdutoForm({ ...produtoForm, nome: e.target.value })}
+                />
+              </Campo>
+            </div>
+            <Campo rotulo="Categoria">
+              <input
+                className="campo"
+                placeholder="ex.: mercearia"
+                value={produtoForm.categoria}
+                onChange={(e) => setProdutoForm({ ...produtoForm, categoria: e.target.value })}
+              />
+            </Campo>
+            <Campo rotulo="Código no EaseEat">
+              <input
+                className="campo"
+                placeholder="opcional"
+                value={produtoForm.codigoExterno}
+                onChange={(e) => setProdutoForm({ ...produtoForm, codigoExterno: e.target.value })}
+              />
+            </Campo>
+            <Campo rotulo="Código de barras">
+              <input
+                className="campo"
+                value={produtoForm.codigoBarras}
+                onChange={(e) => setProdutoForm({ ...produtoForm, codigoBarras: e.target.value })}
+              />
+            </Campo>
+            <Campo rotulo={`Unidade de compra (XML: ${nota.itens.find((i) => i.indice === produtoForm.indice)?.uCom || "—"}) *`}>
+              <select
+                className="campo"
+                required
+                value={produtoForm.unidadeCompraId}
+                onChange={(e) => setProdutoForm({ ...produtoForm, unidadeCompraId: e.target.value })}
+              >
+                {db.unidades.map((u) => (
+                  <option key={u.id} value={u.id}>{u.nome} ({u.sigla})</option>
+                ))}
+              </select>
+            </Campo>
+            <Campo rotulo="Unidade de uso no estoque *">
+              <select
+                className="campo"
+                required
+                value={produtoForm.unidadeUsoId}
+                onChange={(e) => setProdutoForm({ ...produtoForm, unidadeUsoId: e.target.value })}
+              >
+                {db.unidades.map((u) => (
+                  <option key={u.id} value={u.id}>{u.nome} ({u.sigla})</option>
+                ))}
+              </select>
+            </Campo>
+            <Campo rotulo="Fator de conversão *">
+              <input
+                type="number"
+                min="0.000001"
+                step="any"
+                required
+                className="campo"
+                value={produtoForm.fatorConversao}
+                onChange={(e) => setProdutoForm({ ...produtoForm, fatorConversao: Number(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Estoque mínimo *">
+              <input
+                type="number"
+                min={0}
+                step="any"
+                required
+                className="campo"
+                value={produtoForm.estoqueMinimo}
+                onChange={(e) => setProdutoForm({ ...produtoForm, estoqueMinimo: Number(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Validade padrão (dias) *">
+              <input
+                type="number"
+                min={0}
+                required
+                className="campo"
+                value={produtoForm.validadePadraoDias}
+                onChange={(e) => setProdutoForm({ ...produtoForm, validadePadraoDias: Number(e.target.value) })}
+              />
+            </Campo>
+            <p className="text-xs text-slate-500 sm:col-span-2">
+              O código do item no fornecedor ({nota.itens.find((i) => i.indice === produtoForm.indice)?.cProd || "não informado"}) será vinculado automaticamente. O fator indica quantas unidades de uso entram no estoque para cada unidade comprada.
+            </p>
+            <div className="flex justify-end gap-2 sm:col-span-2">
+              <button type="button" className="btn-secundario" onClick={() => setProdutoForm(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                <PackagePlus size={18} /> Salvar produto
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }

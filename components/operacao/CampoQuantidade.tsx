@@ -10,9 +10,10 @@ interface Props {
   onChange: (novo: number) => void;
   passo?: number;
   min?: number;
+  disabled?: boolean;
 }
 
-export default function CampoQuantidade({ valor, onChange, passo = 1, min = 0 }: Props) {
+export default function CampoQuantidade({ valor, onChange, passo = 1, min = 0, disabled = false }: Props) {
   function ajustar(delta: number) {
     const novo = Math.max(min, Math.round((valor + delta) * 100) / 100);
     onChange(novo);
@@ -22,6 +23,7 @@ export default function CampoQuantidade({ valor, onChange, passo = 1, min = 0 }:
     <div className="flex items-stretch gap-2">
       <button
         type="button"
+        disabled={disabled}
         className="btn-secundario min-w-[56px] px-0 py-3"
         onClick={() => ajustar(-passo)}
         aria-label="Diminuir"
@@ -33,6 +35,7 @@ export default function CampoQuantidade({ valor, onChange, passo = 1, min = 0 }:
         inputMode="decimal"
         step="any"
         min={min}
+        disabled={disabled}
         className="campo min-w-0 flex-1 py-3 text-center text-2xl font-bold"
         value={Number.isFinite(valor) ? valor : ""}
         onChange={(e) => {
@@ -42,6 +45,7 @@ export default function CampoQuantidade({ valor, onChange, passo = 1, min = 0 }:
       />
       <button
         type="button"
+        disabled={disabled}
         className="btn-secundario min-w-[56px] px-0 py-3"
         onClick={() => ajustar(passo)}
         aria-label="Aumentar"

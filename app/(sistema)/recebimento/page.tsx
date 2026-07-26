@@ -30,6 +30,8 @@ import {
   useDB,
 } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
+import { converterParaUnidadeUso, precoPorUnidadeUso } from "@/lib/domain/produtos";
+import { criarLote } from "@/lib/domain/estoque";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { dataBR, moeda, qtd } from "@/lib/format";
 import type { StatusRecebimento } from "@/lib/types";
@@ -190,22 +192,46 @@ export default function RecebimentoPage() {
       itensPedido.forEach((item) => {
         const c = conferencia[item.id];
         if (!c) return;
+        const esperadaConvertida = converterParaUnidadeUso(d, item.produto_id, item.quantidade, {
+          unidadeOrigemId: item.unidade_id,
+          fornecedorId: pedido.fornecedor_id,
+        });
+        const recebidaConvertida = converterParaUnidadeUso(d, item.produto_id, c.recebida, {
+          unidadeOrigemId: item.unidade_id,
+          fornecedorId: pedido.fornecedor_id,
+        });
+        const recebimentoItemId = uid("ri");
         d.recebimento_itens.push({
-          id: uid("ri"),
+          id: recebimentoItemId,
           recebimento_id: recebimentoId,
           produto_id: item.produto_id,
-          qtd_esperada: item.quantidade,
-          qtd_recebida: c.recebida,
+          qtd_esperada: esperadaConvertida.quantidadeUso,
+          qtd_recebida: recebidaConvertida.quantidadeUso,
+          qtd_esperada_origem: item.quantidade,
+          qtd_recebida_origem: c.recebida,
+          unidade_origem_id: item.unidade_id,
+          fator_conversao_aplicado: recebidaConvertida.fator,
           validade: c.validade || undefined,
           divergencia: c.divergencia.trim() || undefined,
           foto_url: c.foto_url,
         });
-        if (c.recebida > 0) {
+        if (recebidaConvertida.quantidadeUso > 0) {
+          criarLote(d, {
+            id: uid("lote"),
+            produto_id: item.produto_id,
+            recebimento_item_id: recebimentoItemId,
+            origem: "recebimento",
+            quantidade: recebidaConvertida.quantidadeUso,
+            data_entrada: agora.slice(0, 10),
+            validade: c.validade || undefined,
+            criado_em: agora,
+            atualizado_em: agora,
+          });
           d.movimentos_estoque.unshift({
             id: uid("mov"),
             produto_id: item.produto_id,
             tipo: "entrada",
-            quantidade: c.recebida,
+            quantidade: recebidaConvertida.quantidadeUso,
             recebimento_id: recebimentoId,
             usuario_id: usuarioId,
             criado_em: agora,
@@ -217,7 +243,10 @@ export default function RecebimentoPage() {
               id: uid("ph"),
               produto_id: item.produto_id,
               fornecedor_id: pedido.fornecedor_id,
-              preco: item.preco_unitario,
+              preco: precoPorUnidadeUso(d, item.produto_id, item.preco_unitario, {
+                unidadeOrigemId: item.unidade_id,
+                fornecedorId: pedido.fornecedor_id,
+              }),
               origem: "nota",
               data: agora.slice(0, 10),
             });
@@ -252,7 +281,7 @@ export default function RecebimentoPage() {
       const c = conferencia[item.id];
       if (!c || c.recebida <= 0) return;
       const produto = dbNovo.produtos.find((p) => p.id === item.produto_id);
-      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, item.produto_id) + c.recebida);
+      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, item.produto_id));
     });
 
     setResultado({ status, temNota: Boolean(nota), boletosLiberados });

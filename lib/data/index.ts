@@ -7,7 +7,8 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { Caixa, DB, Produto } from "@/lib/types";
 import { seedDB } from "./seed";
-import { LOCAL_ESTOQUE_SECO, produtosReais, UNIDADE_SACO } from "./catalogo";
+import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_SACO } from "./catalogo";
+import { compararPrioridadeConsumo, saldoDosLotes } from "@/lib/domain/estoque";
 
 const STORAGE_KEY = "compraschef-db-v1";
 
@@ -30,12 +31,69 @@ function persist() {
 /** Acrescenta ao banco salvo itens novos do catálogo (idempotente — nada é sobrescrito). */
 function atualizarComNovidades(db: DB): boolean {
   let mudou = false;
+  // Migração do mock anterior: transforma cada caixa ocupada em um lote canônico,
+  // preservando exatamente o saldo que já estava salvo no navegador.
+  if (!Array.isArray(db.lotes_estoque)) {
+    db.lotes_estoque = db.caixas
+      .filter((c) => c.status !== "vazia" && c.produto_id && (c.quantidade ?? 0) > 0)
+      .map((c) => ({
+        id: `lote-migrado-${c.id}`,
+        produto_id: c.produto_id!,
+        origem: "manual" as const,
+        quantidade_inicial: c.quantidade!,
+        quantidade_atual: c.quantidade!,
+        data_entrada: c.data_envase ?? c.atualizado_em.slice(0, 10),
+        validade: c.validade,
+        criado_em: c.atualizado_em,
+        atualizado_em: c.atualizado_em,
+      }));
+    mudou = true;
+  }
+  for (const lote of db.lotes_estoque) {
+    if (!lote.origem) {
+      const produto = db.produtos.find((p) => p.id === lote.produto_id);
+      lote.origem = lote.recebimento_item_id ? "recebimento" : produto?.tipo === "produzido" ? "producao" : "manual";
+      mudou = true;
+    }
+  }
+  if (!Array.isArray(db.alocacoes_caixa)) {
+    type LoteLegado = (typeof db.lotes_estoque)[number] & { caixa_id?: string; local_id?: string };
+    db.alocacoes_caixa = db.caixas
+      .filter((c) => c.status !== "vazia" && c.produto_id && (c.quantidade ?? 0) > 0)
+      .map((c) => {
+        const legado = db.lotes_estoque.find((l) => (l as LoteLegado).caixa_id === c.id);
+        const lote = legado ?? db.lotes_estoque.find(
+          (l) => l.produto_id === c.produto_id && l.quantidade_atual === c.quantidade
+        );
+        return {
+          id: `aloc-migrada-${c.id}`,
+          lote_id: lote?.id ?? `lote-migrado-${c.id}`,
+          caixa_id: c.id,
+          quantidade_inicial: c.quantidade!,
+          quantidade_atual: c.quantidade!,
+          criado_em: c.atualizado_em,
+          atualizado_em: c.atualizado_em,
+        };
+      });
+    for (const lote of db.lotes_estoque as LoteLegado[]) {
+      delete lote.caixa_id;
+      delete lote.local_id;
+    }
+    mudou = true;
+  }
   if (!db.unidades.some((u) => u.id === UNIDADE_SACO.id)) {
     db.unidades.push({ ...UNIDADE_SACO });
     mudou = true;
   }
   if (!db.locais.some((l) => l.id === LOCAL_ESTOQUE_SECO.id)) {
     db.locais.push({ ...LOCAL_ESTOQUE_SECO });
+    mudou = true;
+  }
+  const jaTemGeladeira2 = db.locais.some(
+    (l) => l.id === LOCAL_GELADEIRA_2.id || l.nome.trim().toLocaleLowerCase("pt-BR") === "geladeira 2"
+  );
+  if (!jaTemGeladeira2) {
+    db.locais.push({ ...LOCAL_GELADEIRA_2 });
     mudou = true;
   }
   for (const produto of produtosReais()) {
@@ -125,11 +183,9 @@ export function useDB(): DB {
 
 // ---------- Helpers de domínio ----------
 
-/** Estoque atual de um produto (soma das caixas cheias/em uso), na unidade de uso. */
+/** Estoque atual de um produto (soma dos lotes, alocados ou ainda pendentes), na unidade de uso. */
 export function estoqueAtual(db: DB, produtoId: string): number {
-  return db.caixas
-    .filter((c) => c.produto_id === produtoId && c.status !== "vazia")
-    .reduce((soma, c) => soma + (c.quantidade ?? 0), 0);
+  return saldoDosLotes(db, produtoId);
 }
 
 /** Produtos com estoque abaixo do mínimo. */
@@ -140,11 +196,11 @@ export function produtosAbaixoDoMinimo(db: DB): { produto: Produto; estoque: num
     .filter(({ produto, estoque }) => estoque < produto.estoque_minimo);
 }
 
-/** Caixa que deve ser usada primeiro (FIFO — envase mais antigo) para um produto. */
+/** Caixa que deve ser usada primeiro: menor validade (FEFO), depois preparo/entrada mais antigo (FIFO). */
 export function caixaFifo(db: DB, produtoId: string): Caixa | undefined {
   return db.caixas
     .filter((c) => c.produto_id === produtoId && c.status !== "vazia" && (c.quantidade ?? 0) > 0)
-    .sort((a, b) => (a.data_envase ?? "").localeCompare(b.data_envase ?? ""))[0];
+    .sort(compararPrioridadeConsumo)[0];
 }
 
 /** Caixas com validade nos próximos `dias` dias (inclui vencidas). */

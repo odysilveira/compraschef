@@ -49,18 +49,19 @@ Módulo: Recebimento
 33. O sistema deve registrar divergências (falta, sobra, produto errado) e validades dos itens recebidos
 34. A conferência OK deve gerar automaticamente a entrada no estoque e registrar o preço pago no histórico
 35. O recebimento pode ser feito por gerente, líderes de cozinha ou responsável pelo caixa
+35a. Fornecedores e produtos não reconhecidos no XML devem poder ser cadastrados durante a conferência, gravando o vínculo de código do fornecedor/EAN para reconhecimento futuro
 
 Módulo: Estoque por Caixas
-36. O sistema deve permitir encher uma caixa (escanear QR + informar produto, quantidade, data e validade) e esvaziá-la para reuso
+36. O sistema deve permitir encher uma caixa (escanear QR da caixa + código de barras do produto + informar quantidade e validade) e esvaziá-la para reuso; uma caixa ativa não mistura produtos ou validades
 37. A baixa de estoque deve ser feita escaneando o QR da caixa
-38. O sistema deve indicar qual caixa usar primeiro (mais antiga — FIFO) e onde ela está, alertando se a caixa escaneada não for a mais antiga
+38. O sistema deve indicar qual caixa usar primeiro (menor validade — FEFO; em empate, mais antiga — FIFO) e onde ela está, alertando se outra caixa for escaneada
 39. O sistema deve alertar validades próximas do vencimento, incluindo produtos de produção própria
-40. O sistema deve registrar produtos produzidos (bolonhesa, massas, risotos) como entrada de estoque, consumindo insumos conforme a ficha técnica consultada no ERP parceiro
+40. O sistema deve registrar um lote total de produtos produzidos (bolonhesa, massas, risotos), contado em sacos/porções G ou P, identificar quem porcionou, permitir distribuí-lo entre várias caixas e futuramente consumir insumos conforme a ficha técnica consultada no ERP parceiro
 41. O sistema deve manter o estoque em unidade de uso, convertendo automaticamente da unidade de compra
 
 Módulo: Balanço
 42. O sistema deve permitir balanço por leitura de QR: semanal (insumos) e a cada 2 dias (produtos acabados)
-43. O sistema deve comparar esperado × encontrado e exibir somente as diferenças
+43. Ao ler cada caixa, o sistema deve permitir informar a quantidade restante, atualizar imediatamente caixa, lote e estoque total, comparar esperado × encontrado e exibir somente as diferenças
 44. Ajustes de balanço devem gerar movimentos de estoque auditáveis (quem, quando, quanto)
 
 Módulo: Painel e Relatórios

@@ -491,6 +491,8 @@ export interface DB {
   balanco_itens: BalancoItem[];
   precos_historico: PrecoHistorico[];
   integracao_eventos: IntegracaoEvento[];
+  fichas_tecnicas_receitas?: ReceitaFichaTecnica[];
+  fichas_tecnicas_versoes?: ReceitaFichaTecnicaVersao[];
   fichas_tecnicas?: FichaTecnica[];
   ficha_tecnica_custo_snapshots?: FichaTecnicaCustoSnapshot[];
 }
@@ -568,6 +570,28 @@ export interface FichaTecnica {
   alergenicos: FichaTecnicaAlergenicos;
   informacao_nutricional?: InformacaoNutricional;
   pegada_carbono?: PegadaCarbono;
+  criado_em: string; // ISO datetime
+  atualizado_em: string; // ISO datetime
+}
+
+export interface ReceitaFichaTecnica {
+  id: string;
+  codigo: string;
+  nome: string;
+  descricao?: string;
+  versao_vigente_id?: string;
+  criado_em: string; // ISO datetime
+  atualizado_em: string; // ISO datetime
+}
+
+export interface ReceitaFichaTecnicaVersao {
+  id: string;
+  receita_id: string;
+  numero_versao: string;
+  status: FichaTecnicaStatus;
+  ficha: FichaTecnica;
+  publicada_em?: string; // ISO datetime
+  snapshot_custo_id?: string;
   criado_em: string; // ISO datetime
   atualizado_em: string; // ISO datetime
 }

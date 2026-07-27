@@ -31,9 +31,104 @@ function persist() {
   }
 }
 
+/** Garante as coleções de fichas técnicas no banco local (retrocompatível e idempotente). */
+export function migrarColecoesFichasTecnicas(db: DB): boolean {
+  let mudou = false;
+
+  if (!Array.isArray(db.fichas_tecnicas_receitas)) {
+    db.fichas_tecnicas_receitas = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.fichas_tecnicas_versoes)) {
+    db.fichas_tecnicas_versoes = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.ficha_tecnica_custo_snapshots)) {
+    db.ficha_tecnica_custo_snapshots = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.fichas_tecnicas) || db.fichas_tecnicas.length === 0) {
+    return mudou;
+  }
+
+  for (const fichaLegada of db.fichas_tecnicas) {
+    const receitaId = fichaLegada.id;
+    const codigoReceita = fichaLegada.codigo_externo?.trim() || `FT-${fichaLegada.id}`;
+
+    if (!db.fichas_tecnicas_receitas.some((r) => r.id === receitaId)) {
+      db.fichas_tecnicas_receitas.push({
+        id: receitaId,
+        codigo: codigoReceita,
+        nome: fichaLegada.nome,
+        descricao: fichaLegada.descricao,
+        versao_vigente_id: fichaLegada.status === "publicada" ? fichaLegada.id : undefined,
+        criado_por: "migração-legado",
+        atualizado_por: "migração-legado",
+        criado_em: fichaLegada.criado_em,
+        atualizado_em: fichaLegada.atualizado_em,
+      });
+      mudou = true;
+    }
+
+    const versaoExiste = db.fichas_tecnicas_versoes.some((v) => v.id === fichaLegada.id);
+    if (!versaoExiste) {
+      db.fichas_tecnicas_versoes.push({
+        id: fichaLegada.id,
+        receita_id: receitaId,
+        numero_versao: fichaLegada.versao,
+        status: fichaLegada.status,
+        rendimento_total: fichaLegada.rendimento_quantidade,
+        unidade_rendimento: fichaLegada.rendimento_unidade_id,
+        configuracoes_porcionamento: fichaLegada.porcoes_config?.quantidade_porcoes
+          ? [
+              {
+                id: "config-legado",
+                nome: "Porção padrão",
+                quantidade_por_porcao:
+                  fichaLegada.rendimento_quantidade / fichaLegada.porcoes_config.quantidade_porcoes,
+                unidade:
+                  fichaLegada.porcoes_config.unidade_porcao_id ?? fichaLegada.rendimento_unidade_id,
+                quantidade_porcoes_teorica: fichaLegada.porcoes_config.quantidade_porcoes,
+                ativa: true,
+              },
+            ]
+          : [],
+        ficha: structuredClone(fichaLegada),
+        criado_por: "migração-legado",
+        atualizado_por: "migração-legado",
+        publicado_por: fichaLegada.status === "publicada" ? "migração-legado" : undefined,
+        publicada_em: fichaLegada.status === "publicada" ? fichaLegada.atualizado_em : undefined,
+        criado_em: fichaLegada.criado_em,
+        atualizado_em: fichaLegada.atualizado_em,
+        historico: [
+          {
+            id: `hist-legado-${fichaLegada.id}`,
+            versao_id: fichaLegada.id,
+            acao: "criacao",
+            responsavel: "migração-legado",
+            em: fichaLegada.criado_em,
+            detalhes: "Registro importado do formato legado.",
+          },
+        ],
+      });
+      mudou = true;
+    }
+  }
+
+  return mudou;
+}
+
 /** Acrescenta ao banco salvo itens novos do catálogo (idempotente — nada é sobrescrito). */
 export function atualizarComNovidades(db: DB): boolean {
   let mudou = false;
+
+  if (migrarColecoesFichasTecnicas(db)) {
+    mudou = true;
+  }
+
   // Migração do mock anterior: transforma cada caixa ocupada em um lote canônico,
   // preservando exatamente o saldo que já estava salvo no navegador.
   if (!Array.isArray(db.lotes_estoque)) {
@@ -272,6 +367,14 @@ export function subscribe(cb: () => void): () => void {
 }
 
 export function getDB(): DB {
+  return current;
+}
+
+/** Substitui o banco por completo em uma única gravação (persist + notificação). */
+export function substituirDB(next: DB): DB {
+  current = next;
+  persist();
+  emit();
   return current;
 }
 

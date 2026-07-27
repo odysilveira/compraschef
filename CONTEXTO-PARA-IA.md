@@ -57,6 +57,11 @@ localStorage**, com a MESMA forma dos tipos do Supabase, para trocar depois sem 
   `consumoMedioDiario`, `precoMedioHistorico`, `precoForaDoPadrao`, `siglaParaItem`, lookups).
   `atualizarComNovidades()` faz "upsert" idempotente de itens novos do catálogo em bancos
   já salvos no navegador (para o demo evoluir sem perder o que o usuário digitou).
+- Etapa 1C (fichas técnicas): arquitetura em 3 camadas.
+  Domínio puro em `lib/domain/fichas-tecnicas.ts` (sem localStorage),
+  contrato em `lib/domain/fichas-tecnicas-repositorio.ts` e adaptador local em
+  `lib/domain/fichas-tecnicas-repositorio-local.ts`, usando o mesmo objeto central do banco mock.
+  Migração retrocompatível no `lib/data/index.ts` inicializa coleções ausentes de fichas.
 - `lib/supabase.ts` — cliente pronto; ativa sozinho quando `.env.local` tiver as chaves
   (`supabaseConfigurado`). Enquanto vazio, usa mock.
 - `lib/roles.tsx` — papéis (dono/gerente/lider/caixa) via seletor no rodapé do menu

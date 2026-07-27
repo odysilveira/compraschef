@@ -3,6 +3,7 @@ import type {
   ReceitaFichaTecnica,
   ReceitaFichaTecnicaVersao,
   FichaTecnica,
+  TipoReceitaFichaTecnica,
 } from "../types";
 
 export interface NovaReceitaFichaTecnica {
@@ -10,7 +11,24 @@ export interface NovaReceitaFichaTecnica {
   codigo: string;
   nome: string;
   descricao?: string;
+  tipo?: TipoReceitaFichaTecnica;
+  categoria_id?: string;
   criado_por?: string;
+}
+
+export interface NovoRascunhoBasicoFichaTecnica {
+  codigo: string;
+  nome: string;
+  tipo: TipoReceitaFichaTecnica;
+  categoria_id?: string;
+  descricao?: string;
+  criado_por: string;
+  rendimento_unidade_id: string;
+}
+
+export interface ResultadoCriacaoRascunhoBasicoFichaTecnica {
+  receita: ReceitaFichaTecnica;
+  versao: ReceitaFichaTecnicaVersao;
 }
 
 export interface NovaVersaoRascunhoFichaTecnica {
@@ -31,6 +49,9 @@ export interface RepositorioFichasTecnicas {
   buscarReceitaPorId(receitaId: string): ReceitaFichaTecnica | undefined;
   buscarReceitaPorCodigo(codigo: string): ReceitaFichaTecnica | undefined;
   salvarNovaReceita(novaReceita: NovaReceitaFichaTecnica): ReceitaFichaTecnica;
+  criarRascunhoBasico(
+    novoRascunho: NovoRascunhoBasicoFichaTecnica
+  ): ResultadoCriacaoRascunhoBasicoFichaTecnica;
   atualizarRascunho(
     versaoId: string,
     atualizacoes: Partial<Omit<FichaTecnica, "id" | "versao" | "criado_em">>,

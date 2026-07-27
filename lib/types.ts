@@ -499,6 +499,8 @@ export interface DB {
 
 export type FichaTecnicaStatus = "rascunho" | "publicada" | "arquivada";
 
+export type TipoReceitaFichaTecnica = "prato" | "sub_receita";
+
 export type TipoIngrediente = "PRODUTO" | "SUB_RECEITA";
 
 export type PresencaAlergenico = "CONTEM" | "PODE_CONTER" | "NAO_INFORMADO";
@@ -614,6 +616,8 @@ export interface ReceitaFichaTecnica {
   codigo: string;
   nome: string;
   descricao?: string;
+  tipo?: TipoReceitaFichaTecnica;
+  categoria_id?: string;
   versao_vigente_id?: string;
   criado_por?: string;
   atualizado_por?: string;

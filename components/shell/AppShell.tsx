@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  BookOpenText,
 } from "lucide-react";
 import { PapelProvider, usePapel, podeVerValores, ROTULO_PAPEL } from "@/lib/roles";
 import { useDB } from "@/lib/data";
@@ -65,7 +66,10 @@ const MENU: SecaoMenu[] = [
   },
   {
     titulo: "Sistema",
-    itens: [{ href: "/cadastros", rotulo: "Cadastros", icone: FolderCog }],
+    itens: [
+      { href: "/cadastros", rotulo: "Cadastros", icone: FolderCog },
+      { href: "/fichas-tecnicas", rotulo: "Fichas técnicas", icone: BookOpenText },
+    ],
   },
 ];
 

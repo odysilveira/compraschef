@@ -8,9 +8,11 @@ import {
 } from "./fichas-tecnicas";
 import type {
   ContextoOperacaoFichaTecnica,
+  NovoRascunhoBasicoFichaTecnica,
   NovaReceitaFichaTecnica,
   NovaVersaoRascunhoFichaTecnica,
   RepositorioFichasTecnicas,
+  ResultadoCriacaoRascunhoBasicoFichaTecnica,
 } from "./fichas-tecnicas-repositorio";
 import { getDB, migrarColecoesFichasTecnicas, substituirDB, uid } from "../data/index";
 import type {
@@ -21,6 +23,7 @@ import type {
   FichaTecnicaIngrediente,
   ReceitaFichaTecnica,
   ReceitaFichaTecnicaVersao,
+  TipoReceitaFichaTecnica,
 } from "../types";
 
 export interface PersistenciaBancoLocal {
@@ -38,6 +41,24 @@ function agoraIso(): string {
 
 function normalizarCodigo(codigo: string): string {
   return codigo.trim().toLocaleLowerCase("pt-BR");
+}
+
+function tipoReceitaNormalizado(tipo?: TipoReceitaFichaTecnica): TipoReceitaFichaTecnica {
+  return tipo ?? "prato";
+}
+
+function alergenicosNaoInformados(): FichaTecnica["alergenicos"] {
+  return {
+    gluten: "NAO_INFORMADO",
+    lactose: "NAO_INFORMADO",
+    ovos: "NAO_INFORMADO",
+    peixes: "NAO_INFORMADO",
+    crustaceos: "NAO_INFORMADO",
+    soja: "NAO_INFORMADO",
+    castanhas: "NAO_INFORMADO",
+    amendoim: "NAO_INFORMADO",
+    outros: [],
+  };
 }
 
 function garantirColecoes(db: DB): {
@@ -92,6 +113,32 @@ function validarDadosBase(novaReceita: NovaReceitaFichaTecnica): void {
   }
   if (!novaReceita.criado_por?.trim()) {
     throw new Error("Responsável de criação da receita é obrigatório.");
+  }
+
+  if (novaReceita.tipo && novaReceita.tipo !== "prato" && novaReceita.tipo !== "sub_receita") {
+    throw new Error(`Tipo de receita inválido: ${novaReceita.tipo}.`);
+  }
+}
+
+function validarNovoRascunhoBasico(novoRascunho: NovoRascunhoBasicoFichaTecnica): void {
+  if (!novoRascunho.codigo.trim()) {
+    throw new Error("Código da receita é obrigatório.");
+  }
+
+  if (!novoRascunho.nome.trim()) {
+    throw new Error("Nome da receita é obrigatório.");
+  }
+
+  if (!novoRascunho.criado_por?.trim()) {
+    throw new Error("Responsável de criação da receita é obrigatório.");
+  }
+
+  if (!novoRascunho.rendimento_unidade_id.trim()) {
+    throw new Error("Unidade de rendimento inicial é obrigatória.");
+  }
+
+  if (novoRascunho.tipo !== "prato" && novoRascunho.tipo !== "sub_receita") {
+    throw new Error(`Tipo de receita inválido: ${novoRascunho.tipo}.`);
   }
 }
 
@@ -310,6 +357,8 @@ export function criarRepositorioFichasTecnicasLocal(
         codigo: novaReceita.codigo.trim(),
         nome: novaReceita.nome.trim(),
         descricao: novaReceita.descricao?.trim() || undefined,
+        tipo: tipoReceitaNormalizado(novaReceita.tipo),
+        categoria_id: novaReceita.categoria_id?.trim() || undefined,
         criado_por: novaReceita.criado_por,
         atualizado_por: novaReceita.criado_por,
         criado_em: agora,
@@ -318,6 +367,77 @@ export function criarRepositorioFichasTecnicasLocal(
 
       receitas.push(receita);
       return receita;
+    });
+  }
+
+  function criarRascunhoBasico(
+    novoRascunho: NovoRascunhoBasicoFichaTecnica
+  ): ResultadoCriacaoRascunhoBasicoFichaTecnica {
+    validarNovoRascunhoBasico(novoRascunho);
+
+    return executarGravacaoAtomica((banco) => {
+      const { receitas, versoes } = garantirColecoes(banco);
+      if (receitas.some((item) => normalizarCodigo(item.codigo) === normalizarCodigo(novoRascunho.codigo))) {
+        throw new Error(`Receita com código ${novoRascunho.codigo} já existe.`);
+      }
+
+      const agora = agoraIso();
+      const receitaId = uid("ftrec");
+      const versaoId = uid("ftver");
+
+      const receita: ReceitaFichaTecnica = {
+        id: receitaId,
+        codigo: novoRascunho.codigo.trim(),
+        nome: novoRascunho.nome.trim(),
+        descricao: novoRascunho.descricao?.trim() || undefined,
+        tipo: novoRascunho.tipo,
+        categoria_id: novoRascunho.categoria_id?.trim() || undefined,
+        criado_por: novoRascunho.criado_por.trim(),
+        atualizado_por: novoRascunho.criado_por.trim(),
+        criado_em: agora,
+        atualizado_em: agora,
+      };
+
+      const ficha: FichaTecnica = {
+        id: versaoId,
+        nome: receita.nome,
+        descricao: receita.descricao,
+        status: "rascunho",
+        versao: "1.0.0",
+        rendimento_quantidade: 1,
+        rendimento_unidade_id: novoRascunho.rendimento_unidade_id.trim(),
+        ingredientes: [],
+        passos: [],
+        alergenicos: alergenicosNaoInformados(),
+        criado_em: agora,
+        atualizado_em: agora,
+      };
+
+      const versao: ReceitaFichaTecnicaVersao = {
+        id: versaoId,
+        receita_id: receitaId,
+        numero_versao: "1.0.0",
+        status: "rascunho",
+        rendimento_total: ficha.rendimento_quantidade,
+        unidade_rendimento: ficha.rendimento_unidade_id,
+        configuracoes_porcionamento: [],
+        ficha,
+        criado_por: novoRascunho.criado_por.trim(),
+        atualizado_por: novoRascunho.criado_por.trim(),
+        criado_em: agora,
+        atualizado_em: agora,
+        historico: [],
+      };
+
+      registrarEventoHistorico(versao, "criacao", novoRascunho.criado_por.trim(), agora);
+
+      receitas.push(receita);
+      versoes.push(versao);
+
+      return {
+        receita,
+        versao,
+      };
     });
   }
 
@@ -526,6 +646,7 @@ export function criarRepositorioFichasTecnicasLocal(
     buscarReceitaPorId,
     buscarReceitaPorCodigo,
     salvarNovaReceita,
+    criarRascunhoBasico,
     atualizarRascunho,
     listarVersoesDaReceita,
     buscarVersaoPorId,

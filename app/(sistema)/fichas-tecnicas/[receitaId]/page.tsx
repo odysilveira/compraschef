@@ -24,6 +24,12 @@ import {
   obterSiglaUnidade,
 } from "@/lib/domain/fichas-tecnicas";
 import {
+  calcularPrecificacaoPorCanal,
+  campoComercialNaoInformado,
+  canaisPadraoSemPremissa,
+  MENSAGEM_DADOS_COMERCIAIS_PENDENTES,
+} from "@/lib/domain/fichas-tecnicas-comercial";
+import {
   atualizarLinhaNutricional,
   criarInformacaoNutricionalPadrao,
   normalizarInformacaoNutricional,
@@ -121,15 +127,6 @@ function textoDificuldade(dificuldade?: DificuldadeReceitaFichaTecnica): string 
   return "Não definida";
 }
 
-function canaisPadrao(): FichaTecnicaCanalPreco[] {
-  return [
-    { canal: "salao", preco_praticado: 42, taxa_percentual: 0, taxa_fixa: 0, impostos_percentual: 6, cmv_desejado_percentual: 32 },
-    { canal: "balcao", preco_praticado: 39, taxa_percentual: 0, taxa_fixa: 0, impostos_percentual: 6, cmv_desejado_percentual: 32 },
-    { canal: "delivery_proprio", preco_praticado: 46, taxa_percentual: 5, taxa_fixa: 0, impostos_percentual: 6, cmv_desejado_percentual: 34 },
-    { canal: "ifood", preco_praticado: 49, taxa_percentual: 16, taxa_fixa: 2, impostos_percentual: 6, cmv_desejado_percentual: 36 },
-  ];
-}
-
 function numeroSeguro(valor?: number): number {
   if (valor === undefined || Number.isNaN(valor) || !Number.isFinite(valor)) return 0;
   return valor;
@@ -163,7 +160,7 @@ function criarEstadoEditavel(receita: ReceitaFichaTecnica, versao: ReceitaFichaT
     custo_preparacao_centavos: base.custo_preparacao_centavos ?? 0,
     custo_coccao_centavos: base.custo_coccao_centavos ?? 0,
     custo_montagem_centavos: base.custo_montagem_centavos ?? 0,
-    canais_preco: base.canais_preco?.length ? base.canais_preco : canaisPadrao(),
+    canais_preco: base.canais_preco?.length ? base.canais_preco : canaisPadraoSemPremissa(),
     configuracoes_porcionamento: configuracoes,
     porcionamento_ativo_id: base.porcionamento_ativo_id ?? configuracoes.find((cfg) => cfg.ativa)?.id ?? configuracoes[0]?.id,
     informacao_nutricional: normalizarInformacaoNutricional(base.informacao_nutricional ?? criarInformacaoNutricionalPadrao()),
@@ -431,29 +428,7 @@ export default function FichaTecnicaDetalhePage() {
   const precificacaoPorCanal = useMemo(() => {
     if (!fichaEditavel) return [];
 
-    return (fichaEditavel.canais_preco ?? []).map((canal) => {
-      const preco = numeroSeguro(canal.preco_praticado);
-      const custo = custosResumo.custoPorPorcaoCent / 100;
-      const taxaPercentualReais = preco * (numeroSeguro(canal.taxa_percentual) / 100);
-      const impostosReais = preco * (numeroSeguro(canal.impostos_percentual) / 100);
-      const taxaFixaReais = numeroSeguro(canal.taxa_fixa);
-      const custoTotal = custo + taxaPercentualReais + impostosReais + taxaFixaReais;
-      const margemReais = preco - custoTotal;
-      const margemPercentual = preco > 0 ? (margemReais / preco) * 100 : 0;
-      const cmv = preco > 0 ? (custo / preco) * 100 : 0;
-      const cmvDesejado = Math.max(1, numeroSeguro(canal.cmv_desejado_percentual));
-      const precoSugerido = custo / (cmvDesejado / 100);
-
-      return {
-        ...canal,
-        custo,
-        custoTotal,
-        margemReais,
-        margemPercentual,
-        cmv,
-        precoSugerido,
-      };
-    });
+    return calcularPrecificacaoPorCanal(fichaEditavel.canais_preco ?? [], custosResumo.custoPorPorcaoCent);
   }, [fichaEditavel, custosResumo.custoPorPorcaoCent]);
 
   const fichaVazia = Boolean(
@@ -973,7 +948,7 @@ export default function FichaTecnicaDetalhePage() {
         custo_preparacao_centavos: 450,
         custo_coccao_centavos: 380,
         custo_montagem_centavos: 240,
-        canais_preco: canaisPadrao(),
+        canais_preco: canaisPadraoSemPremissa(),
       };
     });
   }
@@ -1799,6 +1774,9 @@ export default function FichaTecnicaDetalhePage() {
 
           <Card className="space-y-3">
             <h3 className="text-sm font-semibold text-stone-800">Formação de preço por canal</h3>
+            <p className="text-sm text-stone-600">
+              Preencha preço, taxas, impostos e objetivo de CMV de cada canal para liberar os cálculos comerciais sem premissas fictícias.
+            </p>
             <div className="overflow-x-auto">
               <table className="min-w-[1150px] w-full text-sm">
                 <thead>
@@ -1820,16 +1798,16 @@ export default function FichaTecnicaDetalhePage() {
                   {precificacaoPorCanal.map((linha) => (
                     <tr key={linha.canal}>
                       <td className="px-2 py-2 font-semibold">{CANAIS.find((item) => item.canal === linha.canal)?.nome ?? linha.canal}</td>
-                      <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" value={linha.preco_praticado} onChange={(e) => atualizarCanal(linha.canal, { preco_praticado: Number(e.target.value) })} /></td>
-                      <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" value={linha.taxa_percentual} onChange={(e) => atualizarCanal(linha.canal, { taxa_percentual: Number(e.target.value) })} /></td>
-                      <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" value={linha.taxa_fixa} onChange={(e) => atualizarCanal(linha.canal, { taxa_fixa: Number(e.target.value) })} /></td>
-                      <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" value={linha.impostos_percentual} onChange={(e) => atualizarCanal(linha.canal, { impostos_percentual: Number(e.target.value) })} /></td>
-                      <td className="px-2 py-2 font-semibold">{moeda(linha.custoTotal)}</td>
-                      <td className="px-2 py-2 font-semibold">{linha.cmv.toFixed(1)}%</td>
-                      <td className="px-2 py-2 font-semibold">{moeda(linha.margemReais)}</td>
-                      <td className="px-2 py-2 font-semibold">{linha.margemPercentual.toFixed(1)}%</td>
-                      <td className="px-2 py-2"><input type="number" step="0.1" min={1} className="campo" value={linha.cmv_desejado_percentual} onChange={(e) => atualizarCanal(linha.canal, { cmv_desejado_percentual: Number(e.target.value) })} /></td>
-                      <td className="px-2 py-2 font-semibold text-primaria-escura">{moeda(linha.precoSugerido)}</td>
+                      <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "preco_praticado") ? "" : numeroOuVazio(linha.preco_praticado)} onChange={(e) => atualizarCanal(linha.canal, { preco_praticado: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
+                      <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "taxa_percentual") ? "" : numeroOuVazio(linha.taxa_percentual)} onChange={(e) => atualizarCanal(linha.canal, { taxa_percentual: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
+                      <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "taxa_fixa") ? "" : numeroOuVazio(linha.taxa_fixa)} onChange={(e) => atualizarCanal(linha.canal, { taxa_fixa: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
+                      <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "impostos_percentual") ? "" : numeroOuVazio(linha.impostos_percentual)} onChange={(e) => atualizarCanal(linha.canal, { impostos_percentual: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
+                      <td className="px-2 py-2 font-semibold text-stone-600">{linha.custoTotal === null ? MENSAGEM_DADOS_COMERCIAIS_PENDENTES : moeda(linha.custoTotal)}</td>
+                      <td className="px-2 py-2 font-semibold text-stone-600">{linha.cmv === null ? MENSAGEM_DADOS_COMERCIAIS_PENDENTES : `${linha.cmv.toFixed(1)}%`}</td>
+                      <td className="px-2 py-2 font-semibold text-stone-600">{linha.margemReais === null ? MENSAGEM_DADOS_COMERCIAIS_PENDENTES : moeda(linha.margemReais)}</td>
+                      <td className="px-2 py-2 font-semibold text-stone-600">{linha.margemPercentual === null ? MENSAGEM_DADOS_COMERCIAIS_PENDENTES : `${linha.margemPercentual.toFixed(1)}%`}</td>
+                      <td className="px-2 py-2"><input type="number" step="0.1" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "cmv_desejado_percentual") ? "" : numeroOuVazio(linha.cmv_desejado_percentual)} onChange={(e) => atualizarCanal(linha.canal, { cmv_desejado_percentual: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
+                      <td className="px-2 py-2 font-semibold text-stone-600">{linha.precoSugerido === null ? MENSAGEM_DADOS_COMERCIAIS_PENDENTES : moeda(linha.precoSugerido)}</td>
                     </tr>
                   ))}
                 </tbody>

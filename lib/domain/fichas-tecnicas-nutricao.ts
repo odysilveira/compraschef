@@ -11,9 +11,10 @@ export const REFERENCIA_IN75_2020 = {
   valor_energetico_kcal: 2000,
   carboidratos_g: 300,
   acucares_adicionados_g: 50,
-  proteinas_g: 75,
-  gorduras_totais_g: 55,
-  gorduras_saturadas_g: 22,
+  proteinas_g: 50,
+  gorduras_totais_g: 65,
+  gorduras_saturadas_g: 20,
+  gorduras_trans_g: 2,
   fibra_alimentar_g: 25,
   sodio_mg: 2000,
 } as const;
@@ -84,6 +85,7 @@ export const LINHAS_NUTRICIONAIS_PADRAO: readonly DefinicaoLinhaNutricional[] = 
     codigo: "gorduras_trans_g",
     rotulo: "Gorduras trans",
     unidade: "g",
+    referenciaVD: REFERENCIA_IN75_2020.gorduras_trans_g,
   },
   {
     codigo: "fibra_alimentar_g",
@@ -190,12 +192,31 @@ function normalizarLinhaBase(
   const ajusteManualPor100 = Boolean(linha?.ajuste_manual_por_100);
   const ajusteManualPorPorcao = Boolean(linha?.ajuste_manual_por_porcao);
 
-  const valorPor100 =
-    valorPor100Original ??
-    (!ajusteManualPor100 ? calcularValorPor100(valorPorPorcaoOriginal, porcao) : null);
-  const valorPorPorcao =
-    valorPorPorcaoOriginal ??
-    (!ajusteManualPorPorcao ? calcularValorPorPorcao(valorPor100Original, porcao) : null);
+  const valorPor100 = (() => {
+    if (ajusteManualPor100) {
+      return valorPor100Original;
+    }
+    if (ajusteManualPorPorcao) {
+      return calcularValorPor100(valorPorPorcaoOriginal, porcao);
+    }
+    return valorPor100Original ?? calcularValorPor100(valorPorPorcaoOriginal, porcao);
+  })();
+
+  const valorPorPorcao = (() => {
+    if (ajusteManualPorPorcao) {
+      return valorPorPorcaoOriginal;
+    }
+    if (valorPor100 !== null) {
+      const recalculado = calcularValorPorPorcao(valorPor100, porcao);
+      if (recalculado !== null || porcao !== null) {
+        return recalculado;
+      }
+    }
+    if (ajusteManualPor100) {
+      return calcularValorPorPorcao(valorPor100Original, porcao);
+    }
+    return valorPorPorcaoOriginal;
+  })();
 
   const linhaNormalizada: LinhaInformacaoNutricional = {
     codigo: def.codigo,
@@ -203,18 +224,14 @@ function normalizarLinhaBase(
     unidade: def.unidade,
     valor_por_100: valorPor100,
     valor_por_porcao: valorPorPorcao,
-    vd_por_100: normalizarNumero(linha?.vd_por_100),
-    vd_por_porcao: normalizarNumero(linha?.vd_por_porcao),
+    vd_por_100: null,
+    vd_por_porcao: null,
     ajuste_manual_por_100: ajusteManualPor100,
     ajuste_manual_por_porcao: ajusteManualPorPorcao,
   };
 
-  if (linhaNormalizada.vd_por_100 === null) {
-    linhaNormalizada.vd_por_100 = calcularPercentualVD(def.codigo, linhaNormalizada.valor_por_100);
-  }
-  if (linhaNormalizada.vd_por_porcao === null) {
-    linhaNormalizada.vd_por_porcao = calcularPercentualVD(def.codigo, linhaNormalizada.valor_por_porcao);
-  }
+  linhaNormalizada.vd_por_100 = calcularPercentualVD(def.codigo, linhaNormalizada.valor_por_100);
+  linhaNormalizada.vd_por_porcao = calcularPercentualVD(def.codigo, linhaNormalizada.valor_por_porcao);
 
   return linhaNormalizada;
 }

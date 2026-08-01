@@ -9,7 +9,23 @@ import {
   REFERENCIA_IN75_2020,
 } from "./fichas-tecnicas-nutricao";
 
+function obterLinha(info: ReturnType<typeof normalizarInformacaoNutricional>, codigo: string) {
+  return info.linhas.find((linha) => linha.codigo === codigo);
+}
+
 describe("nutrição manual", () => {
+  it("mantém as referências da IN 75/2020 alinhadas ao Anexo II", () => {
+    expect(REFERENCIA_IN75_2020.valor_energetico_kcal).toBe(2000);
+    expect(REFERENCIA_IN75_2020.carboidratos_g).toBe(300);
+    expect(REFERENCIA_IN75_2020.acucares_adicionados_g).toBe(50);
+    expect(REFERENCIA_IN75_2020.proteinas_g).toBe(50);
+    expect(REFERENCIA_IN75_2020.gorduras_totais_g).toBe(65);
+    expect(REFERENCIA_IN75_2020.gorduras_saturadas_g).toBe(20);
+    expect(REFERENCIA_IN75_2020.gorduras_trans_g).toBe(2);
+    expect(REFERENCIA_IN75_2020.fibra_alimentar_g).toBe(25);
+    expect(REFERENCIA_IN75_2020.sodio_mg).toBe(2000);
+  });
+
   it("converte valor por 100 g para porção", () => {
     const info = normalizarInformacaoNutricional({
       tamanho_porcao: 50,
@@ -55,12 +71,74 @@ describe("nutrição manual", () => {
     const info = normalizarInformacaoNutricional({
       tamanho_porcao: 100,
       linhas: [
+        { codigo: "valor_energetico_kcal", rotulo: "Valor energético (kcal)", unidade: "kcal", valor_por_100: 250, valor_por_porcao: null },
+        { codigo: "acucares_totais_g", rotulo: "Açúcares totais", unidade: "g", valor_por_100: 12, valor_por_porcao: null },
         { codigo: "sodio_mg", rotulo: "Sódio", unidade: "mg", valor_por_100: 1000, valor_por_porcao: null },
+        { codigo: "proteinas_g", rotulo: "Proteínas", unidade: "g", valor_por_100: 25, valor_por_porcao: null },
+        { codigo: "gorduras_totais_g", rotulo: "Gorduras totais", unidade: "g", valor_por_100: 13, valor_por_porcao: null },
+        { codigo: "gorduras_saturadas_g", rotulo: "Gorduras saturadas", unidade: "g", valor_por_100: 10, valor_por_porcao: null },
+        { codigo: "gorduras_trans_g", rotulo: "Gorduras trans", unidade: "g", valor_por_100: 1, valor_por_porcao: null },
       ],
     });
 
-    const sodio = info.linhas.find((linha) => linha.codigo === "sodio_mg");
+    const sodio = obterLinha(info, "sodio_mg");
+    const proteinas = obterLinha(info, "proteinas_g");
+    const gordurasTotais = obterLinha(info, "gorduras_totais_g");
+    const gordurasSaturadas = obterLinha(info, "gorduras_saturadas_g");
+    const gordurasTrans = obterLinha(info, "gorduras_trans_g");
+    const acucaresTotais = obterLinha(info, "acucares_totais_g");
+    const valorEnergeticoKj = obterLinha(info, "valor_energetico_kj");
+
     expect(sodio?.vd_por_100).toBeCloseTo((1000 / REFERENCIA_IN75_2020.sodio_mg) * 100, 5);
+    expect(proteinas?.vd_por_100).toBeCloseTo((25 / REFERENCIA_IN75_2020.proteinas_g) * 100, 5);
+    expect(gordurasTotais?.vd_por_100).toBeCloseTo((13 / REFERENCIA_IN75_2020.gorduras_totais_g) * 100, 5);
+    expect(gordurasSaturadas?.vd_por_100).toBeCloseTo((10 / REFERENCIA_IN75_2020.gorduras_saturadas_g) * 100, 5);
+    expect(gordurasTrans?.vd_por_100).toBeCloseTo((1 / REFERENCIA_IN75_2020.gorduras_trans_g) * 100, 5);
+    expect(acucaresTotais?.vd_por_100).toBeNull();
+    expect(valorEnergeticoKj?.vd_por_100).toBeNull();
+  });
+
+  it("recalcula valores e %VD por porção quando a porção muda", () => {
+    const infoBase = normalizarInformacaoNutricional({
+      tamanho_porcao: 50,
+      linhas: [
+        { codigo: "proteinas_g", rotulo: "Proteínas", unidade: "g", valor_por_100: 100, valor_por_porcao: null },
+      ],
+    });
+
+    const proteina50 = obterLinha(infoBase, "proteinas_g");
+    expect(proteina50?.valor_por_porcao).toBe(50);
+    expect(proteina50?.vd_por_porcao).toBeCloseTo(100, 5);
+
+    const recalculada = normalizarInformacaoNutricional({
+      ...infoBase,
+      tamanho_porcao: 25,
+    });
+
+    const proteina25 = obterLinha(recalculada, "proteinas_g");
+    expect(proteina25?.valor_por_100).toBe(100);
+    expect(proteina25?.valor_por_porcao).toBe(25);
+    expect(proteina25?.vd_por_porcao).toBeCloseTo(50, 5);
+  });
+
+  it("não sobrescreve ajuste manual por porção ao recalcular a porção", () => {
+    const infoManual = atualizarLinhaNutricional(
+      normalizarInformacaoNutricional({ tamanho_porcao: 50 }),
+      "proteinas_g",
+      "valor_por_porcao",
+      12
+    );
+
+    const recalculada = normalizarInformacaoNutricional({
+      ...infoManual,
+      tamanho_porcao: 25,
+    });
+
+    const proteinas = obterLinha(recalculada, "proteinas_g");
+    expect(proteinas?.ajuste_manual_por_porcao).toBe(true);
+    expect(proteinas?.valor_por_porcao).toBe(12);
+    expect(proteinas?.valor_por_100).toBe(48);
+    expect(proteinas?.vd_por_porcao).toBeCloseTo((12 / REFERENCIA_IN75_2020.proteinas_g) * 100, 5);
   });
 
   it("mantém campos vazios sem NaN ou Infinity", () => {

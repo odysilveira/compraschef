@@ -547,15 +547,56 @@ export interface FichaTecnicaAlergenicos {
   outros?: { nome: string; presenca: PresencaAlergenico }[];
 }
 
+export type OrigemInformacaoNutricional = "MANUAL" | "PDF" | "PLANILHA" | "CALCULADA" | "LAUDO";
+
+export type StatusInformacaoNutricional =
+  | "estimado"
+  | "conferido"
+  | "validado_por_nutricionista"
+  | "validado_por_laudo";
+
+export type UnidadeLinhaNutricional = "kcal" | "kJ" | "g" | "mg";
+
+export type CodigoLinhaNutricional =
+  | "valor_energetico_kcal"
+  | "valor_energetico_kj"
+  | "carboidratos_g"
+  | "acucares_totais_g"
+  | "acucares_adicionados_g"
+  | "proteinas_g"
+  | "gorduras_totais_g"
+  | "gorduras_saturadas_g"
+  | "gorduras_trans_g"
+  | "fibra_alimentar_g"
+  | "sodio_mg";
+
+export interface LinhaInformacaoNutricional {
+  codigo: CodigoLinhaNutricional;
+  rotulo: string;
+  unidade: UnidadeLinhaNutricional;
+  valor_por_100: number | null;
+  valor_por_porcao: number | null;
+  vd_por_100?: number | null;
+  vd_por_porcao?: number | null;
+  ajuste_manual_por_100?: boolean;
+  ajuste_manual_por_porcao?: boolean;
+}
+
 export interface InformacaoNutricional {
-  valor_energetico_kcal?: number;
-  carboidratos_g?: number;
-  proteinas_g?: number;
-  gorduras_totais_g?: number;
-  gorduras_saturadas_g?: number;
-  gorduras_trans_g?: number;
-  fibra_alimentar_g?: number;
-  sodio_mg?: number;
+  origem: OrigemInformacaoNutricional;
+  fonte_descricao: string;
+  data_referencia?: string;
+  responsavel?: string;
+  status_validacao: StatusInformacaoNutricional;
+  ultima_alteracao_em?: string;
+  observacoes?: string;
+  tamanho_porcao?: number;
+  unidade_porcao?: "g" | "ml";
+  medida_caseira?: string;
+  quantidade_porcoes?: number;
+  peso_volume_final?: number;
+  unidade_peso_volume_final?: "g" | "ml";
+  linhas: LinhaInformacaoNutricional[];
 }
 
 export interface PegadaCarbono {

@@ -24,6 +24,12 @@ import {
   obterSiglaUnidade,
 } from "@/lib/domain/fichas-tecnicas";
 import {
+  atualizarLinhaNutricional,
+  criarInformacaoNutricionalPadrao,
+  normalizarInformacaoNutricional,
+  LINHAS_NUTRICIONAIS_PADRAO,
+} from "@/lib/domain/fichas-tecnicas-nutricao";
+import {
   MIDIA_MIME_IMAGENS_PERMITIDOS,
   MIDIA_MIME_VIDEOS_PERMITIDOS,
   criarMidiaUrlExterna,
@@ -129,6 +135,13 @@ function numeroSeguro(valor?: number): number {
   return valor;
 }
 
+function numeroOuVazio(valor: number | null | undefined): number | "" {
+  if (valor === null || valor === undefined || !Number.isFinite(valor)) {
+    return "";
+  }
+  return valor;
+}
+
 function criarEstadoEditavel(receita: ReceitaFichaTecnica, versao: ReceitaFichaTecnicaVersao): FichaTecnica {
   const base = structuredClone(versao.ficha);
   const configuracoes = base.configuracoes_porcionamento?.length
@@ -153,6 +166,7 @@ function criarEstadoEditavel(receita: ReceitaFichaTecnica, versao: ReceitaFichaT
     canais_preco: base.canais_preco?.length ? base.canais_preco : canaisPadrao(),
     configuracoes_porcionamento: configuracoes,
     porcionamento_ativo_id: base.porcionamento_ativo_id ?? configuracoes.find((cfg) => cfg.ativa)?.id ?? configuracoes[0]?.id,
+    informacao_nutricional: normalizarInformacaoNutricional(base.informacao_nutricional ?? criarInformacaoNutricionalPadrao()),
     ingredientes: base.ingredientes.map((ing) => ({
       ...ing,
       quantidade_bruta: ing.quantidade_bruta ?? ing.quantidade,
@@ -781,6 +795,57 @@ export default function FichaTecnicaDetalhePage() {
     });
   }
 
+  function atualizarInformacaoNutricional(parcial: Partial<NonNullable<FichaTecnica["informacao_nutricional"]>>) {
+    setFichaEditavel((atual) => {
+      if (!atual) return atual;
+      const informacaoAtual = atual.informacao_nutricional ?? criarInformacaoNutricionalPadrao();
+      return {
+        ...atual,
+        informacao_nutricional: normalizarInformacaoNutricional({
+          ...informacaoAtual,
+          ...parcial,
+          ultima_alteracao_em: new Date().toISOString(),
+        }),
+      };
+    });
+  }
+
+  function atualizarLinhaNutricionalCampo(
+    codigo: (typeof LINHAS_NUTRICIONAIS_PADRAO)[number]["codigo"],
+    campo: "valor_por_100" | "valor_por_porcao",
+    valor: string
+  ) {
+    setFichaEditavel((atual) => {
+      if (!atual) return atual;
+      const informacaoAtual = atual.informacao_nutricional ?? criarInformacaoNutricionalPadrao();
+      const infoAtualizada = atualizarLinhaNutricional(
+        informacaoAtual,
+        codigo,
+        campo,
+        valor === "" ? null : Number(valor)
+      );
+
+      return {
+        ...atual,
+        informacao_nutricional: {
+          ...infoAtualizada,
+          ultima_alteracao_em: new Date().toISOString(),
+        },
+      };
+    });
+  }
+
+  function limparInformacaoNutricional() {
+    if (!window.confirm("Limpar informação nutricional desta ficha?")) {
+      return;
+    }
+    atualizarInformacaoNutricional({
+      ...criarInformacaoNutricionalPadrao(),
+      origem: "MANUAL",
+      fonte_descricao: "",
+    });
+  }
+
   function carregarExemploDemo() {
     setFichaEditavel((atual) => {
       if (!atual) return atual;
@@ -998,6 +1063,7 @@ export default function FichaTecnicaDetalhePage() {
           custo_preparacao_centavos: Math.max(0, Number(fichaEditavel.custo_preparacao_centavos) || 0),
           custo_coccao_centavos: Math.max(0, Number(fichaEditavel.custo_coccao_centavos) || 0),
           custo_montagem_centavos: Math.max(0, Number(fichaEditavel.custo_montagem_centavos) || 0),
+          informacao_nutricional: normalizarInformacaoNutricional(fichaEditavel.informacao_nutricional),
         },
         { responsavel: "interface-local" }
       );
@@ -1115,6 +1181,7 @@ export default function FichaTecnicaDetalhePage() {
             ...cfg,
             id: uid("porc"),
           })),
+          informacao_nutricional: normalizarInformacaoNutricional(fichaEditavel.informacao_nutricional),
         },
         { responsavel: "interface-local" }
       );
@@ -1144,6 +1211,7 @@ export default function FichaTecnicaDetalhePage() {
 
   const midiasDaVersao = fichaEditavel.midias ?? [];
   const midiaPrincipalAtual = midiaPrincipalPersistida(midiasDaVersao);
+  const informacaoNutricional = fichaEditavel.informacao_nutricional ?? criarInformacaoNutricionalPadrao();
   const fotoPrincipalPreviewUrl =
     fotoLocalTemporaria?.objectUrl ?? midiaPrincipalAtual?.url ?? fichaEditavel.foto_url?.trim() ?? undefined;
 
@@ -1772,21 +1840,223 @@ export default function FichaTecnicaDetalhePage() {
       )}
 
       {abaAtiva === "Alergênicos e nutrição" && (
-        <Card className="space-y-3">
-          <p className="text-sm text-stone-600">
-            Utilize esta aba para revisar alergênicos e informações nutricionais da versão. A consolidação automática por ingredientes
-            permanece no domínio já aprovado e pode ser usada no fluxo de publicação.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {Object.entries(fichaEditavel.alergenicos).map(([chave, valor]) => {
-              if (chave === "outros") return null;
-              return (
-                <div key={chave} className="rounded-card border border-stone-200 p-3">
-                  <p className="rotulo">{chave}</p>
-                  <p className="font-semibold">{String(valor)}</p>
+        <Card className="space-y-4">
+          <div className="space-y-3">
+            <p className="text-sm text-stone-600">
+              Utilize esta aba para revisar alergênicos e informações nutricionais da versão. A consolidação automática por ingredientes
+              permanece no domínio já aprovado e pode ser usada no fluxo de publicação.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {Object.entries(fichaEditavel.alergenicos).map(([chave, valor]) => {
+                if (chave === "outros") return null;
+                return (
+                  <div key={chave} className="rounded-card border border-stone-200 p-3">
+                    <p className="rotulo">{chave}</p>
+                    <p className="font-semibold">{String(valor)}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-card border border-stone-200 bg-stone-50/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-semibold text-stone-900">Informação nutricional</h3>
+                <p className="text-sm text-stone-600">
+                  Informação nutricional estimada. A publicação oficial deve ser validada por profissional habilitado.
+                </p>
+              </div>
+              <button className="btn-secundario text-red-600" onClick={limparInformacaoNutricional}>
+                Limpar informação nutricional
+              </button>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-3">
+              <Campo rotulo="Origem">
+                <select
+                  className="campo"
+                  value={informacaoNutricional.origem}
+                  onChange={(e) => atualizarInformacaoNutricional({ origem: e.target.value as NonNullable<FichaTecnica["informacao_nutricional"]>["origem"] })}
+                >
+                  <option value="MANUAL">MANUAL</option>
+                  <option value="PDF">PDF</option>
+                  <option value="PLANILHA">PLANILHA</option>
+                  <option value="CALCULADA">CALCULADA</option>
+                  <option value="LAUDO">LAUDO</option>
+                </select>
+              </Campo>
+              <Campo rotulo="Status">
+                <select
+                  className="campo"
+                  value={informacaoNutricional.status_validacao}
+                  onChange={(e) => atualizarInformacaoNutricional({ status_validacao: e.target.value as NonNullable<FichaTecnica["informacao_nutricional"]>["status_validacao"] })}
+                >
+                  <option value="estimado">Estimado</option>
+                  <option value="conferido">Conferido</option>
+                  <option value="validado_por_nutricionista">Validado por nutricionista</option>
+                  <option value="validado_por_laudo">Validado por laudo</option>
+                </select>
+              </Campo>
+              <Campo rotulo="Fonte / descrição">
+                <input
+                  className="campo"
+                  value={informacaoNutricional.fonte_descricao}
+                  onChange={(e) => atualizarInformacaoNutricional({ fonte_descricao: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Data do cálculo ou laudo">
+                <input
+                  type="date"
+                  className="campo"
+                  value={informacaoNutricional.data_referencia ?? ""}
+                  onChange={(e) => atualizarInformacaoNutricional({ data_referencia: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Responsável">
+                <input
+                  className="campo"
+                  value={informacaoNutricional.responsavel ?? ""}
+                  onChange={(e) => atualizarInformacaoNutricional({ responsavel: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Medida caseira">
+                <input
+                  className="campo"
+                  value={informacaoNutricional.medida_caseira ?? ""}
+                  onChange={(e) => atualizarInformacaoNutricional({ medida_caseira: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Tamanho da porção">
+                <div className="grid grid-cols-[1fr_110px] gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="campo"
+                    value={numeroOuVazio(informacaoNutricional.tamanho_porcao)}
+                    onChange={(e) => atualizarInformacaoNutricional({ tamanho_porcao: e.target.value === "" ? undefined : Number(e.target.value) })}
+                  />
+                  <select
+                    className="campo"
+                    value={informacaoNutricional.unidade_porcao ?? "g"}
+                    onChange={(e) => atualizarInformacaoNutricional({ unidade_porcao: e.target.value as "g" | "ml" })}
+                  >
+                    <option value="g">g</option>
+                    <option value="ml">ml</option>
+                  </select>
                 </div>
-              );
-            })}
+              </Campo>
+              <Campo rotulo="Quantidade de porções na receita">
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className="campo"
+                  value={numeroOuVazio(informacaoNutricional.quantidade_porcoes)}
+                  onChange={(e) => atualizarInformacaoNutricional({ quantidade_porcoes: e.target.value === "" ? undefined : Number(e.target.value) })}
+                />
+              </Campo>
+              <Campo rotulo="Peso ou volume final">
+                <div className="grid grid-cols-[1fr_110px] gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="campo"
+                    value={numeroOuVazio(informacaoNutricional.peso_volume_final)}
+                    onChange={(e) => atualizarInformacaoNutricional({ peso_volume_final: e.target.value === "" ? undefined : Number(e.target.value) })}
+                  />
+                  <select
+                    className="campo"
+                    value={informacaoNutricional.unidade_peso_volume_final ?? "g"}
+                    onChange={(e) => atualizarInformacaoNutricional({ unidade_peso_volume_final: e.target.value as "g" | "ml" })}
+                  >
+                    <option value="g">g</option>
+                    <option value="ml">ml</option>
+                  </select>
+                </div>
+              </Campo>
+            </div>
+
+            <Campo rotulo="Observações">
+              <textarea
+                className="campo min-h-24"
+                value={informacaoNutricional.observacoes ?? ""}
+                onChange={(e) => atualizarInformacaoNutricional({ observacoes: e.target.value })}
+              />
+            </Campo>
+
+            <div className="overflow-x-auto rounded-card border border-stone-200 bg-white">
+              <table className="min-w-[1220px] w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left">
+                    <th className="rotulo px-2 py-2">Nutriente</th>
+                    <th className="rotulo px-2 py-2">Unidade</th>
+                    <th className="rotulo px-2 py-2">Por 100 g/ml</th>
+                    <th className="rotulo px-2 py-2">Por porção</th>
+                    <th className="rotulo px-2 py-2">%VD por 100</th>
+                    <th className="rotulo px-2 py-2">%VD por porção</th>
+                    <th className="rotulo px-2 py-2">Ajuste manual</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {LINHAS_NUTRICIONAIS_PADRAO.map((def) => {
+                    const linha = informacaoNutricional.linhas.find((item) => item.codigo === def.codigo) ?? {
+                      codigo: def.codigo,
+                      rotulo: def.rotulo,
+                      unidade: def.unidade,
+                      valor_por_100: null,
+                      valor_por_porcao: null,
+                      vd_por_100: null,
+                      vd_por_porcao: null,
+                    };
+                    const vdDisponivel = Boolean(def.referenciaVD);
+                    const vdPor100 = linha.vd_por_100 ?? null;
+                    const vdPorPorcao = linha.vd_por_porcao ?? null;
+                    return (
+                      <tr key={def.codigo}>
+                        <td className="px-2 py-2 font-semibold text-stone-800">{def.rotulo}</td>
+                        <td className="px-2 py-2">{def.unidade}</td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            className="campo"
+                            value={numeroOuVazio(linha.valor_por_100)}
+                            onChange={(e) => atualizarLinhaNutricionalCampo(def.codigo, "valor_por_100", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            className="campo"
+                            value={numeroOuVazio(linha.valor_por_porcao)}
+                            onChange={(e) => atualizarLinhaNutricionalCampo(def.codigo, "valor_por_porcao", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2 font-semibold">{vdDisponivel && vdPor100 !== null ? `${vdPor100.toFixed(1)}%` : "—"}</td>
+                        <td className="px-2 py-2 font-semibold">{vdDisponivel && vdPorPorcao !== null ? `${vdPorPorcao.toFixed(1)}%` : "—"}</td>
+                        <td className="px-2 py-2 text-xs text-stone-600">
+                          {linha.ajuste_manual_por_100 || linha.ajuste_manual_por_porcao ? "Sim" : "Não"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Informação nutricional estimada. A publicação oficial deve ser validada por profissional habilitado.
+            </div>
+
+            <p className="text-xs text-stone-500">
+              Última alteração: {informacaoNutricional.ultima_alteracao_em ? dataHoraBR(informacaoNutricional.ultima_alteracao_em) : "—"}
+            </p>
           </div>
         </Card>
       )}

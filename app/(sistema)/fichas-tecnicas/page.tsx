@@ -118,7 +118,7 @@ export default function FichasTecnicasPage() {
         subtitulo="Catálogo inicial de receitas e sub-receitas com criação rápida de rascunho básico."
         acao={
           <button className="btn-primario" onClick={abrirModal}>
-            <Plus className="h-4 w-4" /> Nova ficha técnica
+            <Plus className="h-4 w-4" /> Nova ficha
           </button>
         }
       />

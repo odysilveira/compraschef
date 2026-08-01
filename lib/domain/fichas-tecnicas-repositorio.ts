@@ -44,10 +44,23 @@ export interface ContextoOperacaoFichaTecnica {
   em?: string;
 }
 
+export interface AtualizacaoReceitaFichaTecnica {
+  codigo: string;
+  nome: string;
+  descricao?: string;
+  tipo?: TipoReceitaFichaTecnica;
+  categoria_id?: string;
+}
+
 export interface RepositorioFichasTecnicas {
   listarReceitas(): ReceitaFichaTecnica[];
   buscarReceitaPorId(receitaId: string): ReceitaFichaTecnica | undefined;
   buscarReceitaPorCodigo(codigo: string): ReceitaFichaTecnica | undefined;
+  atualizarDadosReceita(
+    receitaId: string,
+    atualizacoes: AtualizacaoReceitaFichaTecnica,
+    contexto: ContextoOperacaoFichaTecnica
+  ): ReceitaFichaTecnica;
   salvarNovaReceita(novaReceita: NovaReceitaFichaTecnica): ReceitaFichaTecnica;
   criarRascunhoBasico(
     novoRascunho: NovoRascunhoBasicoFichaTecnica

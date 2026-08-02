@@ -70,6 +70,36 @@ export function janela28Dias(hoje: string | Date = new Date()): string[] {
 }
 
 /**
+ * Calendário da escala: do dia de hoje até o último dia do mês seguinte
+ * (resto do mês corrente + mês seguinte inteiro).
+ */
+export function janelaCalendarioEscala(hoje: string | Date = new Date()): string[] {
+  const base =
+    typeof hoje === "string"
+      ? parseDataLocal(hoje)
+      : new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  const fim = new Date(base.getFullYear(), base.getMonth() + 2, 0);
+  const dias: string[] = [];
+  const cursor = new Date(base);
+  while (cursor.getTime() <= fim.getTime()) {
+    dias.push(formatDataLocal(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dias;
+}
+
+export function rotuloPeriodoJanela(dias: string[]): string {
+  if (dias.length === 0) return "";
+  return `${formatDataBrLonga(dias[0]!)} a ${formatDataBrLonga(dias[dias.length - 1]!)}`;
+}
+
+export function nomeMesAno(isoDate: string): string {
+  const d = parseDataLocal(isoDate);
+  const nome = d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  return nome.charAt(0).toUpperCase() + nome.slice(1);
+}
+
+/**
  * Monta semanas do calendário a partir da janela de dias.
  * `inicioSemana`: 0 = domingo, 1 = segunda (padrão BR).
  * Células fora da janela vêm como `null`.
@@ -234,6 +264,91 @@ export function criarSlot(
   }
 
   return { sucesso: true, slot, convocacao, erros: [], avisos };
+}
+
+/**
+ * Move um plantão para outra data (arrastar no calendário).
+ * Atualiza convocação/texto e pagamento previsto, se houver.
+ */
+export function moverSlotParaData(
+  db: DB,
+  slotId: string,
+  novaData: string,
+  opcoes: { agora?: string } = {}
+): ResultadoEscala {
+  const avisos: string[] = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(novaData)) {
+    return { sucesso: false, erros: ["Data inválida."], avisos };
+  }
+
+  const slot = (db.escala_slots ?? []).find((s) => s.id === slotId);
+  if (!slot) return { sucesso: false, erros: ["Plantão não encontrado."], avisos };
+  if (slot.data === novaData) {
+    return { sucesso: true, slot, erros: [], avisos: [] };
+  }
+
+  const conflito = (db.escala_slots ?? []).some(
+    (s) => s.id !== slotId && s.pessoa_id === slot.pessoa_id && s.data === novaData
+  );
+  if (conflito) {
+    return { sucesso: false, erros: ["Já existe plantão desta pessoa neste dia."], avisos };
+  }
+
+  const convocacao = convocacaoDoSlot(db, slotId);
+  const pagamento = convocacao ? pagamentoDaConvocacao(db, convocacao.id) : undefined;
+  if (
+    pagamento &&
+    (pagamento.status === "pago" ||
+      pagamento.status === "aguardando_conciliacao" ||
+      pagamento.status === "liberado")
+  ) {
+    return {
+      sucesso: false,
+      erros: ["Não dá para mover: o pagamento deste período já foi informado ou pago."],
+      avisos,
+    };
+  }
+
+  const agora = opcoes.agora ?? new Date().toISOString();
+  slot.data = novaData;
+  slot.atualizado_em = agora;
+
+  if (convocacao) {
+    const pessoa = db.pessoas.find((p) => p.id === slot.pessoa_id);
+    const horas = calcularHorasPagas(slot.hora_inicio, slot.hora_fim, slot.intervalo_min);
+    if (pessoa && !("erro" in horas)) {
+      convocacao.texto_mensagem = montarTextoConvocacaoWhatsApp({
+        pessoa,
+        slot,
+        valor_hora: convocacao.valor_hora,
+        horas_brutas: horas.horas_brutas,
+        horas_pagas: horas.horas_pagas,
+        valor_estimado: convocacao.valor_estimado,
+      });
+      convocacao.horas_brutas = horas.horas_brutas;
+      convocacao.horas_pagas = horas.horas_pagas;
+      convocacao.antecedencia_ok = antecedenciaMinimaOk(agora.slice(0, 10), novaData);
+      convocacao.atualizado_em = agora;
+      if (convocacao.status === "enviada" || convocacao.status === "aceita") {
+        avisos.push("Data alterada. Se a convocação já foi enviada, avise a pessoa de novo pelo WhatsApp.");
+      }
+      if (!convocacao.antecedencia_ok) {
+        avisos.push(
+          `Atenção: antecedência menor que ${ANTECEDENCIA_MINIMA_DIAS} dias corridos (exigência do contrato intermitente).`
+        );
+      }
+    }
+
+    if (pagamento && pagamento.status === "previsto") {
+      const dataBr = formatDataBrLonga(novaData);
+      pagamento.vencimento = novaData;
+      pagamento.competencia = novaData.slice(0, 7);
+      pagamento.descricao = `Período ${dataBr} ${slot.hora_inicio}–${slot.hora_fim} (convocação aceita)`;
+      pagamento.atualizado_em = agora;
+    }
+  }
+
+  return { sucesso: true, slot, convocacao, pagamento, erros: [], avisos };
 }
 
 export function montarTextoConvocacaoWhatsApp(input: {
@@ -495,9 +610,12 @@ export function datasTrabalhoPadraoClt(
   padrao: PadraoEscalaClt,
   inicioJanela: string,
   referenciaCiclo: string = inicioJanela,
-  quantidadeDias = 28
+  quantidadeDias?: number
 ): string[] {
-  const janela = janela28Dias(inicioJanela).slice(0, quantidadeDias);
+  const janela =
+    quantidadeDias != null
+      ? janela28Dias(inicioJanela).slice(0, quantidadeDias)
+      : janelaCalendarioEscala(inicioJanela);
   const ref = parseDataLocal(referenciaCiclo);
 
   return janela.filter((data) => {
@@ -568,7 +686,7 @@ export function gerarEscalaPadraoClt(
 
   const inicio = dados.inicio_janela ?? formatDataLocal(new Date());
   const referencia = dados.referencia_ciclo ?? inicio;
-  const datas = datasTrabalhoPadraoClt(dados.padrao, inicio, referencia, 28);
+  const datas = datasTrabalhoPadraoClt(dados.padrao, inicio, referencia);
   const pular = dados.pular_existentes !== false;
   const agora = opcoes.agora ?? new Date().toISOString();
   let criados = 0;

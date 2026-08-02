@@ -14,9 +14,11 @@ import {
 } from "@/lib/domain/contrato-pessoa";
 import {
   convocacaoDoSlot,
-  janela28Dias,
+  janelaCalendarioEscala,
   montarGradeCalendario,
+  nomeMesAno,
   pessoaPrecisaConvocacao,
+  rotuloPeriodoJanela,
   rotuloStatusConvocacao,
   rotulosCabecalhoSemana,
   slotsDaPessoaNaJanela,
@@ -55,7 +57,8 @@ export default function RhPerfilPage() {
     [db.pessoas, params.id]
   );
 
-  const diasJanela = useMemo(() => janela28Dias(), []);
+  const diasJanela = useMemo(() => janelaCalendarioEscala(), []);
+  const periodoRotulo = useMemo(() => rotuloPeriodoJanela(diasJanela), [diasJanela]);
   const plantaoesPessoa = useMemo(
     () => (pessoa ? slotsDaPessoaNaJanela(db, pessoa.id, diasJanela) : []),
     [db, pessoa, diasJanela]
@@ -676,11 +679,12 @@ export default function RhPerfilPage() {
         <Card className="space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 className="text-base font-bold">Próximos 28 dias</h2>
+              <h2 className="text-base font-bold">Escala no calendário</h2>
               <p className="text-sm text-slate-600">
+                {periodoRotulo}
                 {plantaoesPessoa.length === 0
-                  ? "Nenhum plantão lançado ainda."
-                  : `${plantaoesPessoa.length} plantão(ões) nesta janela.`}
+                  ? " — nenhum plantão lançado ainda."
+                  : ` — ${plantaoesPessoa.length} plantão(ões).`}
               </p>
             </div>
             <Link href="/rh/escala" className="btn-secundario text-sm">
@@ -704,50 +708,64 @@ export default function RhPerfilPage() {
                 ))}
               </div>
               <div className="space-y-1">
-                {semanasPessoa.map((semana, idx) => (
-                  <div key={idx} className="grid grid-cols-7 gap-1">
-                    {semana.map((dia, col) => {
-                      if (!dia) {
-                        return <div key={`vazio-${idx}-${col}`} className="min-h-[4.5rem] rounded-lg bg-stone-50/80" />;
-                      }
-                      const lista = porDiaPessoa.get(dia) ?? [];
-                      const ehHoje = dia === hojeISO;
-                      return (
-                        <div
-                          key={dia}
-                          className={`min-h-[4.5rem] rounded-lg border p-1.5 ${
-                            ehHoje
-                              ? "border-primaria bg-primaria/5"
-                              : lista.length > 0
-                                ? "border-emerald-200 bg-emerald-50/60"
-                                : "border-dashed border-stone-200 bg-stone-50"
-                          }`}
-                        >
-                          <p className={`text-sm font-bold ${ehHoje ? "text-primaria-escura" : "text-slate-900"}`}>
-                            {dia.slice(8, 10)}
-                          </p>
-                          {lista.length === 0 ? (
-                            <p className="text-[10px] text-slate-400">Livre</p>
-                          ) : (
-                            lista.map((slot) => {
-                              const conv = convocacaoDoSlot(db, slot.id);
-                              return (
-                                <div key={slot.id} className="mt-0.5">
-                                  <p className="text-[11px] font-medium text-slate-800">
-                                    {slot.hora_inicio}–{slot.hora_fim}
-                                  </p>
-                                  {conv && (
-                                    <p className="text-[10px] text-slate-500">{rotuloStatusConvocacao(conv.status)}</p>
-                                  )}
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
+                {semanasPessoa.map((semana, idx) => {
+                  const primeiroDiaMes = semana.find((d) => d && d.slice(8, 10) === "01") ?? null;
+                  const rotuloMes =
+                    idx === 0 || primeiroDiaMes
+                      ? primeiroDiaMes ?? (idx === 0 ? semana.find(Boolean) : null)
+                      : null;
+                  return (
+                    <div key={idx}>
+                      {rotuloMes && (
+                        <p className="px-1 pb-1 pt-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                          {nomeMesAno(rotuloMes)}
+                        </p>
+                      )}
+                      <div className="grid grid-cols-7 gap-1">
+                        {semana.map((dia, col) => {
+                          if (!dia) {
+                            return <div key={`vazio-${idx}-${col}`} className="min-h-[4.5rem] rounded-lg bg-stone-50/80" />;
+                          }
+                          const lista = porDiaPessoa.get(dia) ?? [];
+                          const ehHoje = dia === hojeISO;
+                          return (
+                            <div
+                              key={dia}
+                              className={`min-h-[4.5rem] rounded-lg border p-1.5 ${
+                                ehHoje
+                                  ? "border-primaria bg-primaria/5"
+                                  : lista.length > 0
+                                    ? "border-emerald-200 bg-emerald-50/60"
+                                    : "border-dashed border-stone-200 bg-stone-50"
+                              }`}
+                            >
+                              <p className={`text-sm font-bold ${ehHoje ? "text-primaria-escura" : "text-slate-900"}`}>
+                                {dia.slice(8, 10)}
+                              </p>
+                              {lista.length === 0 ? (
+                                <p className="text-[10px] text-slate-400">Livre</p>
+                              ) : (
+                                lista.map((slot) => {
+                                  const conv = convocacaoDoSlot(db, slot.id);
+                                  return (
+                                    <div key={slot.id} className="mt-0.5">
+                                      <p className="text-[11px] font-medium text-slate-800">
+                                        {slot.hora_inicio}–{slot.hora_fim}
+                                      </p>
+                                      {conv && (
+                                        <p className="text-[10px] text-slate-500">{rotuloStatusConvocacao(conv.status)}</p>
+                                      )}
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

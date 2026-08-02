@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { CalendarDays, Check, Copy, Plus, RefreshCw } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
@@ -12,12 +12,15 @@ import {
   criarSlot,
   formatDataBrLonga,
   gerarEscalaPadraoClt,
-  janela28Dias,
+  janelaCalendarioEscala,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
+  moverSlotParaData,
   nomeDiaSemana,
+  nomeMesAno,
   pessoaPrecisaConvocacao,
   registrarRespostaConvocacao,
+  rotuloPeriodoJanela,
   rotuloStatusConvocacao,
   rotulosCabecalhoSemana,
   slotsNaJanela,
@@ -102,8 +105,12 @@ export default function RhEscalaPage() {
   const [copiado, setCopiado] = useState(false);
   const [formPadrao, setFormPadrao] = useState<FormPadrao | null>(null);
   const [erroPadrao, setErroPadrao] = useState<string | null>(null);
+  const [arrastandoSlotId, setArrastandoSlotId] = useState<string | null>(null);
+  const [diaDestinoHover, setDiaDestinoHover] = useState<string | null>(null);
+  const arrastouRef = useRef(false);
 
-  const dias = useMemo(() => janela28Dias(hojeISO()), []);
+  const dias = useMemo(() => janelaCalendarioEscala(hojeISO()), []);
+  const periodoRotulo = useMemo(() => rotuloPeriodoJanela(dias), [dias]);
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
     [db.pessoas]
@@ -257,7 +264,7 @@ export default function RhEscalaPage() {
     mutate((atual) => Object.assign(atual, proximo));
     setFormPadrao(null);
     setMensagem(
-      `Padrão gerado: ${resultado.criados} plantão(ões) nos próximos 28 dias` +
+      `Padrão gerado: ${resultado.criados} plantão(ões) no período do calendário` +
         (resultado.pulados ? ` (${resultado.pulados} dia(s) já existiam)` : "") +
         "."
     );
@@ -281,6 +288,21 @@ export default function RhEscalaPage() {
     }
   }
 
+  function soltarPlantaoNoDia(slotId: string, novaData: string) {
+    const proximo = structuredClone(db);
+    const r = moverSlotParaData(proximo, slotId, novaData);
+    setArrastandoSlotId(null);
+    setDiaDestinoHover(null);
+    if (!r.sucesso) {
+      setErro(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(null);
+    setMensagem(`Plantão movido para ${formatDataBrLonga(novaData)}.`);
+    if (r.avisos.length) setAviso(r.avisos.join(" "));
+  }
+
   const detalheSlot = detalheSlotId ? db.escala_slots.find((s) => s.id === detalheSlotId) : null;
   const detalheConv: ConvocacaoIntermitente | undefined = detalheSlot
     ? convocacaoDoSlot(db, detalheSlot.id)
@@ -289,8 +311,8 @@ export default function RhEscalaPage() {
   return (
     <div>
       <TituloPagina
-        titulo="Escala — 28 dias"
-        subtitulo="Plantões dos colaboradores e convocações de intermitentes. Contrato escrito + eSocial vêm antes; WhatsApp só convoca o período."
+        titulo="Escala"
+        subtitulo={`Resto do mês atual + mês seguinte (${periodoRotulo}). Arraste um nome para outro dia para remarcar. Contrato escrito + eSocial vêm antes; WhatsApp só convoca o período.`}
         acao={
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-secundario" onClick={abrirPadrao}>
@@ -329,13 +351,13 @@ export default function RhEscalaPage() {
       </div>
 
       {slots.length === 0 ? (
-        <Vazio mensagem="Nenhum plantão nos próximos 28 dias. Clique num dia do calendário para lançar." />
+        <Vazio mensagem="Nenhum plantão no período. Clique num dia do calendário para lançar." />
       ) : null}
 
       <Card className="overflow-x-auto p-3 sm:p-4">
         <p className="mb-3 text-sm text-slate-600">
-          Calendário dos próximos 28 dias — todos os dias aparecem; clique no dia para adicionar ou no nome
-          para ver o plantão.
+          Calendário {periodoRotulo} — arraste o nome para outro dia para remarcar; clique no nome para abrir o
+          detalhe; clique no dia ou + para adicionar.
         </p>
         <div className="min-w-[640px]">
           <div className="mb-1 grid grid-cols-7 gap-1">
@@ -346,86 +368,138 @@ export default function RhEscalaPage() {
             ))}
           </div>
           <div className="space-y-1">
-            {semanas.map((semana, idx) => (
-              <div key={idx} className="grid grid-cols-7 gap-1">
-                {semana.map((dia, col) => {
-                  if (!dia) {
-                    return <div key={`vazio-${idx}-${col}`} className="min-h-[7.5rem] rounded-lg bg-stone-50/80" />;
-                  }
-                  const lista = porDia.get(dia) ?? [];
-                  const ehHoje = dia === hoje;
-                  return (
-                    <div
-                      key={dia}
-                      className={`flex min-h-[7.5rem] flex-col rounded-lg border p-1.5 ${
-                        ehHoje
-                          ? "border-primaria bg-primaria/5"
-                          : lista.length > 0
-                            ? "border-stone-200 bg-white"
-                            : "border-dashed border-stone-200 bg-stone-50"
-                      }`}
-                    >
-                      <div className="mb-1 flex items-center justify-between gap-1">
-                        <button
-                          type="button"
-                          className="rounded px-0.5 text-left hover:bg-stone-100"
-                          onClick={() => abrirNovo(dia)}
-                          title="Adicionar plantão neste dia"
+            {semanas.map((semana, idx) => {
+              const primeiroDiaMes = semana.find((d) => d && d.slice(8, 10) === "01") ?? null;
+              const inicioMesNaSemana =
+                idx === 0 || semana.some((d) => d && d.slice(8, 10) === "01")
+                  ? primeiroDiaMes ?? (idx === 0 ? semana.find(Boolean) : null)
+                  : null;
+              return (
+                <div key={idx}>
+                  {inicioMesNaSemana && (
+                    <p className="px-1 pb-1 pt-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                      {nomeMesAno(inicioMesNaSemana)}
+                    </p>
+                  )}
+                  <div className="grid grid-cols-7 gap-1">
+                    {semana.map((dia, col) => {
+                      if (!dia) {
+                        return <div key={`vazio-${idx}-${col}`} className="min-h-[7.5rem] rounded-lg bg-stone-50/80" />;
+                      }
+                      const lista = porDia.get(dia) ?? [];
+                      const ehHoje = dia === hoje;
+                      const ehDestino = diaDestinoHover === dia && arrastandoSlotId;
+                      return (
+                        <div
+                          key={dia}
+                          className={`flex min-h-[7.5rem] flex-col rounded-lg border p-1.5 transition-colors ${
+                            ehDestino
+                              ? "border-primaria bg-primaria/10 ring-2 ring-primaria/30"
+                              : ehHoje
+                                ? "border-primaria bg-primaria/5"
+                                : lista.length > 0
+                                  ? "border-stone-200 bg-white"
+                                  : "border-dashed border-stone-200 bg-stone-50"
+                          }`}
+                          onDragOver={(e) => {
+                            if (!arrastandoSlotId) return;
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                            setDiaDestinoHover(dia);
+                          }}
+                          onDragLeave={() => {
+                            setDiaDestinoHover((atual) => (atual === dia ? null : atual));
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            const slotId = e.dataTransfer.getData("text/escala-slot-id") || arrastandoSlotId;
+                            if (slotId) soltarPlantaoNoDia(slotId, dia);
+                          }}
                         >
-                          <span className={`text-sm font-bold ${ehHoje ? "text-primaria-escura" : "text-slate-900"}`}>
-                            {dia.slice(8, 10)}
-                          </span>
-                          <span className="ml-1 text-[10px] text-slate-500 sm:hidden">
-                            {nomeDiaSemana(dia).slice(0, 3)}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded p-0.5 text-slate-400 hover:bg-stone-100 hover:text-primaria-escura"
-                          onClick={() => abrirNovo(dia)}
-                          aria-label={`Adicionar plantão em ${formatDataBrLonga(dia)}`}
-                        >
-                          <Plus size={14} />
-                        </button>
-                      </div>
-                      <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
-                        {lista.length === 0 ? (
-                          <p className="px-0.5 text-[10px] text-slate-400">Livre</p>
-                        ) : (
-                          lista.map((slot) => {
-                            const conv = convocacaoDoSlot(db, slot.id);
-                            return (
-                              <button
-                                key={slot.id}
-                                type="button"
-                                className="truncate rounded bg-stone-100 px-1 py-0.5 text-left text-[11px] font-medium text-slate-800 hover:bg-primaria/15"
-                                title={`${nomePessoa(slot.pessoa_id)} · ${slot.hora_inicio}–${slot.hora_fim}${
-                                  conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
-                                }`}
-                                onClick={() => {
-                                  setDetalheSlotId(slot.id);
-                                  setErro(null);
-                                  setCopiado(false);
-                                }}
-                              >
-                                {primeiroNome(slot.pessoa_id)}
-                                <span className="font-normal text-slate-500"> {slot.hora_inicio}</span>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
+                          <div className="mb-1 flex items-center justify-between gap-1">
+                            <button
+                              type="button"
+                              className="rounded px-0.5 text-left hover:bg-stone-100"
+                              onClick={() => abrirNovo(dia)}
+                              title="Adicionar plantão neste dia"
+                            >
+                              <span className={`text-sm font-bold ${ehHoje ? "text-primaria-escura" : "text-slate-900"}`}>
+                                {dia.slice(8, 10)}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded p-0.5 text-slate-400 hover:bg-stone-100 hover:text-primaria-escura"
+                              onClick={() => abrirNovo(dia)}
+                              aria-label={`Adicionar plantão em ${formatDataBrLonga(dia)}`}
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
+                          <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
+                            {lista.length === 0 ? (
+                              <p className="px-0.5 text-[10px] text-slate-400">Livre</p>
+                            ) : (
+                              lista.map((slot) => {
+                                const conv = convocacaoDoSlot(db, slot.id);
+                                return (
+                                  <button
+                                    key={slot.id}
+                                    type="button"
+                                    draggable
+                                    className={`cursor-grab truncate rounded bg-stone-100 px-1 py-0.5 text-left text-[11px] font-medium text-slate-800 hover:bg-primaria/15 active:cursor-grabbing ${
+                                      arrastandoSlotId === slot.id ? "opacity-50" : ""
+                                    }`}
+                                    title={`${nomePessoa(slot.pessoa_id)} · ${slot.hora_inicio}–${slot.hora_fim}${
+                                      conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
+                                    } — arraste para outro dia`}
+                                    onDragStart={(e) => {
+                                      arrastouRef.current = false;
+                                      setArrastandoSlotId(slot.id);
+                                      e.dataTransfer.setData("text/escala-slot-id", slot.id);
+                                      e.dataTransfer.effectAllowed = "move";
+                                    }}
+                                    onDragEnd={() => {
+                                      setArrastandoSlotId(null);
+                                      setDiaDestinoHover(null);
+                                      // evita abrir detalhe no clique após arrastar
+                                      setTimeout(() => {
+                                        arrastouRef.current = false;
+                                      }, 0);
+                                    }}
+                                    onDrag={() => {
+                                      arrastouRef.current = true;
+                                    }}
+                                    onClick={() => {
+                                      if (arrastouRef.current) {
+                                        arrastouRef.current = false;
+                                        return;
+                                      }
+                                      setDetalheSlotId(slot.id);
+                                      setErro(null);
+                                      setCopiado(false);
+                                    }}
+                                  >
+                                    {primeiroNome(slot.pessoa_id)}
+                                    <span className="font-normal text-slate-500"> {slot.hora_inicio}</span>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </Card>
 
       <p className="mt-3 text-center text-xs text-slate-500">
-        Dias sem plantão aparecem como “Livre”. Use + ou clique na data para preencher.
+        Dias sem plantão aparecem como “Livre”. No celular, use o detalhe do plantão se o arrastar não funcionar bem.
       </p>
 
       <Modal aberto={form !== null} titulo="Novo plantão" onFechar={() => setForm(null)} fecharAoClicarFundo={false}>

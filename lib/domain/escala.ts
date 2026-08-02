@@ -77,20 +77,21 @@ export function setorPorTextoFuncao(funcao?: string): Exclude<SetorConvocacaoEsc
  */
 export function setorDoPlantao(
   slot: Pick<EscalaSlot, "funcao">,
-  pessoa?: Pick<PessoaRH, "tipo" | "funcao" | "funcao_custom"> | null
+  pessoa?: (Pick<PessoaRH, "tipo"> & Partial<Pick<PessoaRH, "funcao" | "funcao_custom">>) | null
 ): SetorConvocacaoEscala | null {
   if (pessoa?.tipo === "entregador") return "motoboy";
   const textoSlot = slot.funcao?.trim();
-  const textoPessoa = pessoa ? rotuloFuncao(pessoa) : "";
+  const textoPessoa = pessoa?.funcao != null ? rotuloFuncao(pessoa as Pick<PessoaRH, "funcao" | "funcao_custom">) : "";
   return setorPorTextoFuncao(textoSlot || textoPessoa) ?? null;
 }
 
 /** Setor operacional da pessoa no cadastro (para preview ao arrastar CLT). */
 export function setorOperacionalDaPessoa(
-  pessoa: Pick<PessoaRH, "tipo" | "funcao" | "funcao_custom">
+  pessoa: Pick<PessoaRH, "tipo"> & Partial<Pick<PessoaRH, "funcao" | "funcao_custom">>
 ): SetorConvocacaoEscala | null {
   if (pessoa.tipo === "entregador") return "motoboy";
-  return setorPorTextoFuncao(rotuloFuncao(pessoa));
+  if (pessoa.funcao == null) return null;
+  return setorPorTextoFuncao(rotuloFuncao(pessoa as Pick<PessoaRH, "funcao" | "funcao_custom">));
 }
 
 export type ResumoDiaEscala = {
@@ -102,7 +103,7 @@ export type ResumoDiaEscala = {
 
 export function resumoSetoresDoDia(
   slots: EscalaSlot[],
-  pessoas: Array<Pick<PessoaRH, "id" | "tipo" | "funcao" | "funcao_custom">>
+  pessoas: Array<Pick<PessoaRH, "id" | "tipo"> & Partial<Pick<PessoaRH, "funcao" | "funcao_custom">>>
 ): ResumoDiaEscala {
   const porId = new Map(pessoas.map((p) => [p.id, p]));
   const resumo: ResumoDiaEscala = { motoboys: 0, cozinha: 0, balcao: 0, clt: 0 };

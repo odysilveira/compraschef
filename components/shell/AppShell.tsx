@@ -69,6 +69,7 @@ const MENU: SecaoMenu[] = [
     itens: [
       { href: "/cadastros", rotulo: "Cadastros", icone: FolderCog },
       { href: "/fichas-tecnicas", rotulo: "Fichas técnicas", icone: BookOpenText },
+      { href: "/integracoes/saipos", rotulo: "Integração Saipos", icone: FileSpreadsheet },
     ],
   },
 ];

@@ -19,6 +19,7 @@ import {
   registrarRespostaConvocacao,
   rotuloStatusConvocacao,
   slotsNaJanela,
+  validarPreRequisitosConvocacao,
   type PadraoEscalaClt,
 } from "@/lib/domain/escala";
 import { rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
@@ -279,7 +280,7 @@ export default function RhEscalaPage() {
     <div>
       <TituloPagina
         titulo="Escala — 28 dias"
-        subtitulo="Plantões dos colaboradores e convocações de intermitentes (WhatsApp + aceite)."
+        subtitulo="Plantões dos colaboradores e convocações de intermitentes. Contrato escrito + eSocial vêm antes; WhatsApp só convoca o período."
         acao={
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-secundario" onClick={abrirPadrao}>
@@ -441,18 +442,45 @@ export default function RhEscalaPage() {
             {form.pessoa_id &&
               (() => {
                 const p = db.pessoas.find((x) => x.id === form.pessoa_id);
-                return p && pessoaPrecisaConvocacao(p.tipo) ? (
-                  <p className="text-xs text-slate-600">
-                    Intermitente/entregador: ao salvar, o sistema gera o texto de convocação WhatsApp (rascunho).
-                  </p>
-                ) : null;
+                if (!p || !pessoaPrecisaConvocacao(p.tipo)) return null;
+                const gate = validarPreRequisitosConvocacao(p);
+                return (
+                  <div className="space-y-2">
+                    <p className="text-xs text-slate-600">
+                      Contrato e eSocial vêm antes; o WhatsApp só convoca o período (não substitui o contrato escrito).
+                    </p>
+                    {!gate.ok && (
+                      <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                        <p className="font-semibold">Não dá para convocar ainda</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-4">
+                          {gate.erros.map((msg) => (
+                            <li key={msg}>{msg}</li>
+                          ))}
+                        </ul>
+                        <Link href={`/rh/${p.id}`} className="mt-2 inline-block text-primaria-escura underline">
+                          Abrir perfil e marcar contrato / eSocial
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                );
               })()}
             {erro && <p className="text-sm font-medium text-destaque">{erro}</p>}
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-secundario" onClick={() => setForm(null)}>
                 Cancelar
               </button>
-              <button type="submit" className="btn-primario">
+              <button
+                type="submit"
+                className="btn-primario"
+                disabled={Boolean(
+                  form.pessoa_id &&
+                    (() => {
+                      const p = db.pessoas.find((x) => x.id === form.pessoa_id);
+                      return p && pessoaPrecisaConvocacao(p.tipo) && !validarPreRequisitosConvocacao(p).ok;
+                    })()
+                )}
+              >
                 Salvar
               </button>
             </div>

@@ -21,6 +21,27 @@ export function pessoaPrecisaConvocacao(tipo: TipoPessoaRH): boolean {
   return tipo === "intermitente" || tipo === "entregador";
 }
 
+/**
+ * Contrato escrito + eSocial antes da 1ª convocação (WhatsApp não substitui o contrato).
+ * Retorna erros bloqueantes para quem precisa de convocação.
+ */
+export function validarPreRequisitosConvocacao(pessoa: PessoaRH): { ok: boolean; erros: string[] } {
+  if (!pessoaPrecisaConvocacao(pessoa.tipo)) return { ok: true, erros: [] };
+  const erros: string[] = [];
+  if (!pessoa.contrato_assinado) {
+    erros.push(
+      "Contrato intermitente ainda não marcado como assinado. O WhatsApp não substitui o contrato escrito (papel ou assinatura eletrônica)."
+    );
+  }
+  if (!pessoa.esocial_ok) {
+    erros.push("eSocial ainda não marcado como OK. Registre no eSocial antes do primeiro período.");
+  }
+  if (!pessoa.valor_hora || pessoa.valor_hora <= 0) {
+    erros.push("Informe o valor-hora no cadastro da pessoa.");
+  }
+  return { ok: erros.length === 0, erros };
+}
+
 export function rotuloStatusConvocacao(status: StatusConvocacao): string {
   switch (status) {
     case "rascunho":
@@ -149,6 +170,13 @@ export function criarSlot(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dados.data)) erros.push("Data inválida.");
   const horas = calcularHorasPagas(dados.hora_inicio, dados.hora_fim, dados.intervalo_min);
   if ("erro" in horas) erros.push(horas.erro);
+
+  const deveConvocar = opcoes.criarConvocacao !== false && pessoa && pessoaPrecisaConvocacao(pessoa.tipo);
+  if (deveConvocar && pessoa) {
+    const gate = validarPreRequisitosConvocacao(pessoa);
+    if (!gate.ok) erros.push(...gate.erros);
+  }
+
   if (erros.length || !pessoa || "erro" in horas) return { sucesso: false, erros, avisos };
 
   const agora = opcoes.agora ?? new Date().toISOString();
@@ -171,7 +199,6 @@ export function criarSlot(
   db.escala_slots.push(slot);
 
   let convocacao: ConvocacaoIntermitente | undefined;
-  const deveConvocar = opcoes.criarConvocacao !== false && pessoaPrecisaConvocacao(pessoa.tipo);
   if (deveConvocar) {
     const r = criarConvocacaoParaSlot(db, slot.id, { agora, id: opcoes.convocacaoId });
     if (!r.sucesso) return { sucesso: false, erros: r.erros, avisos: r.avisos, slot };
@@ -228,11 +255,15 @@ export function criarConvocacaoParaSlot(
   const pessoa = db.pessoas.find((p) => p.id === slot.pessoa_id);
   if (!pessoa) return { sucesso: false, erros: ["Pessoa não encontrada."], avisos: [] };
 
+  const gate = validarPreRequisitosConvocacao(pessoa);
+  if (!gate.ok) return { sucesso: false, erros: gate.erros, avisos: [] };
+
   const horas = calcularHorasPagas(slot.hora_inicio, slot.hora_fim, slot.intervalo_min);
   if ("erro" in horas) return { sucesso: false, erros: [horas.erro], avisos: [] };
 
   const agora = opcoes.agora ?? new Date().toISOString();
   const valor_hora = opcoes.valorHora ?? pessoa.valor_hora ?? 0;
+  // valor_hora já validado no gate; mantém checagem defensiva
   if (!valor_hora || valor_hora <= 0) {
     return { sucesso: false, erros: ["Informe o valor-hora no cadastro da pessoa."], avisos: [] };
   }

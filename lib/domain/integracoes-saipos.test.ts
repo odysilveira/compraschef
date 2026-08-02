@@ -97,6 +97,31 @@ describe("integração Saipos", () => {
     expect(porCodigo.get("A8")?.preco_centavos).toBe(6490);
   });
 
+  it("rejeita preços negativos nos quatro formatos obrigatórios", () => {
+    const buffer = criarPlanilha([
+      cabecalho(),
+      ["PRATO", "Cat", "U", "Neg 1", "", "-1", "Não", "N1", "Não"],
+      ["PRATO", "Cat", "U", "Neg 2", "", "-10,00", "Não", "N2", "Não"],
+      ["PRATO", "Cat", "U", "Neg 3", "", "R$ -5,50", "Não", "N3", "Não"],
+      ["PRATO", "Cat", "U", "Neg 4", "", -3.75, "Não", "N4", "Não"],
+      ["PRATO", "Cat", "U", "Zero", "", "0", "Não", "N5", "Não"],
+    ]);
+
+    const resultado = analisarPlanilhaSaipos(buffer);
+    expect(resultado.sucesso).toBe(true);
+    if (!resultado.sucesso) return;
+
+    const porCodigo = new Map(resultado.registros.map((registro) => [registro.codigo_completo, registro]));
+
+    for (const codigo of ["N1", "N2", "N3", "N4"]) {
+      const registro = porCodigo.get(codigo);
+      expect(registro?.preco_centavos).toBeNull();
+      expect(registro?.alertas.some((item) => item.toLowerCase().includes("preço inválido"))).toBe(true);
+    }
+
+    expect(porCodigo.get("N5")?.preco_centavos).toBe(0);
+  });
+
   it("bloqueia análise com coluna ausente e marca código vazio", () => {
     const ausente = criarPlanilha([
       ["Tipo", "Categoria", "Tamanho", "Descrição", "Complemento", "Preço", "Pesável", "Código Saipos"],

@@ -196,6 +196,9 @@ function parsePrecoCentavos(valorBruto: unknown): { centavos: number | null; err
     if (!Number.isFinite(valorBruto)) {
       return { centavos: null, erro: "Preço inválido." };
     }
+    if (valorBruto < 0) {
+      return { centavos: null, erro: `Preço inválido: ${valorBruto}.` };
+    }
     return { centavos: Math.round(valorBruto * 100) };
   }
 
@@ -230,6 +233,9 @@ function parsePrecoCentavos(valorBruto: unknown): { centavos: number | null; err
 
   const numero = Number(limpo);
   if (!Number.isFinite(numero)) {
+    return { centavos: null, erro: `Preço inválido: ${textoOriginal}.` };
+  }
+  if (numero < 0) {
     return { centavos: null, erro: `Preço inválido: ${textoOriginal}.` };
   }
 

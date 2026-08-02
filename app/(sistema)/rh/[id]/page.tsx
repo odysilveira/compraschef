@@ -14,11 +14,11 @@ import {
 } from "@/lib/domain/contrato-pessoa";
 import {
   convocacaoDoSlot,
-  formatDataBrLonga,
   janela28Dias,
-  nomeDiaSemana,
+  montarGradeCalendario,
   pessoaPrecisaConvocacao,
   rotuloStatusConvocacao,
+  rotulosCabecalhoSemana,
   slotsDaPessoaNaJanela,
 } from "@/lib/domain/escala";
 import {
@@ -35,21 +35,9 @@ import {
 } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { moeda } from "@/lib/format";
-import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, StatusConvocacao, TipoPessoaRH } from "@/lib/types";
+import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
 type AbaPerfil = "dados" | "acesso" | "escala";
-
-function BadgeConvocacao({ status }: { status: StatusConvocacao }) {
-  const cor =
-    status === "aceita"
-      ? "verde"
-      : status === "enviada"
-        ? "azul"
-        : status === "recusada" || status === "silencio"
-          ? "laranja"
-          : "cinza";
-  return <Badge cor={cor}>{rotuloStatusConvocacao(status)}</Badge>;
-}
 
 export default function RhPerfilPage() {
   const params = useParams<{ id: string }>();
@@ -72,6 +60,18 @@ export default function RhPerfilPage() {
     () => (pessoa ? slotsDaPessoaNaJanela(db, pessoa.id, diasJanela) : []),
     [db, pessoa, diasJanela]
   );
+  const porDiaPessoa = useMemo(() => {
+    const map = new Map<string, typeof plantaoesPessoa>();
+    for (const dia of diasJanela) map.set(dia, []);
+    for (const slot of plantaoesPessoa) {
+      const lista = map.get(slot.data);
+      if (lista) lista.push(slot);
+    }
+    return map;
+  }, [diasJanela, plantaoesPessoa]);
+  const semanasPessoa = useMemo(() => montarGradeCalendario(diasJanela, 1), [diasJanela]);
+  const cabecalhoSemana = useMemo(() => rotulosCabecalhoSemana(1), []);
+  const hojeISO = diasJanela[0] ?? "";
 
   useEffect(() => {
     if (pessoa) setForm({ ...pessoa, permissoes: { ...pessoa.permissoes } });
@@ -684,46 +684,77 @@ export default function RhPerfilPage() {
               </p>
             </div>
             <Link href="/rh/escala" className="btn-secundario text-sm">
-              Abrir escala completa
+              Ver calendário da equipe
             </Link>
           </div>
 
           {pessoaPrecisaConvocacao(pessoa.tipo) && (
             <p className="text-xs text-slate-600">
-              Intermitente/entregador: a convocação por WhatsApp aparece ao lado de cada plantão (quando houver).
+              Intermitente/entregador: a convocação por WhatsApp aparece em cada dia com plantão (quando houver).
             </p>
           )}
 
-          {plantaoesPessoa.length === 0 ? (
-            <Vazio mensagem="Lance plantões em RH → Escala (ou use Gerar padrão CLT para colaborador)." />
-          ) : (
-            <ul className="divide-y divide-stone-200 rounded-lg border border-stone-200 bg-white">
-              {plantaoesPessoa.map((slot) => {
-                const conv = convocacaoDoSlot(db, slot.id);
-                return (
-                  <li key={slot.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm">
-                    <div>
-                      <p className="font-semibold">
-                        {formatDataBrLonga(slot.data)}{" "}
-                        <span className="font-normal text-slate-500">({nomeDiaSemana(slot.data)})</span>
-                      </p>
-                      <p className="text-slate-600">
-                        {slot.hora_inicio}–{slot.hora_fim}
-                        {slot.funcao ? ` · ${slot.funcao}` : ""}
-                        {slot.local ? ` · ${slot.local}` : ""}
-                      </p>
-                    </div>
-                    {conv ? <BadgeConvocacao status={conv.status} /> : pessoaPrecisaConvocacao(pessoa.tipo) ? (
-                      <Badge cor="cinza">Sem convocação</Badge>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <div className="overflow-x-auto">
+            <div className="min-w-[520px]">
+              <div className="mb-1 grid grid-cols-7 gap-1">
+                {cabecalhoSemana.map((rotulo) => (
+                  <div key={rotulo} className="px-1 py-1 text-center text-xs font-semibold uppercase text-slate-500">
+                    {rotulo}
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-1">
+                {semanasPessoa.map((semana, idx) => (
+                  <div key={idx} className="grid grid-cols-7 gap-1">
+                    {semana.map((dia, col) => {
+                      if (!dia) {
+                        return <div key={`vazio-${idx}-${col}`} className="min-h-[4.5rem] rounded-lg bg-stone-50/80" />;
+                      }
+                      const lista = porDiaPessoa.get(dia) ?? [];
+                      const ehHoje = dia === hojeISO;
+                      return (
+                        <div
+                          key={dia}
+                          className={`min-h-[4.5rem] rounded-lg border p-1.5 ${
+                            ehHoje
+                              ? "border-primaria bg-primaria/5"
+                              : lista.length > 0
+                                ? "border-emerald-200 bg-emerald-50/60"
+                                : "border-dashed border-stone-200 bg-stone-50"
+                          }`}
+                        >
+                          <p className={`text-sm font-bold ${ehHoje ? "text-primaria-escura" : "text-slate-900"}`}>
+                            {dia.slice(8, 10)}
+                          </p>
+                          {lista.length === 0 ? (
+                            <p className="text-[10px] text-slate-400">Livre</p>
+                          ) : (
+                            lista.map((slot) => {
+                              const conv = convocacaoDoSlot(db, slot.id);
+                              return (
+                                <div key={slot.id} className="mt-0.5">
+                                  <p className="text-[11px] font-medium text-slate-800">
+                                    {slot.hora_inicio}–{slot.hora_fim}
+                                  </p>
+                                  {conv && (
+                                    <p className="text-[10px] text-slate-500">{rotuloStatusConvocacao(conv.status)}</p>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
 
           <p className="text-xs text-slate-500">
-            Avaliações, histórico de atividades e porcionamentos (cozinha) entram depois neste perfil.
+            No calendário da equipe (RH → Escala) você vê os nomes de todo mundo em cada dia. Avaliações e
+            histórico entram depois neste perfil.
           </p>
         </Card>
       )}

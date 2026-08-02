@@ -69,6 +69,33 @@ export function janela28Dias(hoje: string | Date = new Date()): string[] {
   return dias;
 }
 
+/**
+ * Monta semanas do calendário a partir da janela de dias.
+ * `inicioSemana`: 0 = domingo, 1 = segunda (padrão BR).
+ * Células fora da janela vêm como `null`.
+ */
+export function montarGradeCalendario(
+  dias: string[],
+  inicioSemana: 0 | 1 = 1
+): Array<Array<string | null>> {
+  if (dias.length === 0) return [];
+  const primeiro = parseDataLocal(dias[0]!);
+  const offset = (primeiro.getDay() - inicioSemana + 7) % 7;
+  const celulas: Array<string | null> = [...Array.from({ length: offset }, () => null), ...dias];
+  while (celulas.length % 7 !== 0) celulas.push(null);
+  const semanas: Array<Array<string | null>> = [];
+  for (let i = 0; i < celulas.length; i += 7) {
+    semanas.push(celulas.slice(i, i + 7));
+  }
+  return semanas;
+}
+
+export function rotulosCabecalhoSemana(inicioSemana: 0 | 1 = 1): string[] {
+  const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  if (inicioSemana === 0) return labels;
+  return [...labels.slice(1), labels[0]!];
+}
+
 export function parseDataLocal(isoDate: string): Date {
   const [y, m, d] = isoDate.slice(0, 10).split("-").map(Number);
   return new Date(y, m - 1, d);

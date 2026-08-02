@@ -352,10 +352,40 @@ describe("escala domain", () => {
     expect(resumoSetoresDoDia(slots, pessoas)).toEqual({ motoboys: 1, cozinha: 1, balcao: 1, clt: 0 });
     expect(
       resumoSetoresDoDia(
-        [...slots, { id: "4", pessoa_id: "c1", data: "2026-08-10", hora_inicio: "11:00", hora_fim: "23:00", intervalo_min: 60, funcao: "Cozinha", criado_em: "", atualizado_em: "" }],
-        [...pessoas, { id: "c1", tipo: "colaborador" as const }]
+        [
+          ...slots,
+          {
+            id: "4",
+            pessoa_id: "c1",
+            data: "2026-08-10",
+            hora_inicio: "11:00",
+            hora_fim: "23:00",
+            intervalo_min: 60,
+            funcao: "Cozinha",
+            criado_em: "",
+            atualizado_em: "",
+          },
+          {
+            id: "5",
+            pessoa_id: "c2",
+            data: "2026-08-10",
+            hora_inicio: "11:00",
+            hora_fim: "23:00",
+            intervalo_min: 60,
+            funcao: "Balcão",
+            criado_em: "",
+            atualizado_em: "",
+          },
+        ],
+        [
+          ...pessoas,
+          { id: "c1", tipo: "colaborador" as const, funcao: "cozinha" as const },
+          { id: "c2", tipo: "colaborador" as const, funcao: "balcao" as const },
+        ]
       )
-    ).toEqual({ motoboys: 1, cozinha: 1, balcao: 1, clt: 1 });
+    ).toEqual({ motoboys: 1, cozinha: 2, balcao: 2, clt: 2 });
+    expect(setorDoPlantao({ funcao: "Cozinha" }, { tipo: "colaborador", funcao: "cozinha" })).toBe("cozinha");
+    expect(setorDoPlantao({ funcao: "" }, { tipo: "colaborador", funcao: "balcao" })).toBe("balcao");
     expect(textoResumoSetores({ motoboys: 1, cozinha: 2, balcao: 0, clt: 1 })).toBe("1 CLT · 1 moto · 2 coz");
   });
 

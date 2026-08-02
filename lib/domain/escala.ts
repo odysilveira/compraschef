@@ -63,17 +63,34 @@ function normalizarTextoSetor(valor: string): string {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-/** Classifica o plantão pelo tipo da pessoa + texto da função do slot. */
-export function setorDoPlantao(
-  slot: Pick<EscalaSlot, "funcao">,
-  pessoa?: Pick<PessoaRH, "tipo"> | null
-): SetorConvocacaoEscala | null {
-  if (pessoa?.tipo === "entregador") return "motoboy";
-  if (pessoa?.tipo === "colaborador") return null;
-  const texto = normalizarTextoSetor(slot.funcao ?? "");
+/** Cozinha / balcão a partir do texto da função (CLT ou intermitente). */
+export function setorPorTextoFuncao(funcao?: string): Exclude<SetorConvocacaoEscala, "motoboy"> | null {
+  const texto = normalizarTextoSetor(funcao ?? "");
   if (texto.includes("cozinha")) return "cozinha";
   if (texto.includes("balc") || texto.includes("caixa")) return "balcao";
   return null;
+}
+
+/**
+ * Classifica o plantão pelo tipo da pessoa + função do slot (ou da pessoa).
+ * CLT de cozinha conta como cozinha; CLT de balcão/caixa conta como balcão.
+ */
+export function setorDoPlantao(
+  slot: Pick<EscalaSlot, "funcao">,
+  pessoa?: Pick<PessoaRH, "tipo" | "funcao" | "funcao_custom"> | null
+): SetorConvocacaoEscala | null {
+  if (pessoa?.tipo === "entregador") return "motoboy";
+  const textoSlot = slot.funcao?.trim();
+  const textoPessoa = pessoa ? rotuloFuncao(pessoa) : "";
+  return setorPorTextoFuncao(textoSlot || textoPessoa) ?? null;
+}
+
+/** Setor operacional da pessoa no cadastro (para preview ao arrastar CLT). */
+export function setorOperacionalDaPessoa(
+  pessoa: Pick<PessoaRH, "tipo" | "funcao" | "funcao_custom">
+): SetorConvocacaoEscala | null {
+  if (pessoa.tipo === "entregador") return "motoboy";
+  return setorPorTextoFuncao(rotuloFuncao(pessoa));
 }
 
 export type ResumoDiaEscala = {
@@ -85,16 +102,13 @@ export type ResumoDiaEscala = {
 
 export function resumoSetoresDoDia(
   slots: EscalaSlot[],
-  pessoas: Array<Pick<PessoaRH, "id" | "tipo">>
+  pessoas: Array<Pick<PessoaRH, "id" | "tipo" | "funcao" | "funcao_custom">>
 ): ResumoDiaEscala {
   const porId = new Map(pessoas.map((p) => [p.id, p]));
   const resumo: ResumoDiaEscala = { motoboys: 0, cozinha: 0, balcao: 0, clt: 0 };
   for (const slot of slots) {
     const pessoa = porId.get(slot.pessoa_id);
-    if (pessoa?.tipo === "colaborador") {
-      resumo.clt += 1;
-      continue;
-    }
+    if (pessoa?.tipo === "colaborador") resumo.clt += 1;
     const setor = setorDoPlantao(slot, pessoa);
     if (setor === "motoboy") resumo.motoboys += 1;
     else if (setor === "cozinha") resumo.cozinha += 1;

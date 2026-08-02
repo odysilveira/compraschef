@@ -32,6 +32,7 @@ import {
   slotsNaJanela,
   textoResumoSetores,
   validarPreRequisitosConvocacao,
+  setorOperacionalDaPessoa,
   type PadraoEscalaClt,
   type SetorArrastoEscala,
   type SetorConvocacaoEscala,
@@ -609,7 +610,8 @@ export default function RhEscalaPage() {
             <div>
               <p className="text-sm font-bold text-slate-900">Quem entra na escala</p>
               <p className="text-xs text-slate-600">
-                CLT: arraste um dia ou gere 12x36 (dia sim / dia não). Intermitentes e motoboys: arraste para convocar.
+                CLT: arraste um dia ou gere 12x36. Se a função for cozinha ou balcão/caixa, entra na conta do setor no
+                dia. Intermitentes e motoboys: arraste para convocar.
               </p>
             </div>
             <BancoPessoas
@@ -708,12 +710,21 @@ export default function RhEscalaPage() {
                           const resumo = resumoSetoresDoDia(lista, db.pessoas ?? []);
                           const resumoPreview =
                             ehDestino && arrasto?.tipo === "pessoa"
-                              ? {
-                                  clt: resumo.clt + (arrasto.setor === "clt" ? 1 : 0),
-                                  motoboys: resumo.motoboys + (arrasto.setor === "motoboy" ? 1 : 0),
-                                  cozinha: resumo.cozinha + (arrasto.setor === "cozinha" ? 1 : 0),
-                                  balcao: resumo.balcao + (arrasto.setor === "balcao" ? 1 : 0),
-                                }
+                              ? (() => {
+                                  const pessoaArrasto = db.pessoas.find((p) => p.id === arrasto.id);
+                                  const setorClt =
+                                    arrasto.setor === "clt" && pessoaArrasto
+                                      ? setorOperacionalDaPessoa(pessoaArrasto)
+                                      : null;
+                                  const setorEfetivo =
+                                    arrasto.setor === "clt" ? setorClt : (arrasto.setor as SetorConvocacaoEscala);
+                                  return {
+                                    clt: resumo.clt + (arrasto.setor === "clt" ? 1 : 0),
+                                    motoboys: resumo.motoboys + (setorEfetivo === "motoboy" ? 1 : 0),
+                                    cozinha: resumo.cozinha + (setorEfetivo === "cozinha" ? 1 : 0),
+                                    balcao: resumo.balcao + (setorEfetivo === "balcao" ? 1 : 0),
+                                  };
+                                })()
                               : resumo;
                           const textoResumo = textoResumoSetores(resumoPreview);
                           return (
@@ -782,7 +793,11 @@ export default function RhEscalaPage() {
                                             : "bg-stone-100 text-slate-800 hover:bg-primaria/15"
                                         } ${arrasto?.tipo === "slot" && arrasto.id === slot.id ? "opacity-50" : ""}`}
                                         title={`${nomePessoa(slot.pessoa_id)} · ${
-                                          ehClt ? "CLT" : setor ? rotuloSetorConvocacao(setor) : slot.funcao ?? "—"
+                                          ehClt
+                                            ? `CLT${setor ? ` · ${rotuloSetorConvocacao(setor)}` : ""}`
+                                            : setor
+                                              ? rotuloSetorConvocacao(setor)
+                                              : slot.funcao ?? "—"
                                         } · ${slot.hora_inicio}–${slot.hora_fim}${
                                           conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
                                         } — arraste para outro dia`}
@@ -814,15 +829,12 @@ export default function RhEscalaPage() {
                                         }}
                                       >
                                         {primeiroNome(slot.pessoa_id)}
-                                        {ehClt ? (
-                                          <span className="font-normal text-sky-800"> · CLT</span>
-                                        ) : (
-                                          setor && (
-                                            <span className="font-normal text-slate-500">
-                                              {" "}
-                                              · {abrevSetorConvocacao(setor)}
-                                            </span>
-                                          )
+                                        {ehClt && <span className="font-normal text-sky-800"> · CLT</span>}
+                                        {setor && (
+                                          <span className={`font-normal ${ehClt ? "text-sky-800" : "text-slate-500"}`}>
+                                            {" "}
+                                            · {abrevSetorConvocacao(setor)}
+                                          </span>
                                         )}
                                       </button>
                                     );
@@ -834,7 +846,7 @@ export default function RhEscalaPage() {
                                   className={`mt-1 border-t border-stone-200/80 pt-1 text-[10px] leading-tight ${
                                     ehDestino ? "font-semibold text-primaria-escura" : "text-slate-500"
                                   }`}
-                                  title="CLT · motoboys · intermitentes na cozinha · intermitentes no balcão/caixa"
+                                  title="CLT · motoboys · cozinha (CLT + intermitentes) · balcão (CLT + intermitentes)"
                                 >
                                   {textoResumo || "—"}
                                 </p>
@@ -851,8 +863,8 @@ export default function RhEscalaPage() {
           </Card>
 
           <p className="mt-3 text-center text-xs text-slate-500">
-            Rodapé do dia: CLT · motoboys · intermitentes cozinha · balcão/caixa. CLT solto da lista: jornada 12 h
-            (11:00–23:00). Para dia sim/dia não, use Gerar 12x36.
+            Rodapé: CLT · moto · coz · bal. CLT de cozinha entra em coz; CLT de balcão/caixa entra em bal (junto com
+            intermitentes).
           </p>
         </div>
       </div>

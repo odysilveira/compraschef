@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Save, Users } from "lucide-react";
 import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, useDB } from "@/lib/data";
+import { validarAdiantamento, TETO_ADIANTAMENTO_PCT } from "@/lib/domain/consumos-pessoas";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -14,8 +15,12 @@ import {
   permissoesVazias,
   rotuloFuncao,
   rotuloTipoPessoa,
+  somenteDigitosCpf,
+  somenteDigitosTelefone,
+  validarCpf,
 } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
+import { moeda } from "@/lib/format";
 import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
 type AbaPerfil = "dados" | "acesso" | "proximos";
@@ -85,6 +90,18 @@ export default function RhPerfilPage() {
       setErro("Nome é obrigatório.");
       return;
     }
+    const checagemCpf = validarCpf(editando.cpf);
+    if (editando.cpf?.trim() && !checagemCpf.valido) {
+      setErro(checagemCpf.mensagem ?? "CPF inválido.");
+      return;
+    }
+    if (editando.adiantamento_valor != null && editando.adiantamento_valor > 0) {
+      const checagemAdiant = validarAdiantamento(editando.salario, editando.adiantamento_valor);
+      if (!checagemAdiant.ok) {
+        setErro(checagemAdiant.erros.join(" "));
+        return;
+      }
+    }
     mutate((banco) => {
       const i = banco.pessoas.findIndex((p) => p.id === editando.id);
       if (i < 0) return;
@@ -94,7 +111,7 @@ export default function RhPerfilPage() {
         nome: editando.nome.trim(),
         cargo: editando.cargo?.trim() || undefined,
         telefone: editando.telefone?.trim() || undefined,
-        cpf: editando.cpf?.trim() || undefined,
+        cpf: editando.cpf?.trim() ? somenteDigitosCpf(editando.cpf) : undefined,
         observacao: editando.observacao?.trim() || undefined,
         chave_pix: editando.chave_pix?.trim() || undefined,
         funcao_custom: editando.funcao === "custom" ? editando.funcao_custom?.trim() || undefined : undefined,
@@ -199,6 +216,9 @@ export default function RhPerfilPage() {
         subtitulo={`${rotuloTipoPessoa(pessoa.tipo)} · ${rotuloFuncao(pessoa)}`}
         acao={
           <div className="flex flex-wrap gap-2">
+            <Link href="/rh/escala" className="btn-secundario">
+              Ver na escala
+            </Link>
             <Badge cor={pessoa.ativo ? "verde" : "cinza"}>{pessoa.ativo ? "Ativo" : "Inativo"}</Badge>
             <Badge cor="azul">{rotuloTipoPessoa(pessoa.tipo)}</Badge>
           </div>
@@ -288,15 +308,38 @@ export default function RhPerfilPage() {
                   onChange={(e) => atualizar("cargo", e.target.value)}
                 />
               </Campo>
-              <Campo rotulo="Telefone">
+              <Campo rotulo="Telefone / WhatsApp (com DDD)">
                 <input
                   className="campo"
                   value={editando.telefone ?? ""}
-                  onChange={(e) => atualizar("telefone", e.target.value)}
+                  onChange={(e) => atualizar("telefone", somenteDigitosTelefone(e.target.value))}
+                  placeholder="43999990000"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="tel-national"
                 />
               </Campo>
               <Campo rotulo="CPF">
-                <input className="campo" value={editando.cpf ?? ""} onChange={(e) => atualizar("cpf", e.target.value)} />
+                <input
+                  className="campo"
+                  value={editando.cpf ?? ""}
+                  onChange={(e) => atualizar("cpf", somenteDigitosCpf(e.target.value))}
+                  placeholder="00000000000"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
+                />
+                {editando.cpf && (
+                  <p
+                    className={`mt-1 text-xs font-medium ${
+                      validarCpf(editando.cpf).valido && editando.cpf.length === 11
+                        ? "text-emerald-700"
+                        : "text-destaque"
+                    }`}
+                  >
+                    {validarCpf(editando.cpf).mensagem}
+                  </p>
+                )}
               </Campo>
               <Campo rotulo="Admissão">
                 <input
@@ -314,6 +357,35 @@ export default function RhPerfilPage() {
                   value={editando.salario ?? ""}
                   onChange={(e) => atualizar("salario", e.target.value ? Number(e.target.value) : undefined)}
                 />
+              </Campo>
+              <Campo rotulo="Adiantamento (valor fixo)">
+                <input
+                  type="number"
+                  step="0.01"
+                  className="campo"
+                  value={editando.adiantamento_valor ?? ""}
+                  onChange={(e) =>
+                    atualizar("adiantamento_valor", e.target.value ? Number(e.target.value) : undefined)
+                  }
+                />
+                {editando.salario != null && editando.salario > 0 && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Teto {TETO_ADIANTAMENTO_PCT}% = {moeda((editando.salario * TETO_ADIANTAMENTO_PCT) / 100)}
+                  </p>
+                )}
+                {editando.adiantamento_valor != null && editando.adiantamento_valor > 0 && (
+                  <p
+                    className={`mt-1 text-xs font-medium ${
+                      validarAdiantamento(editando.salario, editando.adiantamento_valor).ok
+                        ? "text-emerald-700"
+                        : "text-destaque"
+                    }`}
+                  >
+                    {validarAdiantamento(editando.salario, editando.adiantamento_valor).ok
+                      ? "Dentro do limite."
+                      : validarAdiantamento(editando.salario, editando.adiantamento_valor).erros.join(" ")}
+                  </p>
+                )}
               </Campo>
               <Campo rotulo="Valor-hora (intermitente/entregador)">
                 <input
@@ -481,9 +553,24 @@ export default function RhPerfilPage() {
         <Card className="space-y-3">
           <h2 className="text-base font-bold">Em breve neste perfil</h2>
           <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-            <li>Escala e calendário dos próximos 28 dias</li>
-            <li>Convocações de intermitentes (WhatsApp + prova)</li>
-            <li>Pagamentos com conciliação bancária</li>
+            <li>
+              <Link href="/rh/pagamentos" className="text-primaria-escura underline">
+                Pagamentos com conciliação bancária
+              </Link>{" "}
+              (já disponível)
+            </li>
+            <li>
+              <Link href="/rh/consumos" className="text-primaria-escura underline">
+                Consumo no restaurante (20% off)
+              </Link>{" "}
+              (já disponível)
+            </li>
+            <li>
+              <Link href="/rh/escala" className="text-primaria-escura underline">
+                Escala 28 dias e convocações
+              </Link>{" "}
+              (já disponível)
+            </li>
             <li>Avaliações e histórico de atividades</li>
             <li>Porcionamentos / feituras (quando função = cozinha)</li>
           </ul>

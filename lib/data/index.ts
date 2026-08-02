@@ -112,6 +112,26 @@ export function atualizarComNovidades(db: DB): boolean {
     mudou = true;
   }
 
+  if (!Array.isArray(db.pagamentos_pessoas)) {
+    db.pagamentos_pessoas = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.consumos_pessoas)) {
+    db.consumos_pessoas = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.escala_slots)) {
+    db.escala_slots = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.convocacoes)) {
+    db.convocacoes = [];
+    mudou = true;
+  }
+
   // Migração do mock anterior: transforma cada caixa ocupada em um lote canônico,
   // preservando exatamente o saldo que já estava salvo no navegador.
   if (!Array.isArray(db.lotes_estoque)) {

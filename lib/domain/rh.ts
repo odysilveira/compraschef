@@ -88,6 +88,54 @@ export function rotuloFuncao(pessoa: Pick<PessoaRH, "funcao" | "funcao_custom">)
   return FUNCOES_OPERACIONAIS.find((f) => f.id === pessoa.funcao)?.rotulo ?? pessoa.funcao;
 }
 
+/** Mantém só dígitos do telefone (DDD + número), no máximo 11. */
+export function somenteDigitosTelefone(valor: string): string {
+  return valor.replace(/\D+/g, "").slice(0, 11);
+}
+
+/** Mantém só dígitos do CPF, no máximo 11. */
+export function somenteDigitosCpf(valor: string): string {
+  return valor.replace(/\D+/g, "").slice(0, 11);
+}
+
+function digitoVerificadorCpf(base: string, pesoInicial: number): number {
+  let soma = 0;
+  for (let i = 0; i < base.length; i += 1) {
+    soma += Number(base[i]) * (pesoInicial - i);
+  }
+  const resto = (soma * 10) % 11;
+  return resto === 10 ? 0 : resto;
+}
+
+/**
+ * Valida autenticidade matemática do CPF (dígitos verificadores).
+ * Não consulta a Receita Federal — só rejeita números inventados/inválidos.
+ */
+export function validarCpf(cpf?: string): { valido: boolean; mensagem: string | null } {
+  const digitos = somenteDigitosCpf(cpf ?? "");
+  if (!digitos) {
+    return { valido: true, mensagem: null }; // opcional no cadastro
+  }
+  if (digitos.length < 11) {
+    return { valido: false, mensagem: "CPF incompleto (11 dígitos)." };
+  }
+  if (/^(\d)\1{10}$/.test(digitos)) {
+    return { valido: false, mensagem: "CPF inválido." };
+  }
+  const d1 = digitoVerificadorCpf(digitos.slice(0, 9), 10);
+  const d2 = digitoVerificadorCpf(digitos.slice(0, 10), 11);
+  if (d1 !== Number(digitos[9]) || d2 !== Number(digitos[10])) {
+    return { valido: false, mensagem: "CPF inválido — dígitos verificadores não conferem." };
+  }
+  return { valido: true, mensagem: "CPF válido." };
+}
+
+export function formatarCpf(cpf?: string): string {
+  const digitos = somenteDigitosCpf(cpf ?? "");
+  if (digitos.length !== 11) return digitos;
+  return digitos.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+}
+
 export function pessoaParaSeedDePerfil(input: {
   id: string;
   nome: string;

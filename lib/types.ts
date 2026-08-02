@@ -51,6 +51,8 @@ export interface PessoaRH {
   data_admissao?: string;
   valor_hora?: number;
   salario?: number;
+  /** Valor fixo de adiantamento mensal (CLT). Não pode passar de 50% do salário. */
+  adiantamento_valor?: number;
   chave_pix?: string;
   contrato_assinado?: boolean;
   esocial_ok?: boolean;
@@ -63,6 +65,114 @@ export interface PessoaRH {
   papel_sistema?: Papel;
   permissoes: PermissoesModulos;
   ativo: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type TipoPagamentoPessoa =
+  | "salario"
+  | "adiantamento"
+  | "vale"
+  | "intermitente_periodo"
+  | "freela_hora"
+  | "freela_servico"
+  | "outro";
+
+export type StatusPagamentoPessoa = "previsto" | "liberado" | "aguardando_conciliacao" | "pago";
+
+export interface PagamentoPessoa {
+  id: string;
+  pessoa_id: string;
+  tipo: TipoPagamentoPessoa;
+  descricao?: string;
+  /** Competência no formato YYYY-MM. */
+  competencia?: string;
+  vencimento: string;
+  valor: number;
+  /** Valor antes de descontos (salário bruto ou diária bruta). */
+  valor_bruto?: number;
+  desconto_consumo?: number;
+  desconto_adiantamento?: number;
+  /** Consumos abatidos neste pagamento. */
+  consumo_ids?: string[];
+  horas?: number;
+  valor_hora?: number;
+  status: StatusPagamentoPessoa;
+  pagamento_data?: string;
+  pagamento_valor?: number;
+  pagamento_banco_conta?: string;
+  pagamento_responsavel?: string;
+  pagamento_observacao?: string;
+  pagamento_informado_em?: string;
+  conciliado_em?: string;
+  conciliado_por?: string;
+  conciliacao_divergente?: boolean;
+  conciliacao_divergencia_motivo?: string;
+  conciliacao_divergencia_em?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type StatusConsumoPessoa = "pendente" | "descontado";
+
+/** Consumo do restaurante pelo funcionário (item a item, com desconto). */
+export interface ConsumoPessoa {
+  id: string;
+  pessoa_id: string;
+  /** Data do consumo YYYY-MM-DD. */
+  data: string;
+  /** Competência YYYY-MM. */
+  competencia: string;
+  descricao: string;
+  quantidade: number;
+  preco_unitario: number;
+  desconto_percentual: number;
+  valor_bruto: number;
+  valor_liquido: number;
+  status: StatusConsumoPessoa;
+  pagamento_id?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface EscalaSlot {
+  id: string;
+  pessoa_id: string;
+  /** Data do plantão YYYY-MM-DD. */
+  data: string;
+  /** HH:MM */
+  hora_inicio: string;
+  /** HH:MM */
+  hora_fim: string;
+  intervalo_min: number;
+  funcao?: string;
+  local?: string;
+  observacao?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type StatusConvocacao =
+  | "rascunho"
+  | "enviada"
+  | "aceita"
+  | "recusada"
+  | "silencio";
+
+export interface ConvocacaoIntermitente {
+  id: string;
+  escala_slot_id: string;
+  pessoa_id: string;
+  /** ISO datetime da convocação. */
+  convocada_em: string;
+  status: StatusConvocacao;
+  respondida_em?: string;
+  texto_mensagem: string;
+  valor_hora: number;
+  horas_brutas: number;
+  horas_pagas: number;
+  valor_estimado: number;
+  antecedencia_ok: boolean;
   criado_em: string;
   atualizado_em: string;
 }
@@ -525,6 +635,10 @@ export interface IntegracaoEvento {
 export interface DB {
   perfis: Perfil[];
   pessoas: PessoaRH[];
+  pagamentos_pessoas: PagamentoPessoa[];
+  consumos_pessoas: ConsumoPessoa[];
+  escala_slots: EscalaSlot[];
+  convocacoes: ConvocacaoIntermitente[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];

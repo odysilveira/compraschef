@@ -2,14 +2,16 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, Copy, Plus } from "lucide-react";
+import { CalendarDays, Check, Copy, Plus, RefreshCw } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
   LOCAL_PADRAO_ESCALA,
+  PADROES_ESCALA_CLT,
   convocacaoDoSlot,
   criarSlot,
   formatDataBrLonga,
+  gerarEscalaPadraoClt,
   janela28Dias,
   marcarConvocacaoEnviada,
   nomeDiaSemana,
@@ -18,6 +20,7 @@ import {
   rotuloStatusConvocacao,
   slotsNaJanela,
   validarPreRequisitosConvocacao,
+  type PadraoEscalaClt,
 } from "@/lib/domain/escala";
 import { rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
@@ -50,6 +53,30 @@ function formVazio(data = hojeISO(), pessoaId = ""): FormPlantao {
   };
 }
 
+type FormPadrao = {
+  pessoa_id: string;
+  padrao: PadraoEscalaClt;
+  hora_inicio: string;
+  hora_fim: string;
+  intervalo_min: string;
+  funcao: string;
+  local: string;
+  referencia_ciclo: string;
+};
+
+function formPadraoVazio(pessoaId = ""): FormPadrao {
+  return {
+    pessoa_id: pessoaId,
+    padrao: "6x1",
+    hora_inicio: "09:00",
+    hora_fim: "17:00",
+    intervalo_min: "60",
+    funcao: "",
+    local: LOCAL_PADRAO_ESCALA,
+    referencia_ciclo: hojeISO(),
+  };
+}
+
 function BadgeConvocacao({ status }: { status: StatusConvocacao }) {
   const cor =
     status === "aceita"
@@ -71,11 +98,17 @@ export default function RhEscalaPage() {
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [detalheSlotId, setDetalheSlotId] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
+  const [formPadrao, setFormPadrao] = useState<FormPadrao | null>(null);
+  const [erroPadrao, setErroPadrao] = useState<string | null>(null);
 
   const dias = useMemo(() => janela28Dias(hojeISO()), []);
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
     [db.pessoas]
+  );
+  const colaboradores = useMemo(
+    () => pessoasAtivas.filter((p) => p.tipo === "colaborador"),
+    [pessoasAtivas]
   );
   const slots = useMemo(() => slotsNaJanela(db, dias), [db, dias]);
 
@@ -180,6 +213,47 @@ export default function RhEscalaPage() {
     }
   }
 
+  function abrirPadrao() {
+    const pessoa = colaboradores[0];
+    const base = formPadraoVazio(pessoa?.id ?? "");
+    if (pessoa) base.funcao = rotuloFuncao(pessoa);
+    setFormPadrao(base);
+    setErroPadrao(null);
+  }
+
+  function salvarPadrao(e: FormEvent) {
+    e.preventDefault();
+    if (!formPadrao) return;
+    const proximo = structuredClone(db);
+    const resultado = gerarEscalaPadraoClt(
+      proximo,
+      {
+        pessoa_id: formPadrao.pessoa_id,
+        padrao: formPadrao.padrao,
+        hora_inicio: formPadrao.hora_inicio,
+        hora_fim: formPadrao.hora_fim,
+        intervalo_min: Number(formPadrao.intervalo_min) || 0,
+        funcao: formPadrao.funcao,
+        local: formPadrao.local,
+        inicio_janela: hojeISO(),
+        referencia_ciclo: formPadrao.referencia_ciclo || hojeISO(),
+      },
+      { idFactory: () => uid("esc") }
+    );
+    if (!resultado.sucesso) {
+      setErroPadrao(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setFormPadrao(null);
+    setMensagem(
+      `Padrão gerado: ${resultado.criados} plantão(ões) nos próximos 28 dias` +
+        (resultado.pulados ? ` (${resultado.pulados} dia(s) já existiam)` : "") +
+        "."
+    );
+    if (resultado.avisos.length) setAviso(resultado.avisos.join(" "));
+  }
+
   function responder(convocacaoId: string, status: Extract<StatusConvocacao, "aceita" | "recusada" | "silencio">) {
     const proximo = structuredClone(db);
     const r = registrarRespostaConvocacao(proximo, convocacaoId, status);
@@ -208,9 +282,14 @@ export default function RhEscalaPage() {
         titulo="Escala — 28 dias"
         subtitulo="Plantões dos colaboradores e convocações de intermitentes. Contrato escrito + eSocial vêm antes; WhatsApp só convoca o período."
         acao={
-          <button type="button" className="btn-primario" onClick={() => abrirNovo()}>
-            <Plus size={16} /> Novo plantão
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-secundario" onClick={abrirPadrao}>
+              <RefreshCw size={16} /> Gerar padrão CLT
+            </button>
+            <button type="button" className="btn-primario" onClick={() => abrirNovo()}>
+              <Plus size={16} /> Novo plantão
+            </button>
+          </div>
         }
       />
 
@@ -403,6 +482,117 @@ export default function RhEscalaPage() {
                 )}
               >
                 Salvar
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={formPadrao !== null}
+        titulo="Gerar padrão CLT (28 dias)"
+        onFechar={() => setFormPadrao(null)}
+        fecharAoClicarFundo={false}
+      >
+        {formPadrao && (
+          <form onSubmit={salvarPadrao} className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Preenche automaticamente os dias de trabalho do colaborador. Dias que já têm plantão são pulados.
+            </p>
+            <Campo rotulo="Colaborador *">
+              <select
+                className="campo"
+                required
+                value={formPadrao.pessoa_id}
+                onChange={(e) => {
+                  const pessoa = db.pessoas.find((p) => p.id === e.target.value);
+                  setFormPadrao({
+                    ...formPadrao,
+                    pessoa_id: e.target.value,
+                    funcao: pessoa ? rotuloFuncao(pessoa) : formPadrao.funcao,
+                  });
+                }}
+              >
+                <option value="">Selecione</option>
+                {colaboradores.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nome}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <Campo rotulo="Padrão *">
+              <select
+                className="campo"
+                value={formPadrao.padrao}
+                onChange={(e) => setFormPadrao({ ...formPadrao, padrao: e.target.value as PadraoEscalaClt })}
+              >
+                {PADROES_ESCALA_CLT.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.rotulo} — {p.descricao}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            {formPadrao.padrao !== "seg_sex" && (
+              <Campo rotulo="Início do ciclo (dia 1 de trabalho)">
+                <input
+                  type="date"
+                  className="campo"
+                  value={formPadrao.referencia_ciclo}
+                  onChange={(e) => setFormPadrao({ ...formPadrao, referencia_ciclo: e.target.value })}
+                />
+              </Campo>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Campo rotulo="Início *">
+                <input
+                  type="time"
+                  className="campo"
+                  required
+                  value={formPadrao.hora_inicio}
+                  onChange={(e) => setFormPadrao({ ...formPadrao, hora_inicio: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Término *">
+                <input
+                  type="time"
+                  className="campo"
+                  required
+                  value={formPadrao.hora_fim}
+                  onChange={(e) => setFormPadrao({ ...formPadrao, hora_fim: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Intervalo (min)">
+                <input
+                  className="campo"
+                  inputMode="numeric"
+                  value={formPadrao.intervalo_min}
+                  onChange={(e) => setFormPadrao({ ...formPadrao, intervalo_min: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Função">
+                <input
+                  className="campo"
+                  value={formPadrao.funcao}
+                  onChange={(e) => setFormPadrao({ ...formPadrao, funcao: e.target.value })}
+                />
+              </Campo>
+            </div>
+            <Campo rotulo="Local">
+              <input
+                className="campo"
+                value={formPadrao.local}
+                onChange={(e) => setFormPadrao({ ...formPadrao, local: e.target.value })}
+              />
+            </Campo>
+            {erroPadrao && <p className="text-sm font-medium text-destaque">{erroPadrao}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secundario" onClick={() => setFormPadrao(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                Gerar 28 dias
               </button>
             </div>
           </form>

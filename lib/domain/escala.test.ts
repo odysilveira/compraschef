@@ -4,6 +4,8 @@ import {
   antecedenciaMinimaOk,
   calcularHorasPagas,
   criarSlot,
+  datasTrabalhoPadraoClt,
+  gerarEscalaPadraoClt,
   janela28Dias,
   marcarConvocacaoEnviada,
   montarTextoConvocacaoWhatsApp,
@@ -186,6 +188,64 @@ describe("escala domain", () => {
     });
     expect(texto).toContain("09/08/2026");
     expect(texto).toContain("contrato de trabalho intermitente");
+  });
+
+  it("gera datas 6x1 e seg–sex", () => {
+    const d61 = datasTrabalhoPadraoClt("6x1", "2026-08-03", "2026-08-03", 14);
+    // 3–8 trab, 9 folga, 10–15 trab → 12 dias em 14
+    expect(d61).toEqual([
+      "2026-08-03",
+      "2026-08-04",
+      "2026-08-05",
+      "2026-08-06",
+      "2026-08-07",
+      "2026-08-08",
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+    ]);
+    const segSex = datasTrabalhoPadraoClt("seg_sex", "2026-08-01", "2026-08-01", 7);
+    // 1=sáb,2=dom,3=seg...7=sex → seg a sex = 3,4,5,6,7
+    expect(segSex).toEqual(["2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07"]);
+  });
+
+  it("gera escala padrão CLT sem duplicar", () => {
+    const db = dbBase();
+    const r = gerarEscalaPadraoClt(
+      db,
+      {
+        pessoa_id: "pes-clt",
+        padrao: "5x2",
+        hora_inicio: "09:00",
+        hora_fim: "17:00",
+        intervalo_min: 60,
+        inicio_janela: "2026-08-03",
+        referencia_ciclo: "2026-08-03",
+      },
+      { agora: "2026-08-02T12:00:00.000Z", idFactory: () => `esc-${db.escala_slots.length + 1}` }
+    );
+    expect(r.sucesso).toBe(true);
+    expect(r.criados).toBeGreaterThan(0);
+    const antes = r.criados;
+    const deNovo = gerarEscalaPadraoClt(
+      db,
+      {
+        pessoa_id: "pes-clt",
+        padrao: "5x2",
+        hora_inicio: "09:00",
+        hora_fim: "17:00",
+        intervalo_min: 60,
+        inicio_janela: "2026-08-03",
+        referencia_ciclo: "2026-08-03",
+      },
+      { agora: "2026-08-02T12:00:00.000Z" }
+    );
+    expect(deNovo.sucesso).toBe(true);
+    expect(deNovo.criados).toBe(0);
+    expect(deNovo.pulados).toBe(antes);
   });
 
   it("bloqueia convocação sem contrato ou eSocial", () => {

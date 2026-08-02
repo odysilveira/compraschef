@@ -428,3 +428,161 @@ export function slotsNaJanela(db: DB, dias: string[]): EscalaSlot[] {
     .filter((s) => set.has(s.data))
     .sort((a, b) => a.data.localeCompare(b.data) || a.hora_inicio.localeCompare(b.hora_inicio));
 }
+
+/** Padrões de escala CLT (ciclo rolante ou calendário). */
+export type PadraoEscalaClt = "6x1" | "5x2" | "4x2" | "12x36" | "seg_sex";
+
+export const PADROES_ESCALA_CLT: Array<{ id: PadraoEscalaClt; rotulo: string; descricao: string }> = [
+  { id: "6x1", rotulo: "6x1", descricao: "6 dias trabalho · 1 folga (ciclo)" },
+  { id: "5x2", rotulo: "5x2", descricao: "5 dias trabalho · 2 folgas (ciclo)" },
+  { id: "4x2", rotulo: "4x2", descricao: "4 dias trabalho · 2 folgas (ciclo)" },
+  { id: "12x36", rotulo: "12x36", descricao: "Trabalha um dia, folga o seguinte (alternado)" },
+  { id: "seg_sex", rotulo: "Seg–sex", descricao: "Segunda a sexta no calendário" },
+];
+
+export function rotuloPadraoEscalaClt(padrao: PadraoEscalaClt): string {
+  return PADROES_ESCALA_CLT.find((p) => p.id === padrao)?.rotulo ?? padrao;
+}
+
+function diasTrabalhaNoCiclo(padrao: Exclude<PadraoEscalaClt, "seg_sex" | "12x36">): { trabalho: number; ciclo: number } {
+  switch (padrao) {
+    case "6x1":
+      return { trabalho: 6, ciclo: 7 };
+    case "5x2":
+      return { trabalho: 5, ciclo: 7 };
+    case "4x2":
+      return { trabalho: 4, ciclo: 6 };
+  }
+}
+
+/**
+ * Datas de trabalho na janela, a partir de `inicioJanela`.
+ * `referenciaCiclo` = dia 0 do ciclo (primeiro dia de trabalho do padrão rolante).
+ */
+export function datasTrabalhoPadraoClt(
+  padrao: PadraoEscalaClt,
+  inicioJanela: string,
+  referenciaCiclo: string = inicioJanela,
+  quantidadeDias = 28
+): string[] {
+  const janela = janela28Dias(inicioJanela).slice(0, quantidadeDias);
+  const ref = parseDataLocal(referenciaCiclo);
+
+  return janela.filter((data) => {
+    const d = parseDataLocal(data);
+    if (padrao === "seg_sex") {
+      const dia = d.getDay(); // 0=dom ... 6=sab
+      return dia >= 1 && dia <= 5;
+    }
+    if (padrao === "12x36") {
+      const diff = Math.floor((d.getTime() - ref.getTime()) / (24 * 60 * 60 * 1000));
+      const idx = ((diff % 2) + 2) % 2;
+      return idx === 0;
+    }
+    const { trabalho, ciclo } = diasTrabalhaNoCiclo(padrao);
+    const diff = Math.floor((d.getTime() - ref.getTime()) / (24 * 60 * 60 * 1000));
+    const idx = ((diff % ciclo) + ciclo) % ciclo;
+    return idx < trabalho;
+  });
+}
+
+export interface DadosGerarEscalaPadrao {
+  pessoa_id: string;
+  padrao: PadraoEscalaClt;
+  hora_inicio: string;
+  hora_fim: string;
+  intervalo_min: number;
+  funcao?: string;
+  local?: string;
+  /** Início da janela (padrão: hoje). */
+  inicio_janela?: string;
+  /** Dia 0 do ciclo (padrão: igual à janela). */
+  referencia_ciclo?: string;
+  /** Se já existir plantão da pessoa na data, pula. */
+  pular_existentes?: boolean;
+}
+
+export interface ResultadoGerarEscalaPadrao {
+  sucesso: boolean;
+  criados: number;
+  pulados: number;
+  datas: string[];
+  erros: string[];
+  avisos: string[];
+}
+
+export function gerarEscalaPadraoClt(
+  db: DB,
+  dados: DadosGerarEscalaPadrao,
+  opcoes: { agora?: string; idFactory?: () => string } = {}
+): ResultadoGerarEscalaPadrao {
+  const pessoa = db.pessoas.find((p) => p.id === dados.pessoa_id);
+  if (!pessoa) return { sucesso: false, criados: 0, pulados: 0, datas: [], erros: ["Pessoa não encontrada."], avisos: [] };
+  if (pessoa.tipo !== "colaborador") {
+    return {
+      sucesso: false,
+      criados: 0,
+      pulados: 0,
+      datas: [],
+      erros: ["Padrão CLT é só para colaborador. Intermitente usa convocação."],
+      avisos: [],
+    };
+  }
+
+  const horas = calcularHorasPagas(dados.hora_inicio, dados.hora_fim, dados.intervalo_min);
+  if ("erro" in horas) {
+    return { sucesso: false, criados: 0, pulados: 0, datas: [], erros: [horas.erro], avisos: [] };
+  }
+
+  const inicio = dados.inicio_janela ?? formatDataLocal(new Date());
+  const referencia = dados.referencia_ciclo ?? inicio;
+  const datas = datasTrabalhoPadraoClt(dados.padrao, inicio, referencia, 28);
+  const pular = dados.pular_existentes !== false;
+  const agora = opcoes.agora ?? new Date().toISOString();
+  let criados = 0;
+  let pulados = 0;
+  const avisos: string[] = [];
+
+  for (const data of datas) {
+    const jaExiste = (db.escala_slots ?? []).some((s) => s.pessoa_id === dados.pessoa_id && s.data === data);
+    if (jaExiste && pular) {
+      pulados += 1;
+      continue;
+    }
+    const r = criarSlot(
+      db,
+      {
+        pessoa_id: dados.pessoa_id,
+        data,
+        hora_inicio: dados.hora_inicio,
+        hora_fim: dados.hora_fim,
+        intervalo_min: dados.intervalo_min,
+        funcao: dados.funcao,
+        local: dados.local,
+        observacao: `Padrão ${rotuloPadraoEscalaClt(dados.padrao)}`,
+      },
+      {
+        id: opcoes.idFactory?.() ?? `esc-pad-${data}-${dados.pessoa_id}`,
+        agora,
+        criarConvocacao: false,
+      }
+    );
+    if (!r.sucesso) {
+      return {
+        sucesso: false,
+        criados,
+        pulados,
+        datas,
+        erros: r.erros,
+        avisos: [...avisos, ...r.avisos],
+      };
+    }
+    criados += 1;
+  }
+
+  if (pulados > 0) {
+    avisos.push(`${pulados} dia(s) já tinham plantão e foram pulados.`);
+  }
+
+  return { sucesso: true, criados, pulados, datas, erros: [], avisos };
+}

@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  Users,
 } from "lucide-react";
 import { PapelProvider, usePapel, podeVerValores, ROTULO_PAPEL } from "@/lib/roles";
 import { useDB } from "@/lib/data";
@@ -62,6 +63,10 @@ const MENU: SecaoMenu[] = [
       { href: "/financeiro", rotulo: "Boletos e contas", icone: Wallet, precisaVerValores: true },
       { href: "/relatorios", rotulo: "Relatórios", icone: BarChart3, precisaVerValores: true },
     ],
+  },
+  {
+    titulo: "RH",
+    itens: [{ href: "/rh", rotulo: "Pessoas", icone: Users, precisaVerValores: true }],
   },
   {
     titulo: "Sistema",

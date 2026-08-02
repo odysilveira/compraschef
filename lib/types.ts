@@ -10,6 +10,63 @@ export interface Perfil {
   ativo: boolean;
 }
 
+/** Vínculo jurídico/operacional no módulo RH (fase 1). */
+export type TipoPessoaRH = "colaborador" | "intermitente" | "entregador" | "prestador_eventual";
+
+export type FuncaoOperacional =
+  | "administrador"
+  | "gerente"
+  | "cozinha"
+  | "balcao"
+  | "caixa"
+  | "salao"
+  | "entregador"
+  | "custom";
+
+export type ModuloAcesso =
+  | "painel"
+  | "recebimento"
+  | "estoque"
+  | "lista_compras"
+  | "cotacoes"
+  | "pedidos"
+  | "financeiro"
+  | "relatorios"
+  | "cadastros"
+  | "rh";
+
+export type PermissoesModulos = Record<ModuloAcesso, boolean>;
+
+export interface PessoaRH {
+  id: string;
+  nome: string;
+  tipo: TipoPessoaRH;
+  funcao: FuncaoOperacional;
+  /** Preenchido quando funcao === "custom". */
+  funcao_custom?: string;
+  cargo?: string;
+  telefone?: string;
+  cpf?: string;
+  observacao?: string;
+  data_admissao?: string;
+  valor_hora?: number;
+  salario?: number;
+  chave_pix?: string;
+  contrato_assinado?: boolean;
+  esocial_ok?: boolean;
+  tem_acesso_sistema: boolean;
+  login?: string;
+  /** Demo local — trocar por hash quando Auth/Supabase existir. */
+  senha?: string;
+  /** Liga ao seletor de papel atual (db.perfis). */
+  perfil_id?: string;
+  papel_sistema?: Papel;
+  permissoes: PermissoesModulos;
+  ativo: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
+
 export interface Unidade {
   id: string;
   /** Código da unidade no EASE EAT. O id interno continua sendo próprio do ComprasChef. */
@@ -467,6 +524,7 @@ export interface IntegracaoEvento {
 // Banco completo em memória (camada mock)
 export interface DB {
   perfis: Perfil[];
+  pessoas: PessoaRH[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];

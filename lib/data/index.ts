@@ -12,6 +12,7 @@ import { compararPrioridadeConsumo, saldoDosLotes } from "../domain/estoque";
 import { extrairCnpjEmitenteDaChaveAcesso } from "../domain/nfe-parcelas";
 import { associarCategoriasProdutos } from "../domain/produtos";
 import { recuperarVinculosLegadosBoletos } from "../domain/recuperacao-boleto-legado";
+import { pessoaParaSeedDePerfil } from "../domain/rh";
 
 const STORAGE_KEY = "compraschef-db-v1";
 
@@ -95,6 +96,19 @@ export function atualizarComNovidades(db: DB): boolean {
   let mudou = false;
 
   if (migrarColecoesFichasTecnicas(db)) {
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.pessoas)) {
+    const agora = new Date().toISOString();
+    db.pessoas = (db.perfis ?? []).map((perfil) =>
+      pessoaParaSeedDePerfil({
+        id: perfil.id,
+        nome: perfil.nome,
+        papel: perfil.papel,
+        agora,
+      })
+    );
     mudou = true;
   }
 

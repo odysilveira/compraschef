@@ -6,6 +6,7 @@ import { CalendarDays, Check, Copy, GripVertical, Plus, RefreshCw } from "lucide
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
+  HORARIO_PADRAO_CLT_12X36,
   LOCAL_PADRAO_ESCALA,
   PADROES_ESCALA_CLT,
   abrevSetorConvocacao,
@@ -32,6 +33,7 @@ import {
   textoResumoSetores,
   validarPreRequisitosConvocacao,
   type PadraoEscalaClt,
+  type SetorArrastoEscala,
   type SetorConvocacaoEscala,
 } from "@/lib/domain/escala";
 import { rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
@@ -50,7 +52,7 @@ function hojeISO(): string {
 
 type Arrasto =
   | { tipo: "slot"; id: string }
-  | { tipo: "pessoa"; id: string; setor: SetorConvocacaoEscala };
+  | { tipo: "pessoa"; id: string; setor: SetorArrastoEscala };
 
 type FormPlantao = {
   pessoa_id: string;
@@ -88,10 +90,10 @@ type FormPadrao = {
 function formPadraoVazio(pessoaId = ""): FormPadrao {
   return {
     pessoa_id: pessoaId,
-    padrao: "6x1",
-    hora_inicio: "09:00",
-    hora_fim: "17:00",
-    intervalo_min: "60",
+    padrao: "12x36",
+    hora_inicio: HORARIO_PADRAO_CLT_12X36.hora_inicio,
+    hora_fim: HORARIO_PADRAO_CLT_12X36.hora_fim,
+    intervalo_min: String(HORARIO_PADRAO_CLT_12X36.intervalo_min),
     funcao: "",
     local: LOCAL_PADRAO_ESCALA,
     referencia_ciclo: hojeISO(),
@@ -117,24 +119,28 @@ function BancoPessoas({
   arrasto,
   onDragStart,
   onDragEnd,
+  onGerarPadrao,
 }: {
   titulo: string;
   pessoas: PessoaRH[];
-  setor: SetorConvocacaoEscala;
+  setor: SetorArrastoEscala;
   arrasto: Arrasto | null;
-  onDragStart: (pessoaId: string, setor: SetorConvocacaoEscala) => void;
+  onDragStart: (pessoaId: string, setor: SetorArrastoEscala) => void;
   onDragEnd: () => void;
+  /** Só para CLT: abre o gerador de padrão (ex.: 12x36). */
+  onGerarPadrao?: (pessoaId: string) => void;
 }) {
   if (pessoas.length === 0) return null;
+  const ehClt = setor === "clt";
   return (
     <div className="space-y-1.5">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{titulo}</p>
       <ul className="space-y-1">
         {pessoas.map((p) => {
-          const gate = validarPreRequisitosConvocacao(p);
+          const gate = ehClt ? { ok: true, erros: [] as string[] } : validarPreRequisitosConvocacao(p);
           const ativo = arrasto?.tipo === "pessoa" && arrasto.id === p.id && arrasto.setor === setor;
           return (
-            <li key={`${setor}-${p.id}`}>
+            <li key={`${setor}-${p.id}`} className="space-y-1">
               <button
                 type="button"
                 draggable
@@ -142,13 +148,17 @@ function BancoPessoas({
                   ativo
                     ? "border-primaria bg-primaria/10 opacity-60"
                     : gate.ok
-                      ? "border-stone-200 bg-white hover:border-primaria/40"
+                      ? ehClt
+                        ? "border-sky-200 bg-sky-50 hover:border-sky-400"
+                        : "border-stone-200 bg-white hover:border-primaria/40"
                       : "border-amber-200 bg-amber-50/80"
                 }`}
                 title={
-                  gate.ok
-                    ? `Arraste ${p.nome} como ${rotuloSetorConvocacao(setor)}`
-                    : `Falta contrato/eSocial — ${gate.erros[0] ?? ""}`
+                  ehClt
+                    ? `Arraste ${p.nome} para um dia (CLT · sem convocação)`
+                    : gate.ok
+                      ? `Arraste ${p.nome} como ${rotuloSetorConvocacao(setor as SetorConvocacaoEscala)}`
+                      : `Falta contrato/eSocial — ${gate.erros[0] ?? ""}`
                 }
                 onDragStart={(e) => {
                   onDragStart(p.id, setor);
@@ -160,9 +170,18 @@ function BancoPessoas({
                 onDragEnd={onDragEnd}
               >
                 <GripVertical size={14} className="shrink-0 text-slate-400" />
-                <span className="min-w-0 flex-1 truncate font-medium text-slate-800">{p.nome}</span>
-                {!gate.ok && <Badge cor="laranja">pendente</Badge>}
+                <span className="min-w-0 flex-1 truncate font-medium">{p.nome.split(/\s+/)[0]}</span>
+                {ehClt && <span className="shrink-0 text-[10px] font-semibold text-sky-800">CLT</span>}
               </button>
+              {ehClt && onGerarPadrao && (
+                <button
+                  type="button"
+                  className="w-full rounded-md px-2 py-1 text-left text-[11px] font-medium text-sky-900 underline-offset-2 hover:underline"
+                  onClick={() => onGerarPadrao(p.id)}
+                >
+                  Gerar 12x36 no calendário…
+                </button>
+              )}
             </li>
           );
         })}
@@ -347,8 +366,10 @@ export default function RhEscalaPage() {
     }
   }
 
-  function abrirPadrao() {
-    const pessoa = colaboradores[0];
+  function abrirPadrao(pessoaId?: string) {
+    const pessoa = pessoaId
+      ? db.pessoas.find((p) => p.id === pessoaId)
+      : colaboradores[0];
     const base = formPadraoVazio(pessoa?.id ?? "");
     if (pessoa) base.funcao = rotuloFuncao(pessoa);
     setFormPadrao(base);
@@ -421,7 +442,7 @@ export default function RhEscalaPage() {
     if (r.avisos.length) setAviso(r.avisos.join(" "));
   }
 
-  function soltarPessoaNoDia(pessoaId: string, data: string, setor: SetorConvocacaoEscala) {
+  function soltarPessoaNoDia(pessoaId: string, data: string, setor: SetorArrastoEscala) {
     const pessoa = db.pessoas.find((p) => p.id === pessoaId);
     setArrasto(null);
     setDiaDestinoHover(null);
@@ -429,12 +450,51 @@ export default function RhEscalaPage() {
       setErro("Pessoa não encontrada.");
       return;
     }
+
+    if (setor === "clt") {
+      if (pessoa.tipo !== "colaborador") {
+        setErro("Só colaboradores CLT entram por esta lista.");
+        return;
+      }
+      const proximo = structuredClone(db);
+      const resultado = criarSlot(
+        proximo,
+        {
+          pessoa_id: pessoaId,
+          data,
+          hora_inicio: HORARIO_PADRAO_CLT_12X36.hora_inicio,
+          hora_fim: HORARIO_PADRAO_CLT_12X36.hora_fim,
+          intervalo_min: HORARIO_PADRAO_CLT_12X36.intervalo_min,
+          funcao: rotuloFuncao(pessoa),
+          local: LOCAL_PADRAO_ESCALA,
+          observacao: "CLT · jornada 12x36 (ajuste o horário se precisar)",
+        },
+        { id: uid("esc"), criarConvocacao: false }
+      );
+      if (!resultado.sucesso) {
+        setErro(resultado.erros.join(" "));
+        return;
+      }
+      mutate((atual) => Object.assign(atual, proximo));
+      setErro(null);
+      const nomeCurto = pessoa.nome.split(/\s+/)[0];
+      setMensagem(
+        `${nomeCurto} (CLT) em ${formatDataBrLonga(data)} · ${HORARIO_PADRAO_CLT_12X36.hora_inicio}–${HORARIO_PADRAO_CLT_12X36.hora_fim}. Para dia sim/dia não, use Gerar 12x36.`
+      );
+      if (resultado.slot) setDetalheSlotId(resultado.slot.id);
+      return;
+    }
+
     if (setor === "motoboy" && pessoa.tipo !== "entregador") {
       setErro("Só entregadores entram como motoboy.");
       return;
     }
     if (setor !== "motoboy" && pessoa.tipo === "entregador") {
       setErro("Entregador só pode ser lançado como motoboy.");
+      return;
+    }
+    if (pessoa.tipo === "colaborador") {
+      setErro("Colaborador CLT: use a lista CLT ou Gerar padrão 12x36.");
       return;
     }
     const gate = validarPreRequisitosConvocacao(pessoa);
@@ -479,10 +539,10 @@ export default function RhEscalaPage() {
       const pessoaId = dataTransfer.getData("text/escala-pessoa-id") || (arrasto?.tipo === "pessoa" ? arrasto.id : "");
       const setorBruto =
         dataTransfer.getData("text/escala-setor") || (arrasto?.tipo === "pessoa" ? arrasto.setor : "");
-      const setor = (["cozinha", "balcao", "motoboy"] as SetorConvocacaoEscala[]).includes(
-        setorBruto as SetorConvocacaoEscala
+      const setor = (["cozinha", "balcao", "motoboy", "clt"] as SetorArrastoEscala[]).includes(
+        setorBruto as SetorArrastoEscala
       )
-        ? (setorBruto as SetorConvocacaoEscala)
+        ? (setorBruto as SetorArrastoEscala)
         : null;
       if (pessoaId && setor) soltarPessoaNoDia(pessoaId, dia, setor);
       return;
@@ -501,10 +561,10 @@ export default function RhEscalaPage() {
     <div>
       <TituloPagina
         titulo="Escala"
-        subtitulo={`Resto do mês atual + mês seguinte (${periodoRotulo}). Arraste intermitentes/motoboys da lista para o dia, ou remarque plantões arrastando no calendário.`}
+        subtitulo={`Resto do mês atual + mês seguinte (${periodoRotulo}). CLT (12x36) e intermitentes/motoboys no mesmo calendário — arraste da lista ou gere o padrão.`}
         acao={
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-secundario" onClick={abrirPadrao}>
+            <button type="button" className="btn-secundario" onClick={() => abrirPadrao()}>
               <RefreshCw size={16} /> Gerar padrão CLT
             </button>
             <button type="button" className="btn-primario" onClick={() => abrirNovo()}>
@@ -547,11 +607,23 @@ export default function RhEscalaPage() {
         <aside className="w-full shrink-0 space-y-3 lg:sticky lg:top-20 lg:w-60">
           <Card className="space-y-3 p-3">
             <div>
-              <p className="text-sm font-bold text-slate-900">Banco para convocar</p>
+              <p className="text-sm font-bold text-slate-900">Quem entra na escala</p>
               <p className="text-xs text-slate-600">
-                Arraste da lista certa: cozinha, balcão/caixa ou motoboy. O dia mostra quantos já tem em cada setor.
+                CLT: arraste um dia ou gere 12x36 (dia sim / dia não). Intermitentes e motoboys: arraste para convocar.
               </p>
             </div>
+            <BancoPessoas
+              titulo="CLT — mensalistas"
+              pessoas={colaboradores}
+              setor="clt"
+              arrasto={arrasto}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
+              onDragEnd={() => {
+                setArrasto(null);
+                setDiaDestinoHover(null);
+              }}
+              onGerarPadrao={(pessoaId) => abrirPadrao(pessoaId)}
+            />
             <BancoPessoas
               titulo="Intermitentes — Cozinha"
               pessoas={intermitentes}
@@ -585,9 +657,9 @@ export default function RhEscalaPage() {
                 setDiaDestinoHover(null);
               }}
             />
-            {intermitentes.length === 0 && entregadores.length === 0 && (
+            {colaboradores.length === 0 && intermitentes.length === 0 && entregadores.length === 0 && (
               <p className="text-xs text-slate-500">
-                Cadastre intermitentes ou entregadores em{" "}
+                Cadastre pessoas em{" "}
                 <Link href="/rh" className="underline">
                   Pessoas
                 </Link>
@@ -637,6 +709,7 @@ export default function RhEscalaPage() {
                           const resumoPreview =
                             ehDestino && arrasto?.tipo === "pessoa"
                               ? {
+                                  clt: resumo.clt + (arrasto.setor === "clt" ? 1 : 0),
                                   motoboys: resumo.motoboys + (arrasto.setor === "motoboy" ? 1 : 0),
                                   cozinha: resumo.cozinha + (arrasto.setor === "cozinha" ? 1 : 0),
                                   balcao: resumo.balcao + (arrasto.setor === "balcao" ? 1 : 0),
@@ -696,16 +769,21 @@ export default function RhEscalaPage() {
                                   lista.map((slot) => {
                                     const conv = convocacaoDoSlot(db, slot.id);
                                     const pessoaSlot = db.pessoas.find((p) => p.id === slot.pessoa_id);
+                                    const ehClt = pessoaSlot?.tipo === "colaborador";
                                     const setor = setorDoPlantao(slot, pessoaSlot);
                                     return (
                                       <button
                                         key={slot.id}
                                         type="button"
                                         draggable
-                                        className={`cursor-grab truncate rounded bg-stone-100 px-1 py-0.5 text-left text-[11px] font-medium text-slate-800 hover:bg-primaria/15 active:cursor-grabbing ${
-                                          arrasto?.tipo === "slot" && arrasto.id === slot.id ? "opacity-50" : ""
-                                        }`}
-                                        title={`${nomePessoa(slot.pessoa_id)} · ${setor ? rotuloSetorConvocacao(setor) : slot.funcao ?? "—"} · ${slot.hora_inicio}–${slot.hora_fim}${
+                                        className={`cursor-grab truncate rounded px-1 py-0.5 text-left text-[11px] font-medium active:cursor-grabbing ${
+                                          ehClt
+                                            ? "bg-sky-100 text-sky-950 hover:bg-sky-200/80"
+                                            : "bg-stone-100 text-slate-800 hover:bg-primaria/15"
+                                        } ${arrasto?.tipo === "slot" && arrasto.id === slot.id ? "opacity-50" : ""}`}
+                                        title={`${nomePessoa(slot.pessoa_id)} · ${
+                                          ehClt ? "CLT" : setor ? rotuloSetorConvocacao(setor) : slot.funcao ?? "—"
+                                        } · ${slot.hora_inicio}–${slot.hora_fim}${
                                           conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
                                         } — arraste para outro dia`}
                                         onDragStart={(e) => {
@@ -736,8 +814,15 @@ export default function RhEscalaPage() {
                                         }}
                                       >
                                         {primeiroNome(slot.pessoa_id)}
-                                        {setor && (
-                                          <span className="font-normal text-slate-500"> · {abrevSetorConvocacao(setor)}</span>
+                                        {ehClt ? (
+                                          <span className="font-normal text-sky-800"> · CLT</span>
+                                        ) : (
+                                          setor && (
+                                            <span className="font-normal text-slate-500">
+                                              {" "}
+                                              · {abrevSetorConvocacao(setor)}
+                                            </span>
+                                          )
                                         )}
                                       </button>
                                     );
@@ -749,7 +834,7 @@ export default function RhEscalaPage() {
                                   className={`mt-1 border-t border-stone-200/80 pt-1 text-[10px] leading-tight ${
                                     ehDestino ? "font-semibold text-primaria-escura" : "text-slate-500"
                                   }`}
-                                  title="Motoboys · intermitentes na cozinha · intermitentes no balcão/caixa"
+                                  title="CLT · motoboys · intermitentes na cozinha · intermitentes no balcão/caixa"
                                 >
                                   {textoResumo || "—"}
                                 </p>
@@ -766,8 +851,8 @@ export default function RhEscalaPage() {
           </Card>
 
           <p className="mt-3 text-center text-xs text-slate-500">
-            No rodapé de cada dia: motoboys · intermitentes na cozinha · intermitentes no balcão/caixa. Horário padrão ao
-            soltar da lista: 18:00–23:30.
+            Rodapé do dia: CLT · motoboys · intermitentes cozinha · balcão/caixa. CLT solto da lista: jornada 12 h
+            (11:00–23:00). Para dia sim/dia não, use Gerar 12x36.
           </p>
         </div>
       </div>
@@ -891,7 +976,9 @@ export default function RhEscalaPage() {
         {formPadrao && (
           <form onSubmit={salvarPadrao} className="space-y-3">
             <p className="text-sm text-slate-600">
-              Preenche automaticamente os dias de trabalho do colaborador. Dias que já têm plantão são pulados.
+              Preenche os dias de trabalho do colaborador no calendário. O padrão mais comum no restaurante é{" "}
+              <span className="font-semibold">12x36</span> (trabalha um dia, folga o seguinte). Dias que já têm plantão
+              são pulados.
             </p>
             <Campo rotulo="Colaborador *">
               <select
@@ -919,7 +1006,20 @@ export default function RhEscalaPage() {
               <select
                 className="campo"
                 value={formPadrao.padrao}
-                onChange={(e) => setFormPadrao({ ...formPadrao, padrao: e.target.value as PadraoEscalaClt })}
+                onChange={(e) => {
+                  const padrao = e.target.value as PadraoEscalaClt;
+                  setFormPadrao({
+                    ...formPadrao,
+                    padrao,
+                    ...(padrao === "12x36"
+                      ? {
+                          hora_inicio: HORARIO_PADRAO_CLT_12X36.hora_inicio,
+                          hora_fim: HORARIO_PADRAO_CLT_12X36.hora_fim,
+                          intervalo_min: String(HORARIO_PADRAO_CLT_12X36.intervalo_min),
+                        }
+                      : {}),
+                  });
+                }}
               >
                 {PADROES_ESCALA_CLT.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -929,7 +1029,13 @@ export default function RhEscalaPage() {
               </select>
             </Campo>
             {formPadrao.padrao !== "seg_sex" && (
-              <Campo rotulo="Início do ciclo (dia 1 de trabalho)">
+              <Campo
+                rotulo={
+                  formPadrao.padrao === "12x36"
+                    ? "Primeiro dia de trabalho (ciclo dia sim / dia não)"
+                    : "Início do ciclo (dia 1 de trabalho)"
+                }
+              >
                 <input
                   type="date"
                   className="campo"

@@ -349,8 +349,14 @@ describe("escala domain", () => {
     expect(setorDoPlantao(slots[0]!, pessoas[0])).toBe("cozinha");
     expect(setorDoPlantao(slots[1]!, pessoas[1])).toBe("balcao");
     expect(setorDoPlantao(slots[2]!, pessoas[2])).toBe("motoboy");
-    expect(resumoSetoresDoDia(slots, pessoas)).toEqual({ motoboys: 1, cozinha: 1, balcao: 1 });
-    expect(textoResumoSetores({ motoboys: 1, cozinha: 2, balcao: 0 })).toBe("1 moto · 2 coz");
+    expect(resumoSetoresDoDia(slots, pessoas)).toEqual({ motoboys: 1, cozinha: 1, balcao: 1, clt: 0 });
+    expect(
+      resumoSetoresDoDia(
+        [...slots, { id: "4", pessoa_id: "c1", data: "2026-08-10", hora_inicio: "11:00", hora_fim: "23:00", intervalo_min: 60, funcao: "Cozinha", criado_em: "", atualizado_em: "" }],
+        [...pessoas, { id: "c1", tipo: "colaborador" as const }]
+      )
+    ).toEqual({ motoboys: 1, cozinha: 1, balcao: 1, clt: 1 });
+    expect(textoResumoSetores({ motoboys: 1, cozinha: 2, balcao: 0, clt: 1 })).toBe("1 CLT · 1 moto · 2 coz");
   });
 
   it("filtra plantões da pessoa na janela", () => {

@@ -24,6 +24,16 @@ export function pessoaPrecisaConvocacao(tipo: TipoPessoaRH): boolean {
 /** Setor operacional na escala de convocação (intermitente / motoboy). */
 export type SetorConvocacaoEscala = "cozinha" | "balcao" | "motoboy";
 
+/** Inclui CLT no arraste do calendário (sem convocação WhatsApp). */
+export type SetorArrastoEscala = SetorConvocacaoEscala | "clt";
+
+/** Jornada típica 12x36 (12 h brutas, 1 h de intervalo). */
+export const HORARIO_PADRAO_CLT_12X36 = {
+  hora_inicio: "11:00",
+  hora_fim: "23:00",
+  intervalo_min: 60,
+} as const;
+
 export function rotuloSetorConvocacao(setor: SetorConvocacaoEscala): string {
   switch (setor) {
     case "cozinha":
@@ -59,20 +69,33 @@ export function setorDoPlantao(
   pessoa?: Pick<PessoaRH, "tipo"> | null
 ): SetorConvocacaoEscala | null {
   if (pessoa?.tipo === "entregador") return "motoboy";
+  if (pessoa?.tipo === "colaborador") return null;
   const texto = normalizarTextoSetor(slot.funcao ?? "");
   if (texto.includes("cozinha")) return "cozinha";
   if (texto.includes("balc") || texto.includes("caixa")) return "balcao";
   return null;
 }
 
+export type ResumoDiaEscala = {
+  motoboys: number;
+  cozinha: number;
+  balcao: number;
+  clt: number;
+};
+
 export function resumoSetoresDoDia(
   slots: EscalaSlot[],
   pessoas: Array<Pick<PessoaRH, "id" | "tipo">>
-): { motoboys: number; cozinha: number; balcao: number } {
+): ResumoDiaEscala {
   const porId = new Map(pessoas.map((p) => [p.id, p]));
-  const resumo = { motoboys: 0, cozinha: 0, balcao: 0 };
+  const resumo: ResumoDiaEscala = { motoboys: 0, cozinha: 0, balcao: 0, clt: 0 };
   for (const slot of slots) {
-    const setor = setorDoPlantao(slot, porId.get(slot.pessoa_id));
+    const pessoa = porId.get(slot.pessoa_id);
+    if (pessoa?.tipo === "colaborador") {
+      resumo.clt += 1;
+      continue;
+    }
+    const setor = setorDoPlantao(slot, pessoa);
     if (setor === "motoboy") resumo.motoboys += 1;
     else if (setor === "cozinha") resumo.cozinha += 1;
     else if (setor === "balcao") resumo.balcao += 1;
@@ -80,8 +103,9 @@ export function resumoSetoresDoDia(
   return resumo;
 }
 
-export function textoResumoSetores(resumo: { motoboys: number; cozinha: number; balcao: number }): string {
+export function textoResumoSetores(resumo: ResumoDiaEscala): string {
   const partes: string[] = [];
+  if (resumo.clt > 0) partes.push(`${resumo.clt} CLT`);
   if (resumo.motoboys > 0) partes.push(`${resumo.motoboys} moto`);
   if (resumo.cozinha > 0) partes.push(`${resumo.cozinha} coz`);
   if (resumo.balcao > 0) partes.push(`${resumo.balcao} bal`);
@@ -647,10 +671,10 @@ export function slotsDaPessoaNaJanela(db: DB, pessoaId: string, dias: string[]):
 export type PadraoEscalaClt = "6x1" | "5x2" | "4x2" | "12x36" | "seg_sex";
 
 export const PADROES_ESCALA_CLT: Array<{ id: PadraoEscalaClt; rotulo: string; descricao: string }> = [
+  { id: "12x36", rotulo: "12x36", descricao: "Trabalha um dia, folga o seguinte (mais comum no restaurante)" },
   { id: "6x1", rotulo: "6x1", descricao: "6 dias trabalho · 1 folga (ciclo)" },
   { id: "5x2", rotulo: "5x2", descricao: "5 dias trabalho · 2 folgas (ciclo)" },
   { id: "4x2", rotulo: "4x2", descricao: "4 dias trabalho · 2 folgas (ciclo)" },
-  { id: "12x36", rotulo: "12x36", descricao: "Trabalha um dia, folga o seguinte (alternado)" },
   { id: "seg_sex", rotulo: "Seg–sex", descricao: "Segunda a sexta no calendário" },
 ];
 

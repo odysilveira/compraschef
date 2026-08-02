@@ -17,7 +17,7 @@ import {
   validarCpf,
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
-import { podeVerValores, usePapel } from "@/lib/roles";
+import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
 type FormNovaPessoa = {
@@ -64,13 +64,12 @@ function BadgeTipo({ tipo }: { tipo: TipoPessoaRH }) {
 
 export default function RhPage() {
   const db = useDB();
-  const { papel } = usePapel();
   const [busca, setBusca] = useState("");
   const [filtroTipo, setFiltroTipo] = useState<TipoPessoaRH | "todos">("todos");
   const [form, setForm] = useState<FormNovaPessoa | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
-  const podeGerirRh = podeVerValores(papel);
+  const podeGerirRh = usePodeAcessarModulo("rh");
 
   const lista = useMemo(() => {
     const termo = busca.trim().toLowerCase();

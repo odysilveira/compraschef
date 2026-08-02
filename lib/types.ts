@@ -645,6 +645,26 @@ export interface IntegracaoEvento {
   criado_em: string;
 }
 
+/** Conta bancária do restaurante (origem dos pagamentos). */
+export type TipoContaBancaria = "corrente" | "poupanca" | "pagamento";
+
+export interface ContaBancariaRestaurante {
+  id: string;
+  /** Nome do banco, ex.: Itaú, Bradesco */
+  banco: string;
+  tipo: TipoContaBancaria;
+  /** Apelido opcional, ex.: “conta principal” */
+  apelido?: string;
+  agencia?: string;
+  /** Número da conta (pode ser só final) */
+  numero?: string;
+  ativa: boolean;
+  /** Preferida ao informar pagamento */
+  padrao?: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
+
 // Banco completo em memória (camada mock)
 export interface DB {
   perfis: Perfil[];
@@ -653,6 +673,8 @@ export interface DB {
   consumos_pessoas: ConsumoPessoa[];
   escala_slots: EscalaSlot[];
   convocacoes: ConvocacaoIntermitente[];
+  /** Contas de onde o restaurante paga (origem). */
+  contas_bancarias: ContaBancariaRestaurante[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];

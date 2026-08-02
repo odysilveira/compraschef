@@ -84,7 +84,8 @@ import {
   sugerirMatchesExtrato,
   type SugestaoMatchExtrato,
 } from "@/lib/domain/conciliar-extrato";
-import { CONTAS_ORIGEM_PAGAMENTO } from "@/lib/domain/contas-pagamento";
+import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
+import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import {
   CLASSE_CAIXA_CODIGO_SEM_ROLAGEM,
   CLASSE_GRID_CODIGO_PAGAMENTO,
@@ -579,6 +580,7 @@ export default function FinanceiroPage() {
     setFormPagamentoBoleto({
       ...novoPagamentoBoletoInicial(),
       valorPago: boleto.valor.toFixed(2),
+      bancoConta: contaPadraoOrigem(db),
     });
     setErroPagamentoBoleto(null);
     setMensagemPagamentoBoleto(null);
@@ -2821,35 +2823,13 @@ export default function FinanceiroPage() {
               </label>
               <label className="block sm:col-span-2">
                 <span className="rotulo mb-1 block">De qual banco/conta saiu o pagamento? *</span>
-                <input
-                  className="input w-full"
-                  list="contas-origem-boleto"
-                  value={formPagamentoBoleto.bancoConta}
-                  onChange={(event) => atualizarCampoPagamento("bancoConta", event.target.value)}
-                  placeholder="Ex.: Itaú — conta corrente"
-                  required
+                <SeletorContaOrigem
+                  db={db}
+                  valor={formPagamentoBoleto.bancoConta}
+                  onChange={(bancoConta) => atualizarCampoPagamento("bancoConta", bancoConta)}
+                  listId="contas-origem-boleto"
+                  classNameInput="input w-full"
                 />
-                <datalist id="contas-origem-boleto">
-                  {CONTAS_ORIGEM_PAGAMENTO.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {CONTAS_ORIGEM_PAGAMENTO.map((conta) => (
-                    <button
-                      key={conta}
-                      type="button"
-                      className={`rounded-full border px-2.5 py-1 text-xs ${
-                        formPagamentoBoleto.bancoConta === conta
-                          ? "border-primaria bg-primaria/10 font-semibold text-primaria-escura"
-                          : "border-stone-200 bg-white text-slate-600 hover:border-primaria/40"
-                      }`}
-                      onClick={() => atualizarCampoPagamento("bancoConta", conta)}
-                    >
-                      {conta.split("—")[0]?.trim()}
-                    </button>
-                  ))}
-                </div>
                 <p className="mt-1 text-xs text-slate-500">Ajuda a localizar o débito no extrato OFX.</p>
               </label>
               <label className="block sm:col-span-2">

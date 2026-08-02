@@ -28,7 +28,8 @@ import {
   type ReciboFolhaVinculado,
 } from "@/lib/domain/folha-recibo-pdf";
 import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
-import { CONTAS_ORIGEM_PAGAMENTO } from "@/lib/domain/contas-pagamento";
+import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
+import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { PagamentoPessoa, TipoPagamentoPessoa } from "@/lib/types";
@@ -257,7 +258,7 @@ export default function RhPagamentosPage() {
     setFormInformar({
       dataPagamento: hojeISO(),
       valorPago: pagamento.valor.toFixed(2),
-      bancoConta: "",
+      bancoConta: contaPadraoOrigem(db),
       responsavel: "usuário local",
       observacao: "",
     });
@@ -715,36 +716,13 @@ export default function RhPagamentosPage() {
               </Campo>
               <div className="sm:col-span-2 space-y-2">
                 <Campo rotulo="De qual banco/conta saiu o pagamento? *">
-                  <input
-                    className="campo"
-                    required
-                    list="contas-origem-rh"
-                    placeholder="Ex.: Itaú — conta corrente"
-                    value={formInformar.bancoConta}
-                    onChange={(e) => setFormInformar({ ...formInformar, bancoConta: e.target.value })}
+                  <SeletorContaOrigem
+                    db={db}
+                    valor={formInformar.bancoConta}
+                    onChange={(bancoConta) => setFormInformar({ ...formInformar, bancoConta })}
+                    listId="contas-origem-rh"
                   />
                 </Campo>
-                <datalist id="contas-origem-rh">
-                  {CONTAS_ORIGEM_PAGAMENTO.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-                <div className="flex flex-wrap gap-1.5">
-                  {CONTAS_ORIGEM_PAGAMENTO.map((conta) => (
-                    <button
-                      key={conta}
-                      type="button"
-                      className={`rounded-full border px-2.5 py-1 text-xs ${
-                        formInformar.bancoConta === conta
-                          ? "border-primaria bg-primaria/10 font-semibold text-primaria-escura"
-                          : "border-stone-200 bg-white text-slate-600 hover:border-primaria/40"
-                      }`}
-                      onClick={() => setFormInformar({ ...formInformar, bancoConta: conta })}
-                    >
-                      {conta.split("—")[0]?.trim()}
-                    </button>
-                  ))}
-                </div>
                 <p className="text-xs text-slate-500">
                   Essa informação facilita achar o débito no extrato na hora de conciliar.
                 </p>

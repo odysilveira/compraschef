@@ -95,6 +95,8 @@ export interface PagamentoPessoa {
   desconto_adiantamento?: number;
   /** Consumos abatidos neste pagamento. */
   consumo_ids?: string[];
+  /** Vínculo com convocação intermitente (quando gerado pelo aceite). */
+  convocacao_id?: string;
   horas?: number;
   valor_hora?: number;
   status: StatusPagamentoPessoa;

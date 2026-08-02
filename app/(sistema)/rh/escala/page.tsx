@@ -187,7 +187,13 @@ export default function RhEscalaPage() {
       return;
     }
     mutate((atual) => Object.assign(atual, proximo));
-    setMensagem(`Resposta registrada: ${rotuloStatusConvocacao(status)}.`);
+    if (status === "aceita" && r.pagamento) {
+      setMensagem(
+        `Convocação aceita. Pagamento previsto de ${moeda(r.pagamento.valor)} criado — veja em Pagamentos.`
+      );
+    } else {
+      setMensagem(`Resposta registrada: ${rotuloStatusConvocacao(status)}.`);
+    }
   }
 
   const detalheSlot = detalheSlotId ? db.escala_slots.find((s) => s.id === detalheSlotId) : null;
@@ -209,7 +215,12 @@ export default function RhEscalaPage() {
 
       {mensagem && (
         <div className="mb-4 rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
-          {mensagem}
+          {mensagem}{" "}
+          {mensagem.includes("Pagamentos") && (
+            <Link href="/rh/pagamentos" className="underline">
+              Abrir pagamentos
+            </Link>
+          )}
         </div>
       )}
       {aviso && (

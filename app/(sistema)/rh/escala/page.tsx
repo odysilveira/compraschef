@@ -19,6 +19,7 @@ import {
   moverSlotParaData,
   nomeDiaSemana,
   nomeMesAno,
+  pagamentoDaConvocacao,
   pessoaPrecisaConvocacao,
   registrarRespostaConvocacao,
   resumoSetoresDoDia,
@@ -33,6 +34,11 @@ import {
   type PadraoEscalaClt,
   type SetorConvocacaoEscala,
 } from "@/lib/domain/escala";
+import { rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
+import {
+  montarTextoConfirmacaoRecebimento,
+  montarTextoReciboPagamentoPessoa,
+} from "@/lib/domain/recibo-pagamento-pessoa";
 import { rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
@@ -309,6 +315,38 @@ export default function RhEscalaPage() {
     }
   }
 
+  async function copiarReciboDoPagamento(convocacaoId: string, variante: "recibo" | "confirmacao") {
+    const pagamento = pagamentoDaConvocacao(db, convocacaoId);
+    if (!pagamento) {
+      setErro("Pagamento desta convocação não encontrado.");
+      return;
+    }
+    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
+    if (!pessoa) {
+      setErro("Pessoa do pagamento não encontrada.");
+      return;
+    }
+    const texto =
+      variante === "confirmacao"
+        ? montarTextoConfirmacaoRecebimento({ pessoa, pagamento })
+        : montarTextoReciboPagamentoPessoa({
+            pessoa,
+            pagamento,
+            consumos: db.consumos_pessoas ?? [],
+          });
+    try {
+      await navigator.clipboard.writeText(texto);
+      setErro(null);
+      setMensagem(
+        variante === "confirmacao"
+          ? "Confirmação do empregado copiada — envie para responder no WhatsApp."
+          : "Recibo discriminado copiado — pode colar no WhatsApp ou arquivar."
+      );
+    } catch {
+      setErro("Não foi possível copiar neste navegador.");
+    }
+  }
+
   function abrirPadrao() {
     const pessoa = colaboradores[0];
     const base = formPadraoVazio(pessoa?.id ?? "");
@@ -362,6 +400,7 @@ export default function RhEscalaPage() {
       setMensagem(
         `Convocação aceita. Pagamento previsto de ${moeda(r.pagamento.valor)} criado — veja em Pagamentos.`
       );
+      setErro(null);
     } else {
       setMensagem(`Resposta registrada: ${rotuloStatusConvocacao(status)}.`);
     }
@@ -456,6 +495,7 @@ export default function RhEscalaPage() {
   const detalheConv: ConvocacaoIntermitente | undefined = detalheSlot
     ? convocacaoDoSlot(db, detalheSlot.id)
     : undefined;
+  const detalhePagamento = detalheConv ? pagamentoDaConvocacao(db, detalheConv.id) : undefined;
 
   return (
     <div>
@@ -1027,6 +1067,48 @@ export default function RhEscalaPage() {
             ) : (
               <p className="text-sm text-slate-600">Colaborador: apenas agenda (sem convocação intermitente).</p>
             )}
+
+            {detalhePagamento && (
+              <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-blue-950">Pagamento</p>
+                  <Badge cor="azul">{rotuloStatusPagamentoPessoa(detalhePagamento.status)}</Badge>
+                </div>
+                <p className="text-sm text-blue-950">
+                  {moeda(detalhePagamento.pagamento_valor ?? detalhePagamento.valor)}
+                  {detalhePagamento.horas != null ? ` · ${detalhePagamento.horas} h` : ""}
+                  {detalhePagamento.pagamento_banco_conta
+                    ? ` · saiu de ${detalhePagamento.pagamento_banco_conta}`
+                    : ""}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Link href="/rh/pagamentos" className="btn-secundario">
+                    Abrir pagamentos
+                  </Link>
+                  {(detalhePagamento.status === "aguardando_conciliacao" ||
+                    detalhePagamento.status === "pago") &&
+                    detalheConv && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() => void copiarReciboDoPagamento(detalheConv.id, "recibo")}
+                        >
+                          <Copy size={16} /> Copiar recibo
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() => void copiarReciboDoPagamento(detalheConv.id, "confirmacao")}
+                        >
+                          <Copy size={16} /> Confirmação
+                        </button>
+                      </>
+                    )}
+                </div>
+              </div>
+            )}
+
             {erro && <p className="text-sm font-medium text-destaque">{erro}</p>}
           </div>
         )}

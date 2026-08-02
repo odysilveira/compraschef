@@ -37,6 +37,16 @@ export type ModuloAcesso =
 
 export type PermissoesModulos = Record<ModuloAcesso, boolean>;
 
+/** Arquivo de contrato assinado guardado no perfil (demo local). */
+export interface ContratoArquivoPessoa {
+  nome_arquivo: string;
+  tipo_arquivo: string;
+  tamanho_bytes: number;
+  enviado_em: string;
+  /** Data URL (base64) para abrir/baixar no navegador. */
+  data_url: string;
+}
+
 export interface PessoaRH {
   id: string;
   nome: string;
@@ -56,6 +66,8 @@ export interface PessoaRH {
   chave_pix?: string;
   contrato_assinado?: boolean;
   esocial_ok?: boolean;
+  /** Cópia do contrato assinado (PDF ou imagem) — demo em localStorage. */
+  contrato_arquivo?: ContratoArquivoPessoa;
   tem_acesso_sistema: boolean;
   login?: string;
   /** Demo local — trocar por hash quando Auth/Supabase existir. */

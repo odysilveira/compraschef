@@ -13,6 +13,15 @@ import {
   montarContratoArquivo,
 } from "@/lib/domain/contrato-pessoa";
 import {
+  convocacaoDoSlot,
+  formatDataBrLonga,
+  janela28Dias,
+  nomeDiaSemana,
+  pessoaPrecisaConvocacao,
+  rotuloStatusConvocacao,
+  slotsDaPessoaNaJanela,
+} from "@/lib/domain/escala";
+import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
   TIPOS_PESSOA_RH,
@@ -26,9 +35,21 @@ import {
 } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { moeda } from "@/lib/format";
-import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
+import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, StatusConvocacao, TipoPessoaRH } from "@/lib/types";
 
-type AbaPerfil = "dados" | "acesso" | "proximos";
+type AbaPerfil = "dados" | "acesso" | "escala";
+
+function BadgeConvocacao({ status }: { status: StatusConvocacao }) {
+  const cor =
+    status === "aceita"
+      ? "verde"
+      : status === "enviada"
+        ? "azul"
+        : status === "recusada" || status === "silencio"
+          ? "laranja"
+          : "cinza";
+  return <Badge cor={cor}>{rotuloStatusConvocacao(status)}</Badge>;
+}
 
 export default function RhPerfilPage() {
   const params = useParams<{ id: string }>();
@@ -44,6 +65,12 @@ export default function RhPerfilPage() {
   const pessoa = useMemo(
     () => (db.pessoas ?? []).find((p) => p.id === params.id) ?? null,
     [db.pessoas, params.id]
+  );
+
+  const diasJanela = useMemo(() => janela28Dias(), []);
+  const plantaoesPessoa = useMemo(
+    () => (pessoa ? slotsDaPessoaNaJanela(db, pessoa.id, diasJanela) : []),
+    [db, pessoa, diasJanela]
   );
 
   useEffect(() => {
@@ -276,7 +303,7 @@ export default function RhPerfilPage() {
           [
             ["dados", "Dados"],
             ["acesso", "Acesso"],
-            ["proximos", "Próximos passos"],
+            ["escala", "Escala"],
           ] as const
         ).map(([id, rotulo]) => (
           <button
@@ -645,31 +672,59 @@ export default function RhPerfilPage() {
         </form>
       )}
 
-      {aba === "proximos" && (
+      {aba === "escala" && (
         <Card className="space-y-3">
-          <h2 className="text-base font-bold">Em breve neste perfil</h2>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-            <li>
-              <Link href="/rh/pagamentos" className="text-primaria-escura underline">
-                Pagamentos com conciliação bancária
-              </Link>{" "}
-              (já disponível)
-            </li>
-            <li>
-              <Link href="/rh/consumos" className="text-primaria-escura underline">
-                Consumo no restaurante (20% off)
-              </Link>{" "}
-              (já disponível)
-            </li>
-            <li>
-              <Link href="/rh/escala" className="text-primaria-escura underline">
-                Escala 28 dias e convocações
-              </Link>{" "}
-              (já disponível)
-            </li>
-            <li>Avaliações e histórico de atividades</li>
-            <li>Porcionamentos / feituras (quando função = cozinha)</li>
-          </ul>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold">Próximos 28 dias</h2>
+              <p className="text-sm text-slate-600">
+                {plantaoesPessoa.length === 0
+                  ? "Nenhum plantão lançado ainda."
+                  : `${plantaoesPessoa.length} plantão(ões) nesta janela.`}
+              </p>
+            </div>
+            <Link href="/rh/escala" className="btn-secundario text-sm">
+              Abrir escala completa
+            </Link>
+          </div>
+
+          {pessoaPrecisaConvocacao(pessoa.tipo) && (
+            <p className="text-xs text-slate-600">
+              Intermitente/entregador: a convocação por WhatsApp aparece ao lado de cada plantão (quando houver).
+            </p>
+          )}
+
+          {plantaoesPessoa.length === 0 ? (
+            <Vazio mensagem="Lance plantões em RH → Escala (ou use Gerar padrão CLT para colaborador)." />
+          ) : (
+            <ul className="divide-y divide-stone-200 rounded-lg border border-stone-200 bg-white">
+              {plantaoesPessoa.map((slot) => {
+                const conv = convocacaoDoSlot(db, slot.id);
+                return (
+                  <li key={slot.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm">
+                    <div>
+                      <p className="font-semibold">
+                        {formatDataBrLonga(slot.data)}{" "}
+                        <span className="font-normal text-slate-500">({nomeDiaSemana(slot.data)})</span>
+                      </p>
+                      <p className="text-slate-600">
+                        {slot.hora_inicio}–{slot.hora_fim}
+                        {slot.funcao ? ` · ${slot.funcao}` : ""}
+                        {slot.local ? ` · ${slot.local}` : ""}
+                      </p>
+                    </div>
+                    {conv ? <BadgeConvocacao status={conv.status} /> : pessoaPrecisaConvocacao(pessoa.tipo) ? (
+                      <Badge cor="cinza">Sem convocação</Badge>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <p className="text-xs text-slate-500">
+            Avaliações, histórico de atividades e porcionamentos (cozinha) entram depois neste perfil.
+          </p>
         </Card>
       )}
     </div>

@@ -10,6 +10,7 @@ import {
   marcarConvocacaoEnviada,
   montarTextoConvocacaoWhatsApp,
   registrarRespostaConvocacao,
+  slotsDaPessoaNaJanela,
   validarPreRequisitosConvocacao,
 } from "./escala";
 
@@ -246,6 +247,35 @@ describe("escala domain", () => {
     expect(deNovo.sucesso).toBe(true);
     expect(deNovo.criados).toBe(0);
     expect(deNovo.pulados).toBe(antes);
+  });
+
+  it("filtra plantões da pessoa na janela", () => {
+    const db = dbBase();
+    const dias = janela28Dias("2026-08-03");
+    criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-05",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-p1", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    criarSlot(
+      db,
+      {
+        pessoa_id: "pes-clt",
+        data: "2026-08-05",
+        hora_inicio: "09:00",
+        hora_fim: "17:00",
+        intervalo_min: 60,
+      },
+      { id: "esc-p2", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    const daPessoa = slotsDaPessoaNaJanela(db, "pes-inter-1", dias);
+    expect(daPessoa.map((s) => s.id)).toEqual(["esc-p1"]);
   });
 
   it("bloqueia convocação sem contrato ou eSocial", () => {

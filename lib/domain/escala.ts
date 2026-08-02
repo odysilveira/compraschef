@@ -429,6 +429,11 @@ export function slotsNaJanela(db: DB, dias: string[]): EscalaSlot[] {
     .sort((a, b) => a.data.localeCompare(b.data) || a.hora_inicio.localeCompare(b.hora_inicio));
 }
 
+/** Plantões de uma pessoa dentro da janela (ex.: próximos 28 dias). */
+export function slotsDaPessoaNaJanela(db: DB, pessoaId: string, dias: string[]): EscalaSlot[] {
+  return slotsNaJanela(db, dias).filter((s) => s.pessoa_id === pessoaId);
+}
+
 /** Padrões de escala CLT (ciclo rolante ou calendário). */
 export type PadraoEscalaClt = "6x1" | "5x2" | "4x2" | "12x36" | "seg_sex";
 

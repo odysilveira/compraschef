@@ -349,7 +349,14 @@ describe("escala domain", () => {
     expect(setorDoPlantao(slots[0]!, pessoas[0])).toBe("cozinha");
     expect(setorDoPlantao(slots[1]!, pessoas[1])).toBe("balcao");
     expect(setorDoPlantao(slots[2]!, pessoas[2])).toBe("motoboy");
-    expect(resumoSetoresDoDia(slots, pessoas)).toEqual({ motoboys: 1, cozinha: 1, balcao: 1, clt: 0 });
+    expect(resumoSetoresDoDia(slots, pessoas)).toEqual({
+      motoboys: 1,
+      cozinha: 1,
+      balcao: 1,
+      clt_cozinha: 0,
+      clt_balcao: 0,
+      clt_outros: 0,
+    });
     expect(
       resumoSetoresDoDia(
         [
@@ -383,10 +390,26 @@ describe("escala domain", () => {
           { id: "c2", tipo: "colaborador" as const, funcao: "balcao" as const },
         ]
       )
-    ).toEqual({ motoboys: 1, cozinha: 2, balcao: 2, clt: 2 });
+    ).toEqual({
+      motoboys: 1,
+      cozinha: 1,
+      balcao: 1,
+      clt_cozinha: 1,
+      clt_balcao: 1,
+      clt_outros: 0,
+    });
     expect(setorDoPlantao({ funcao: "Cozinha" }, { tipo: "colaborador", funcao: "cozinha" })).toBe("cozinha");
     expect(setorDoPlantao({ funcao: "" }, { tipo: "colaborador", funcao: "balcao" })).toBe("balcao");
-    expect(textoResumoSetores({ motoboys: 1, cozinha: 2, balcao: 0, clt: 1 })).toBe("1 CLT · 1 moto · 2 coz");
+    expect(
+      textoResumoSetores({
+        motoboys: 1,
+        cozinha: 2,
+        balcao: 0,
+        clt_cozinha: 2,
+        clt_balcao: 1,
+        clt_outros: 0,
+      })
+    ).toBe("CLT coz 2 · CLT balc 1 · 1 moto · 2 coz");
   });
 
   it("filtra plantões da pessoa na janela", () => {

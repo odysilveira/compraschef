@@ -458,31 +458,40 @@ export default function RhEscalaPage() {
         return;
       }
       const proximo = structuredClone(db);
-      const resultado = criarSlot(
+      // A partir deste dia: preenche o resto do calendário em 12x36 (dia sim / dia não).
+      const gerado = gerarEscalaPadraoClt(
         proximo,
         {
           pessoa_id: pessoaId,
-          data,
+          padrao: "12x36",
           hora_inicio: HORARIO_PADRAO_CLT_12X36.hora_inicio,
           hora_fim: HORARIO_PADRAO_CLT_12X36.hora_fim,
           intervalo_min: HORARIO_PADRAO_CLT_12X36.intervalo_min,
           funcao: rotuloFuncao(pessoa),
           local: LOCAL_PADRAO_ESCALA,
-          observacao: "CLT · jornada 12x36 (ajuste o horário se precisar)",
+          inicio_janela: data,
+          referencia_ciclo: data,
+          pular_existentes: true,
         },
-        { id: uid("esc"), criarConvocacao: false }
+        { idFactory: () => uid("esc") }
       );
-      if (!resultado.sucesso) {
-        setErro(resultado.erros.join(" "));
+      if (!gerado.sucesso) {
+        setErro(gerado.erros.join(" "));
         return;
       }
       mutate((atual) => Object.assign(atual, proximo));
       setErro(null);
       const nomeCurto = pessoa.nome.split(/\s+/)[0];
+      const setorPessoa = setorOperacionalDaPessoa(pessoa);
+      const setorTxt =
+        setorPessoa === "cozinha" ? "cozinha" : setorPessoa === "balcao" ? "balcão" : rotuloFuncao(pessoa);
       setMensagem(
-        `${nomeCurto} (CLT) em ${formatDataBrLonga(data)} · ${HORARIO_PADRAO_CLT_12X36.hora_inicio}–${HORARIO_PADRAO_CLT_12X36.hora_fim}. Para dia sim/dia não, use Gerar 12x36.`
+        `${nomeCurto} (CLT · ${setorTxt}): ${gerado.criados} dia(s) no 12x36 a partir de ${formatDataBrLonga(data)}` +
+          (gerado.pulados ? ` (${gerado.pulados} já existiam)` : "") +
+          " — dias alternados até o fim do período."
       );
-      if (resultado.slot) setDetalheSlotId(resultado.slot.id);
+      const slotDoDia = (proximo.escala_slots ?? []).find((s) => s.pessoa_id === pessoaId && s.data === data);
+      if (slotDoDia) setDetalheSlotId(slotDoDia.id);
       return;
     }
 
@@ -610,8 +619,8 @@ export default function RhEscalaPage() {
             <div>
               <p className="text-sm font-bold text-slate-900">Quem entra na escala</p>
               <p className="text-xs text-slate-600">
-                CLT: arraste um dia ou gere 12x36. Se a função for cozinha ou balcão/caixa, entra na conta do setor no
-                dia. Intermitentes e motoboys: arraste para convocar.
+                CLT: solte num dia e o sistema preenche o resto em 12x36 (dia sim / dia não). Cozinha e balcão entram no
+                saldo do dia como CLT coz / CLT balc.
               </p>
             </div>
             <BancoPessoas
@@ -718,11 +727,17 @@ export default function RhEscalaPage() {
                                       : null;
                                   const setorEfetivo =
                                     arrasto.setor === "clt" ? setorClt : (arrasto.setor as SetorConvocacaoEscala);
+                                  const ehClt = arrasto.setor === "clt";
                                   return {
-                                    clt: resumo.clt + (arrasto.setor === "clt" ? 1 : 0),
-                                    motoboys: resumo.motoboys + (setorEfetivo === "motoboy" ? 1 : 0),
-                                    cozinha: resumo.cozinha + (setorEfetivo === "cozinha" ? 1 : 0),
-                                    balcao: resumo.balcao + (setorEfetivo === "balcao" ? 1 : 0),
+                                    clt_cozinha:
+                                      resumo.clt_cozinha + (ehClt && setorEfetivo === "cozinha" ? 1 : 0),
+                                    clt_balcao: resumo.clt_balcao + (ehClt && setorEfetivo === "balcao" ? 1 : 0),
+                                    clt_outros:
+                                      resumo.clt_outros +
+                                      (ehClt && setorEfetivo !== "cozinha" && setorEfetivo !== "balcao" ? 1 : 0),
+                                    motoboys: resumo.motoboys + (!ehClt && setorEfetivo === "motoboy" ? 1 : 0),
+                                    cozinha: resumo.cozinha + (!ehClt && setorEfetivo === "cozinha" ? 1 : 0),
+                                    balcao: resumo.balcao + (!ehClt && setorEfetivo === "balcao" ? 1 : 0),
                                   };
                                 })()
                               : resumo;
@@ -846,7 +861,7 @@ export default function RhEscalaPage() {
                                   className={`mt-1 border-t border-stone-200/80 pt-1 text-[10px] leading-tight ${
                                     ehDestino ? "font-semibold text-primaria-escura" : "text-slate-500"
                                   }`}
-                                  title="CLT · motoboys · cozinha (CLT + intermitentes) · balcão (CLT + intermitentes)"
+                                  title="CLT coz · CLT balc · moto · coz (intermitentes) · bal (intermitentes)"
                                 >
                                   {textoResumo || "—"}
                                 </p>
@@ -863,8 +878,8 @@ export default function RhEscalaPage() {
           </Card>
 
           <p className="mt-3 text-center text-xs text-slate-500">
-            Rodapé: CLT · moto · coz · bal. CLT de cozinha entra em coz; CLT de balcão/caixa entra em bal (junto com
-            intermitentes).
+            Saldo do dia: CLT coz · CLT balc · moto · coz · bal. Soltar CLT num dia gera automaticamente os dias
+            alternados (12x36) a partir daí.
           </p>
         </div>
       </div>

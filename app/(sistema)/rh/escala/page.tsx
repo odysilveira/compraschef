@@ -436,7 +436,7 @@ export default function RhEscalaPage() {
     <div>
       <TituloPagina
         titulo="Escala"
-        subtitulo={`Resto do mês atual + mês seguinte (${periodoRotulo}). Arraste intermitentes/motoboys da lista para o dia, ou remova plantões arrastando no calendário.`}
+        subtitulo={`Resto do mês atual + mês seguinte (${periodoRotulo}). Arraste intermitentes/motoboys da lista para o dia, ou remarque plantões arrastando no calendário.`}
         acao={
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-secundario" onClick={abrirPadrao}>

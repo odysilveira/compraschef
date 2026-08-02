@@ -295,12 +295,47 @@ export const seedDB: DB = {
     { id: "bol-2", nota_id: "nf-3", valor: 1240.0, vencimento: soData(diasAFrente(3)), cnpj_beneficiario: "99.888.777/0001-66", linha_digitavel: "23791.22928 60000.123456 77000.045678 1 98760000124000", status: "suspeito", observacao: "CNPJ do beneficiário difere do CNPJ do fornecedor na nota — NÃO PAGAR sem confirmar por telefone" },
     // Liberado: conferência OK
     { id: "bol-3", nota_id: "nf-1", valor: 318.4, vencimento: soData(diasAFrente(2)), cnpj_beneficiario: "12.345.678/0001-90", status: "liberado" },
+    // Pagamento informado — aguarda conciliação bancária (demo da fila)
+    {
+      id: "bol-4",
+      nota_id: "nf-1",
+      numero_parcela: "002",
+      valor: 150.0,
+      vencimento: soData(diasAtras(1)),
+      cnpj_beneficiario: "12.345.678/0001-90",
+      linha_digitavel: "34191.09008 81020.334567 89000.011206 5 98760000015000",
+      status: "aguardando_conciliacao",
+      status_conferencia: "conferido",
+      conferido_em: diasAtras(3),
+      conferido_por: "Marina",
+      pagamento_data: soData(diasAtras(1)),
+      pagamento_valor: 150.0,
+      pagamento_banco_conta: "Banco Demo — Conta Operacional",
+      pagamento_responsavel: "Ody",
+      pagamento_informado_em: diasAtras(1),
+      pagamento_observacao: "Pago via PIX no app do banco",
+    },
   ],
 
   contas_pagar: [],
   conta_pagar_historico: [],
   documentos_boleto: [],
-  boleto_pagamentos_historico: [],
+  boleto_pagamentos_historico: [
+    {
+      id: "bph-seed-1",
+      boleto_id: "bol-4",
+      nota_id: "nf-1",
+      acao: "pagamento_informado",
+      status_anterior: "liberado",
+      status_novo: "aguardando_conciliacao",
+      data_pagamento: soData(diasAtras(1)),
+      valor_pago: 150.0,
+      banco_conta: "Banco Demo — Conta Operacional",
+      responsavel: "Ody",
+      observado_em: diasAtras(1),
+      observacao: "Pago via PIX no app do banco",
+    },
+  ],
 
   recebimentos: [
     // Recebimento OK do pedido hortifrúti — com uma divergência parcial no tomate

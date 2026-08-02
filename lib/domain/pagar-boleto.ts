@@ -47,6 +47,22 @@ export interface OpcoesInformarPagamentoBoleto {
   gerarIdHistorico?: () => string;
 }
 
+export interface DadosConciliarBoleto {
+  dataLiquidacao: string;
+  responsavel?: string;
+  observacao?: string;
+}
+
+export interface DadosDivergenciaBoleto {
+  motivo: string;
+  responsavel?: string;
+}
+
+export type ResultadoConciliarBoleto = ResultadoInformarPagamentoBoleto;
+export type ResultadoDivergenciaBoleto = ResultadoInformarPagamentoBoleto;
+export type OpcoesConciliarBoleto = OpcoesInformarPagamentoBoleto;
+export type OpcoesDivergenciaBoleto = OpcoesInformarPagamentoBoleto;
+
 export interface EstadoAgendaPagamentoBoleto {
   podeExibirCodigo: boolean;
   podeCopiarLinha: boolean;
@@ -363,6 +379,145 @@ export function informarPagamentoBoleto(
     responsavel,
     observado_em: agora,
     observacao,
+  };
+
+  db.boleto_pagamentos_historico.push(historico);
+
+  return {
+    sucesso: true,
+    boleto,
+    historico,
+    erros: [],
+  };
+}
+
+export function conciliarBoleto(
+  db: DB,
+  boletoId: string,
+  dados: DadosConciliarBoleto,
+  opcoes: OpcoesConciliarBoleto = {}
+): ResultadoConciliarBoleto {
+  const boleto = db.boletos.find((item) => item.id === boletoId);
+  if (!boleto) {
+    return {
+      sucesso: false,
+      erros: ["Boleto não encontrado."],
+    };
+  }
+
+  if (boleto.status !== "aguardando_conciliacao") {
+    return {
+      sucesso: false,
+      erros: [`Só é possível conciliar boleto em aguardando conciliação (atual: ${rotuloStatus(boleto.status)}).`],
+    };
+  }
+
+  if (!dataIsoValida(dados.dataLiquidacao)) {
+    return {
+      sucesso: false,
+      erros: ["Informe uma data de liquidação válida."],
+    };
+  }
+
+  const agora = opcoes.agora ?? new Date().toISOString();
+  const responsavel = limparTexto(dados.responsavel) || opcoes.responsavelPadrao || "usuário local";
+  if (!responsavel) {
+    return {
+      sucesso: false,
+      erros: ["Informe o responsável pela conciliação."],
+    };
+  }
+
+  const observacao = limparTexto(dados.observacao) || undefined;
+  const statusAnterior = boleto.status;
+  const valorPago = Number((boleto.pagamento_valor ?? boleto.valor).toFixed(2));
+  const bancoConta = limparTexto(boleto.pagamento_banco_conta) || "não informado";
+
+  boleto.status = "pago";
+  boleto.conciliado_em = agora;
+  boleto.conciliado_por = responsavel;
+  boleto.conciliacao_divergente = false;
+  boleto.conciliacao_divergencia_motivo = undefined;
+  boleto.conciliacao_divergencia_em = undefined;
+
+  const historico: HistoricoPagamentoBoleto = {
+    id: opcoes.gerarIdHistorico ? opcoes.gerarIdHistorico() : `bph-${Date.now().toString(36)}`,
+    boleto_id: boleto.id,
+    nota_id: boleto.nota_id,
+    acao: "conciliado",
+    status_anterior: statusAnterior,
+    status_novo: "pago",
+    data_pagamento: dados.dataLiquidacao,
+    valor_pago: valorPago,
+    banco_conta: bancoConta,
+    responsavel,
+    observado_em: agora,
+    observacao,
+  };
+
+  db.boleto_pagamentos_historico.push(historico);
+
+  return {
+    sucesso: true,
+    boleto,
+    historico,
+    erros: [],
+  };
+}
+
+export function registrarDivergenciaBoleto(
+  db: DB,
+  boletoId: string,
+  dados: DadosDivergenciaBoleto,
+  opcoes: OpcoesDivergenciaBoleto = {}
+): ResultadoDivergenciaBoleto {
+  const boleto = db.boletos.find((item) => item.id === boletoId);
+  if (!boleto) {
+    return {
+      sucesso: false,
+      erros: ["Boleto não encontrado."],
+    };
+  }
+
+  if (boleto.status !== "aguardando_conciliacao") {
+    return {
+      sucesso: false,
+      erros: [`Só é possível registrar divergência em aguardando conciliação (atual: ${rotuloStatus(boleto.status)}).`],
+    };
+  }
+
+  const motivo = limparTexto(dados.motivo);
+  if (!motivo) {
+    return {
+      sucesso: false,
+      erros: ["Informe o motivo da divergência."],
+    };
+  }
+
+  const agora = opcoes.agora ?? new Date().toISOString();
+  const responsavel = limparTexto(dados.responsavel) || opcoes.responsavelPadrao || "usuário local";
+  const statusAnterior = boleto.status;
+  const valorPago = Number((boleto.pagamento_valor ?? boleto.valor).toFixed(2));
+  const bancoConta = limparTexto(boleto.pagamento_banco_conta) || "não informado";
+  const dataPagamento = boleto.pagamento_data ?? agora.slice(0, 10);
+
+  boleto.conciliacao_divergente = true;
+  boleto.conciliacao_divergencia_motivo = motivo;
+  boleto.conciliacao_divergencia_em = agora;
+
+  const historico: HistoricoPagamentoBoleto = {
+    id: opcoes.gerarIdHistorico ? opcoes.gerarIdHistorico() : `bph-${Date.now().toString(36)}`,
+    boleto_id: boleto.id,
+    nota_id: boleto.nota_id,
+    acao: "divergencia_registrada",
+    status_anterior: statusAnterior,
+    status_novo: "aguardando_conciliacao",
+    data_pagamento: dataPagamento,
+    valor_pago: valorPago,
+    banco_conta: bancoConta,
+    responsavel,
+    observado_em: agora,
+    observacao: motivo,
   };
 
   db.boleto_pagamentos_historico.push(historico);

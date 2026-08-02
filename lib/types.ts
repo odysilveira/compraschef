@@ -292,6 +292,11 @@ export interface Boleto {
   pagamento_responsavel?: string;
   pagamento_observacao?: string;
   pagamento_informado_em?: string;
+  conciliado_em?: string;
+  conciliado_por?: string;
+  conciliacao_divergente?: boolean;
+  conciliacao_divergencia_motivo?: string;
+  conciliacao_divergencia_em?: string;
   observacao?: string;
 }
 
@@ -299,7 +304,7 @@ export interface HistoricoPagamentoBoleto {
   id: string;
   boleto_id: string;
   nota_id: string;
-  acao: "pagamento_informado";
+  acao: "pagamento_informado" | "conciliado" | "divergencia_registrada";
   status_anterior: StatusBoleto;
   status_novo: StatusBoleto;
   data_pagamento: string;

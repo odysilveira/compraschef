@@ -5,11 +5,13 @@ import {
   acoesPagamentoDisponiveisNoLayout,
   alternarCodigoAberto,
   avaliarElegibilidadePagamentoBoleto,
+  conciliarBoleto,
   criarSnapshotPagamentoBoleto,
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
   montarEstadoAgendaPagamentoBoleto,
   obterCodigoCanonicoConfirmadoDoDocumento,
+  registrarDivergenciaBoleto,
 } from "./pagar-boleto";
 
 function dbTeste(): DB {
@@ -44,6 +46,19 @@ function boletoBase(overrides: Partial<Boleto> = {}): Boleto {
     status_conferencia: "conferido",
     ...overrides,
   };
+}
+
+function boletoAguardandoConciliacao(overrides: Partial<Boleto> = {}): Boleto {
+  return boletoBase({
+    id: "bol-ok",
+    status: "aguardando_conciliacao",
+    pagamento_data: "2026-08-08",
+    pagamento_valor: 318.4,
+    pagamento_banco_conta: "Banco X / Conta Operacional",
+    pagamento_responsavel: "Marina",
+    pagamento_informado_em: "2026-08-08T10:00:00.000Z",
+    ...overrides,
+  });
 }
 
 function documentoBase(overrides: Partial<DocumentoBoleto> = {}): DocumentoBoleto {
@@ -255,6 +270,118 @@ describe("informar pagamento do boleto", () => {
     expect(resultado.sucesso).toBe(true);
     expect(db.boletos[0].pagamento_responsavel).toBe("usuário local");
     expect(db.boleto_pagamentos_historico[0].responsavel).toBe("usuário local");
+  });
+});
+
+describe("conciliar boleto", () => {
+  it("concilia a partir de aguardando_conciliacao para pago e registra histórico", () => {
+    const db = dbTeste();
+    db.boletos = [boletoAguardandoConciliacao()];
+
+    const resultado = conciliarBoleto(
+      db,
+      "bol-ok",
+      {
+        dataLiquidacao: "2026-08-09",
+        responsavel: "Ody",
+        observacao: "Confirmado no extrato",
+      },
+      {
+        agora: "2026-08-09T12:00:00.000Z",
+        gerarIdHistorico: () => "bph-conc-1",
+      }
+    );
+
+    expect(resultado.sucesso).toBe(true);
+    expect(db.boletos[0].status).toBe("pago");
+    expect(db.boletos[0].conciliado_em).toBe("2026-08-09T12:00:00.000Z");
+    expect(db.boletos[0].conciliado_por).toBe("Ody");
+    expect(db.boletos[0].conciliacao_divergente).toBe(false);
+    expect(db.boleto_pagamentos_historico[0]).toMatchObject({
+      id: "bph-conc-1",
+      acao: "conciliado",
+      status_anterior: "aguardando_conciliacao",
+      status_novo: "pago",
+      data_pagamento: "2026-08-09",
+      valor_pago: 318.4,
+      responsavel: "Ody",
+      observacao: "Confirmado no extrato",
+    });
+  });
+
+  it("recusa conciliar boleto liberado", () => {
+    const db = dbTeste();
+
+    const resultado = conciliarBoleto(db, "bol-ok", {
+      dataLiquidacao: "2026-08-09",
+      responsavel: "Ody",
+    });
+
+    expect(resultado.sucesso).toBe(false);
+    expect(resultado.erros[0]).toContain("aguardando conciliação");
+    expect(db.boletos[0].status).toBe("liberado");
+    expect(db.boleto_pagamentos_historico).toHaveLength(0);
+  });
+
+  it("registra divergência sem mudar status e sem marcar como pago", () => {
+    const db = dbTeste();
+    db.boletos = [boletoAguardandoConciliacao()];
+
+    const resultado = registrarDivergenciaBoleto(
+      db,
+      "bol-ok",
+      {
+        motivo: "Valor no extrato diferente do informado",
+        responsavel: "Ody",
+      },
+      {
+        agora: "2026-08-09T13:00:00.000Z",
+        gerarIdHistorico: () => "bph-div-1",
+      }
+    );
+
+    expect(resultado.sucesso).toBe(true);
+    expect(db.boletos[0].status).toBe("aguardando_conciliacao");
+    expect(db.boletos[0].status).not.toBe("pago");
+    expect(db.boletos[0].conciliacao_divergente).toBe(true);
+    expect(db.boletos[0].conciliacao_divergencia_motivo).toBe("Valor no extrato diferente do informado");
+    expect(db.boletos[0].conciliacao_divergencia_em).toBe("2026-08-09T13:00:00.000Z");
+    expect(db.boleto_pagamentos_historico[0]).toMatchObject({
+      id: "bph-div-1",
+      acao: "divergencia_registrada",
+      status_novo: "aguardando_conciliacao",
+      observacao: "Valor no extrato diferente do informado",
+    });
+  });
+
+  it("concilia após divergência, limpa a flag e marca como pago", () => {
+    const db = dbTeste();
+    db.boletos = [
+      boletoAguardandoConciliacao({
+        conciliacao_divergente: true,
+        conciliacao_divergencia_motivo: "Diferença de R$ 0,50",
+        conciliacao_divergencia_em: "2026-08-09T13:00:00.000Z",
+      }),
+    ];
+
+    const resultado = conciliarBoleto(
+      db,
+      "bol-ok",
+      {
+        dataLiquidacao: "2026-08-10",
+        responsavel: "Ody",
+      },
+      {
+        agora: "2026-08-10T09:00:00.000Z",
+        gerarIdHistorico: () => "bph-conc-2",
+      }
+    );
+
+    expect(resultado.sucesso).toBe(true);
+    expect(db.boletos[0].status).toBe("pago");
+    expect(db.boletos[0].conciliacao_divergente).toBe(false);
+    expect(db.boletos[0].conciliacao_divergencia_motivo).toBeUndefined();
+    expect(db.boletos[0].conciliacao_divergencia_em).toBeUndefined();
   });
 });
 

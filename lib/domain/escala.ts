@@ -2,10 +2,13 @@ import type {
   ConvocacaoIntermitente,
   DB,
   EscalaSlot,
+  PagamentoPessoa,
   PessoaRH,
   StatusConvocacao,
+  TipoPagamentoPessoa,
   TipoPessoaRH,
 } from "../types";
+import { aplicarDescontosNoPagamento } from "./consumos-pessoas";
 import { rotuloFuncao } from "./rh";
 
 export const ANTECEDENCIA_MINIMA_DIAS = 3;
@@ -129,6 +132,7 @@ export interface ResultadoEscala {
   sucesso: boolean;
   slot?: EscalaSlot;
   convocacao?: ConvocacaoIntermitente;
+  pagamento?: PagamentoPessoa;
   erros: string[];
   avisos: string[];
 }
@@ -296,7 +300,91 @@ export function registrarRespostaConvocacao(
   convocacao.status = status;
   convocacao.respondida_em = agora;
   convocacao.atualizado_em = agora;
-  return { sucesso: true, convocacao, erros: [], avisos: [] };
+
+  if (status !== "aceita") {
+    return { sucesso: true, convocacao, erros: [], avisos: [] };
+  }
+
+  const pagamentoResultado = criarPagamentoDaConvocacaoAceita(db, convocacaoId, { agora });
+  return {
+    sucesso: pagamentoResultado.sucesso,
+    convocacao,
+    pagamento: pagamentoResultado.pagamento,
+    erros: pagamentoResultado.erros,
+    avisos: pagamentoResultado.avisos,
+  };
+}
+
+export function pagamentoDaConvocacao(db: DB, convocacaoId: string): PagamentoPessoa | undefined {
+  return (db.pagamentos_pessoas ?? []).find((p) => p.convocacao_id === convocacaoId);
+}
+
+function tipoPagamentoPorPessoa(tipo: TipoPessoaRH): TipoPagamentoPessoa {
+  return tipo === "entregador" ? "freela_hora" : "intermitente_periodo";
+}
+
+/** Cria PagamentoPessoa previsto a partir de convocação aceita (sem duplicar). */
+export function criarPagamentoDaConvocacaoAceita(
+  db: DB,
+  convocacaoId: string,
+  opcoes: { agora?: string; id?: string } = {}
+): ResultadoEscala {
+  const convocacao = db.convocacoes.find((c) => c.id === convocacaoId);
+  if (!convocacao) return { sucesso: false, erros: ["Convocação não encontrada."], avisos: [] };
+  if (convocacao.status !== "aceita") {
+    return { sucesso: false, erros: ["Só é possível gerar pagamento de convocação aceita."], avisos: [] };
+  }
+
+  const existente = pagamentoDaConvocacao(db, convocacaoId);
+  if (existente) {
+    return { sucesso: true, convocacao, pagamento: existente, erros: [], avisos: ["Pagamento já existia para esta convocação."] };
+  }
+
+  const slot = db.escala_slots.find((s) => s.id === convocacao.escala_slot_id);
+  if (!slot) return { sucesso: false, erros: ["Plantão da convocação não encontrado."], avisos: [] };
+  const pessoa = db.pessoas.find((p) => p.id === convocacao.pessoa_id);
+  if (!pessoa) return { sucesso: false, erros: ["Pessoa não encontrada."], avisos: [] };
+
+  const agora = opcoes.agora ?? new Date().toISOString();
+  if (!Array.isArray(db.pagamentos_pessoas)) db.pagamentos_pessoas = [];
+
+  const dataBr = formatDataBrLonga(slot.data);
+  const pagamento: PagamentoPessoa = {
+    id: opcoes.id ?? `pagp-conv-${Date.now()}`,
+    pessoa_id: convocacao.pessoa_id,
+    tipo: tipoPagamentoPorPessoa(pessoa.tipo),
+    descricao: `Período ${dataBr} ${slot.hora_inicio}–${slot.hora_fim} (convocação aceita)`,
+    competencia: slot.data.slice(0, 7),
+    vencimento: slot.data,
+    valor: convocacao.valor_estimado,
+    valor_bruto: convocacao.valor_estimado,
+    horas: convocacao.horas_pagas,
+    valor_hora: convocacao.valor_hora,
+    convocacao_id: convocacao.id,
+    status: "previsto",
+    criado_em: agora,
+    atualizado_em: agora,
+  };
+  db.pagamentos_pessoas.push(pagamento);
+
+  const descontos = aplicarDescontosNoPagamento(db, pagamento.id);
+  if (!descontos.sucesso) {
+    return {
+      sucesso: false,
+      convocacao,
+      pagamento,
+      erros: descontos.erros,
+      avisos: [],
+    };
+  }
+
+  return {
+    sucesso: true,
+    convocacao,
+    pagamento: descontos.pagamento ?? pagamento,
+    erros: [],
+    avisos: [],
+  };
 }
 
 export function convocacaoDoSlot(db: DB, slotId: string): ConvocacaoIntermitente | undefined {

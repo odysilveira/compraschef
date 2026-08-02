@@ -101,7 +101,7 @@ describe("escala domain", () => {
     expect(db.convocacoes).toHaveLength(1);
   });
 
-  it("fluxo convocação: texto, enviar, aceitar", () => {
+  it("fluxo convocação: texto, enviar, aceitar cria pagamento", () => {
     const db = dbBase();
     const r = criarSlot(
       db,
@@ -113,7 +113,7 @@ describe("escala domain", () => {
         intervalo_min: 30,
         funcao: "Garçom",
       },
-      { id: "esc-2", agora: "2026-08-02T12:00:00.000Z" }
+      { id: "esc-2", agora: "2026-08-02T12:00:00.000Z", convocacaoId: "conv-2" }
     );
     expect(r.sucesso).toBe(true);
     expect(r.convocacao?.status).toBe("rascunho");
@@ -130,6 +130,35 @@ describe("escala domain", () => {
     const aceita = registrarRespostaConvocacao(db, r.convocacao!.id, "aceita", "2026-08-03T10:00:00.000Z");
     expect(aceita.sucesso).toBe(true);
     expect(db.convocacoes[0].status).toBe("aceita");
+    expect(aceita.pagamento?.convocacao_id).toBe("conv-2");
+    expect(aceita.pagamento?.tipo).toBe("intermitente_periodo");
+    expect(aceita.pagamento?.valor).toBe(62.5);
+    expect(aceita.pagamento?.status).toBe("previsto");
+    expect(db.pagamentos_pessoas).toHaveLength(1);
+
+    const deNovo = registrarRespostaConvocacao(db, r.convocacao!.id, "aceita", "2026-08-03T11:00:00.000Z");
+    expect(deNovo.sucesso).toBe(true);
+    expect(db.pagamentos_pessoas).toHaveLength(1);
+  });
+
+  it("recusa não cria pagamento", () => {
+    const db = dbBase();
+    const r = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-12",
+        hora_inicio: "18:00",
+        hora_fim: "22:00",
+        intervalo_min: 0,
+      },
+      { id: "esc-3", convocacaoId: "conv-3", agora: "2026-08-02T12:00:00.000Z" }
+    );
+    marcarConvocacaoEnviada(db, r.convocacao!.id);
+    const recusa = registrarRespostaConvocacao(db, r.convocacao!.id, "recusada");
+    expect(recusa.sucesso).toBe(true);
+    expect(recusa.pagamento).toBeUndefined();
+    expect(db.pagamentos_pessoas).toHaveLength(0);
   });
 
   it("monta texto no modelo WhatsApp", () => {

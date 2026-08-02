@@ -466,6 +466,7 @@ export default function RhPagamentosPage() {
                   <p className="text-sm text-slate-600">
                     {rotuloTipoPagamentoPessoa(pagamento.tipo)}
                     {pagamento.descricao ? ` · ${pagamento.descricao}` : ""}
+                    {pagamento.convocacao_id ? " · via convocação" : ""}
                   </p>
                   <p className="text-xl font-bold">{moeda(pagamento.pagamento_valor ?? pagamento.valor)}</p>
                   {(pagamento.desconto_consumo || pagamento.desconto_adiantamento) && (

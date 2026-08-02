@@ -8,6 +8,7 @@ import {
   marcarConvocacaoEnviada,
   montarTextoConvocacaoWhatsApp,
   registrarRespostaConvocacao,
+  validarPreRequisitosConvocacao,
 } from "./escala";
 
 function pessoaInter(overrides: Partial<PessoaRH> = {}): PessoaRH {
@@ -19,6 +20,8 @@ function pessoaInter(overrides: Partial<PessoaRH> = {}): PessoaRH {
     cargo: "Garçom",
     valor_hora: 12.5,
     telefone: "43988881000",
+    contrato_assinado: true,
+    esocial_ok: true,
     tem_acesso_sistema: false,
     permissoes: {
       painel: false,
@@ -183,5 +186,32 @@ describe("escala domain", () => {
     });
     expect(texto).toContain("09/08/2026");
     expect(texto).toContain("contrato de trabalho intermitente");
+  });
+
+  it("bloqueia convocação sem contrato ou eSocial", () => {
+    const semContrato = pessoaInter({
+      id: "pes-sem",
+      contrato_assinado: false,
+      esocial_ok: false,
+    });
+    expect(validarPreRequisitosConvocacao(semContrato).ok).toBe(false);
+    expect(validarPreRequisitosConvocacao(semContrato).erros.length).toBeGreaterThanOrEqual(2);
+
+    const db = dbBase();
+    db.pessoas.push(semContrato);
+    const r = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-sem",
+        data: "2026-08-20",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-block", agora: "2026-08-10T12:00:00.000Z" }
+    );
+    expect(r.sucesso).toBe(false);
+    expect(r.erros.some((e) => e.includes("Contrato"))).toBe(true);
+    expect(db.escala_slots.find((s) => s.id === "esc-block")).toBeUndefined();
   });
 });

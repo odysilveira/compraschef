@@ -51,6 +51,12 @@ export function migrarColecoesFichasTecnicas(db: DB): boolean {
   }
 
   if (!Array.isArray(db.fichas_tecnicas) || db.fichas_tecnicas.length === 0) {
+    for (const receita of db.fichas_tecnicas_receitas) {
+      if (!receita.tipo) {
+        receita.tipo = "prato";
+        mudou = true;
+      }
+    }
     return mudou;
   }
 
@@ -64,6 +70,7 @@ export function migrarColecoesFichasTecnicas(db: DB): boolean {
         codigo: codigoReceita,
         nome: fichaLegada.nome,
         descricao: fichaLegada.descricao,
+        tipo: "prato",
         versao_vigente_id: fichaLegada.status === "publicada" ? fichaLegada.id : undefined,
         criado_por: "migração-legado",
         atualizado_por: "migração-legado",
@@ -114,6 +121,13 @@ export function migrarColecoesFichasTecnicas(db: DB): boolean {
           },
         ],
       });
+      mudou = true;
+    }
+  }
+
+  for (const receita of db.fichas_tecnicas_receitas) {
+    if (!receita.tipo) {
+      receita.tipo = "prato";
       mudou = true;
     }
   }

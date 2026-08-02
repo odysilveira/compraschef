@@ -7,10 +7,13 @@ import {
   converterUnidadeBasica,
 } from "./fichas-tecnicas";
 import type {
+  AtualizacaoReceitaFichaTecnica,
   ContextoOperacaoFichaTecnica,
+  NovoRascunhoBasicoFichaTecnica,
   NovaReceitaFichaTecnica,
   NovaVersaoRascunhoFichaTecnica,
   RepositorioFichasTecnicas,
+  ResultadoCriacaoRascunhoBasicoFichaTecnica,
 } from "./fichas-tecnicas-repositorio";
 import { getDB, migrarColecoesFichasTecnicas, substituirDB, uid } from "../data/index";
 import type {
@@ -21,6 +24,7 @@ import type {
   FichaTecnicaIngrediente,
   ReceitaFichaTecnica,
   ReceitaFichaTecnicaVersao,
+  TipoReceitaFichaTecnica,
 } from "../types";
 
 export interface PersistenciaBancoLocal {
@@ -38,6 +42,24 @@ function agoraIso(): string {
 
 function normalizarCodigo(codigo: string): string {
   return codigo.trim().toLocaleLowerCase("pt-BR");
+}
+
+function tipoReceitaNormalizado(tipo?: TipoReceitaFichaTecnica): TipoReceitaFichaTecnica {
+  return tipo ?? "prato";
+}
+
+function alergenicosNaoInformados(): FichaTecnica["alergenicos"] {
+  return {
+    gluten: "NAO_INFORMADO",
+    lactose: "NAO_INFORMADO",
+    ovos: "NAO_INFORMADO",
+    peixes: "NAO_INFORMADO",
+    crustaceos: "NAO_INFORMADO",
+    soja: "NAO_INFORMADO",
+    castanhas: "NAO_INFORMADO",
+    amendoim: "NAO_INFORMADO",
+    outros: [],
+  };
 }
 
 function garantirColecoes(db: DB): {
@@ -92,6 +114,44 @@ function validarDadosBase(novaReceita: NovaReceitaFichaTecnica): void {
   }
   if (!novaReceita.criado_por?.trim()) {
     throw new Error("Responsável de criação da receita é obrigatório.");
+  }
+
+  if (novaReceita.tipo && novaReceita.tipo !== "prato" && novaReceita.tipo !== "sub_receita") {
+    throw new Error(`Tipo de receita inválido: ${novaReceita.tipo}.`);
+  }
+}
+
+function validarAtualizacaoReceita(atualizacoes: AtualizacaoReceitaFichaTecnica): void {
+  if (!atualizacoes.codigo.trim()) {
+    throw new Error("Código da receita é obrigatório.");
+  }
+  if (!atualizacoes.nome.trim()) {
+    throw new Error("Nome da receita é obrigatório.");
+  }
+  if (atualizacoes.tipo && atualizacoes.tipo !== "prato" && atualizacoes.tipo !== "sub_receita") {
+    throw new Error(`Tipo de receita inválido: ${atualizacoes.tipo}.`);
+  }
+}
+
+function validarNovoRascunhoBasico(novoRascunho: NovoRascunhoBasicoFichaTecnica): void {
+  if (!novoRascunho.codigo.trim()) {
+    throw new Error("Código da receita é obrigatório.");
+  }
+
+  if (!novoRascunho.nome.trim()) {
+    throw new Error("Nome da receita é obrigatório.");
+  }
+
+  if (!novoRascunho.criado_por?.trim()) {
+    throw new Error("Responsável de criação da receita é obrigatório.");
+  }
+
+  if (!novoRascunho.rendimento_unidade_id.trim()) {
+    throw new Error("Unidade de rendimento inicial é obrigatória.");
+  }
+
+  if (novoRascunho.tipo !== "prato" && novoRascunho.tipo !== "sub_receita") {
+    throw new Error(`Tipo de receita inválido: ${novoRascunho.tipo}.`);
   }
 }
 
@@ -310,6 +370,8 @@ export function criarRepositorioFichasTecnicasLocal(
         codigo: novaReceita.codigo.trim(),
         nome: novaReceita.nome.trim(),
         descricao: novaReceita.descricao?.trim() || undefined,
+        tipo: tipoReceitaNormalizado(novaReceita.tipo),
+        categoria_id: novaReceita.categoria_id?.trim() || undefined,
         criado_por: novaReceita.criado_por,
         atualizado_por: novaReceita.criado_por,
         criado_em: agora,
@@ -318,6 +380,131 @@ export function criarRepositorioFichasTecnicasLocal(
 
       receitas.push(receita);
       return receita;
+    });
+  }
+
+  function atualizarDadosReceita(
+    receitaId: string,
+    atualizacoes: AtualizacaoReceitaFichaTecnica,
+    contexto: ContextoOperacaoFichaTecnica
+  ): ReceitaFichaTecnica {
+    validarResponsavel(contexto, "atualização de receita");
+    validarAtualizacaoReceita(atualizacoes);
+
+    return executarGravacaoAtomica((banco) => {
+      const { receitas, versoes } = garantirColecoes(banco);
+      const receita = receitas.find((item) => item.id === receitaId);
+      if (!receita) {
+        throw new Error(`Receita com id ${receitaId} não encontrada.`);
+      }
+
+      const codigoNormalizado = normalizarCodigo(atualizacoes.codigo);
+      const duplicada = receitas.find(
+        (item) => item.id !== receitaId && normalizarCodigo(item.codigo) === codigoNormalizado
+      );
+      if (duplicada) {
+        throw new Error(`Receita com código ${atualizacoes.codigo} já existe.`);
+      }
+
+      const agora = instanteOperacao(contexto);
+      receita.codigo = atualizacoes.codigo.trim();
+      receita.nome = atualizacoes.nome.trim();
+      receita.descricao = atualizacoes.descricao?.trim() || undefined;
+      receita.tipo = tipoReceitaNormalizado(atualizacoes.tipo);
+      receita.categoria_id = atualizacoes.categoria_id?.trim() || undefined;
+      receita.atualizado_por = contexto.responsavel;
+      receita.atualizado_em = agora;
+
+      const versaoAtual = receita.versao_vigente_id
+        ? versoes.find((item) => item.id === receita.versao_vigente_id)
+        : versoes
+            .filter((item) => item.receita_id === receitaId)
+            .sort((a, b) => b.criado_em.localeCompare(a.criado_em))[0];
+
+      if (versaoAtual && versaoAtual.status === "rascunho") {
+        versaoAtual.ficha.nome = receita.nome;
+        versaoAtual.ficha.descricao = receita.descricao;
+        versaoAtual.ficha.codigo_externo = receita.codigo;
+        versaoAtual.ficha.tipo_receita = receita.tipo;
+        versaoAtual.ficha.categoria_id = receita.categoria_id;
+        versaoAtual.ficha.atualizado_em = agora;
+        versaoAtual.atualizado_por = contexto.responsavel;
+        versaoAtual.atualizado_em = agora;
+      }
+
+      return receita;
+    });
+  }
+
+  function criarRascunhoBasico(
+    novoRascunho: NovoRascunhoBasicoFichaTecnica
+  ): ResultadoCriacaoRascunhoBasicoFichaTecnica {
+    validarNovoRascunhoBasico(novoRascunho);
+
+    return executarGravacaoAtomica((banco) => {
+      const { receitas, versoes } = garantirColecoes(banco);
+      if (receitas.some((item) => normalizarCodigo(item.codigo) === normalizarCodigo(novoRascunho.codigo))) {
+        throw new Error(`Receita com código ${novoRascunho.codigo} já existe.`);
+      }
+
+      const agora = agoraIso();
+      const receitaId = uid("ftrec");
+      const versaoId = uid("ftver");
+
+      const receita: ReceitaFichaTecnica = {
+        id: receitaId,
+        codigo: novoRascunho.codigo.trim(),
+        nome: novoRascunho.nome.trim(),
+        descricao: novoRascunho.descricao?.trim() || undefined,
+        tipo: novoRascunho.tipo,
+        categoria_id: novoRascunho.categoria_id?.trim() || undefined,
+        criado_por: novoRascunho.criado_por.trim(),
+        atualizado_por: novoRascunho.criado_por.trim(),
+        criado_em: agora,
+        atualizado_em: agora,
+      };
+
+      const ficha: FichaTecnica = {
+        id: versaoId,
+        nome: receita.nome,
+        descricao: receita.descricao,
+        status: "rascunho",
+        versao: "1.0.0",
+        rendimento_quantidade: 1,
+        rendimento_unidade_id: novoRascunho.rendimento_unidade_id.trim(),
+        ingredientes: [],
+        passos: [],
+        midias: [],
+        alergenicos: alergenicosNaoInformados(),
+        criado_em: agora,
+        atualizado_em: agora,
+      };
+
+      const versao: ReceitaFichaTecnicaVersao = {
+        id: versaoId,
+        receita_id: receitaId,
+        numero_versao: "1.0.0",
+        status: "rascunho",
+        rendimento_total: ficha.rendimento_quantidade,
+        unidade_rendimento: ficha.rendimento_unidade_id,
+        configuracoes_porcionamento: [],
+        ficha,
+        criado_por: novoRascunho.criado_por.trim(),
+        atualizado_por: novoRascunho.criado_por.trim(),
+        criado_em: agora,
+        atualizado_em: agora,
+        historico: [],
+      };
+
+      registrarEventoHistorico(versao, "criacao", novoRascunho.criado_por.trim(), agora);
+
+      receitas.push(receita);
+      versoes.push(versao);
+
+      return {
+        receita,
+        versao,
+      };
     });
   }
 
@@ -525,7 +712,9 @@ export function criarRepositorioFichasTecnicasLocal(
     listarReceitas,
     buscarReceitaPorId,
     buscarReceitaPorCodigo,
+    atualizarDadosReceita,
     salvarNovaReceita,
+    criarRascunhoBasico,
     atualizarRascunho,
     listarVersoesDaReceita,
     buscarVersaoPorId,

@@ -499,6 +499,38 @@ export interface DB {
 
 export type FichaTecnicaStatus = "rascunho" | "publicada" | "arquivada";
 
+export type TipoReceitaFichaTecnica = "prato" | "sub_receita";
+
+export type DificuldadeReceitaFichaTecnica = "facil" | "media" | "dificil";
+
+export type CanalVendaFichaTecnica = "salao" | "balcao" | "delivery_proprio" | "ifood";
+
+export type TipoMidiaFichaTecnica = "FOTO" | "VIDEO";
+
+export type OrigemMidiaFichaTecnica = "ARQUIVO_LOCAL_TEMPORARIO" | "URL_EXTERNA";
+
+export interface FichaTecnicaMidia {
+  id: string;
+  versao_id: string;
+  tipo: TipoMidiaFichaTecnica;
+  origem: OrigemMidiaFichaTecnica;
+  nome_arquivo?: string;
+  mime_type?: string;
+  tamanho_bytes?: number;
+  url: string;
+  passo_id?: string;
+  criado_em: string;
+}
+
+export interface FichaTecnicaCanalPreco {
+  canal: CanalVendaFichaTecnica;
+  preco_praticado: number;
+  taxa_percentual: number;
+  taxa_fixa: number;
+  impostos_percentual: number;
+  cmv_desejado_percentual: number;
+}
+
 export type TipoIngrediente = "PRODUTO" | "SUB_RECEITA";
 
 export type PresencaAlergenico = "CONTEM" | "PODE_CONTER" | "NAO_INFORMADO";
@@ -515,15 +547,56 @@ export interface FichaTecnicaAlergenicos {
   outros?: { nome: string; presenca: PresencaAlergenico }[];
 }
 
+export type OrigemInformacaoNutricional = "MANUAL" | "PDF" | "PLANILHA" | "CALCULADA" | "LAUDO";
+
+export type StatusInformacaoNutricional =
+  | "estimado"
+  | "conferido"
+  | "validado_por_nutricionista"
+  | "validado_por_laudo";
+
+export type UnidadeLinhaNutricional = "kcal" | "kJ" | "g" | "mg";
+
+export type CodigoLinhaNutricional =
+  | "valor_energetico_kcal"
+  | "valor_energetico_kj"
+  | "carboidratos_g"
+  | "acucares_totais_g"
+  | "acucares_adicionados_g"
+  | "proteinas_g"
+  | "gorduras_totais_g"
+  | "gorduras_saturadas_g"
+  | "gorduras_trans_g"
+  | "fibra_alimentar_g"
+  | "sodio_mg";
+
+export interface LinhaInformacaoNutricional {
+  codigo: CodigoLinhaNutricional;
+  rotulo: string;
+  unidade: UnidadeLinhaNutricional;
+  valor_por_100: number | null;
+  valor_por_porcao: number | null;
+  vd_por_100?: number | null;
+  vd_por_porcao?: number | null;
+  ajuste_manual_por_100?: boolean;
+  ajuste_manual_por_porcao?: boolean;
+}
+
 export interface InformacaoNutricional {
-  valor_energetico_kcal?: number;
-  carboidratos_g?: number;
-  proteinas_g?: number;
-  gorduras_totais_g?: number;
-  gorduras_saturadas_g?: number;
-  gorduras_trans_g?: number;
-  fibra_alimentar_g?: number;
-  sodio_mg?: number;
+  origem: OrigemInformacaoNutricional;
+  fonte_descricao: string;
+  data_referencia?: string;
+  responsavel?: string;
+  status_validacao: StatusInformacaoNutricional;
+  ultima_alteracao_em?: string;
+  observacoes?: string;
+  tamanho_porcao?: number;
+  unidade_porcao?: "g" | "ml";
+  medida_caseira?: string;
+  quantidade_porcoes?: number;
+  peso_volume_final?: number;
+  unidade_peso_volume_final?: "g" | "ml";
+  linhas: LinhaInformacaoNutricional[];
 }
 
 export interface PegadaCarbono {
@@ -551,6 +624,8 @@ export interface FichaTecnicaConfiguracaoPorcionamento {
   unidade: string;
   quantidade_porcoes_teorica: number;
   ativa: boolean;
+  embalagem_nome?: string;
+  custo_embalagem_centavos?: number;
 }
 
 export interface FichaTecnicaIngredienteConversaoSnapshot {
@@ -569,7 +644,12 @@ export interface FichaTecnicaIngrediente {
   sub_receita_id?: string; // FK -> fichas_tecnicas.id (se tipo === 'SUB_RECEITA')
   sub_receita_versao?: string; // versão esperada da sub-receita (opcional)
   quantidade: number; // na unidade informada abaixo
+  quantidade_bruta?: number;
+  quantidade_liquida?: number;
+  fator_correcao?: number;
+  percentual_perda?: number;
   unidade_id: string; // FK -> unidades.id
+  fornecedor_referencia_id?: string;
   custo_historico_snapshot?: number; // custo do ingrediente em centavos no momento em que a ficha foi publicada
   conversao_snapshot?: FichaTecnicaIngredienteConversaoSnapshot;
 }
@@ -582,10 +662,13 @@ export interface FichaTecnicaPassoItemIngrediente {
 }
 
 export interface FichaTecnicaPasso {
+  id?: string;
   ordem: number; // 1, 2, 3...
+  titulo?: string;
   descricao: string;
   foto_url?: string;
   tempo_minutos?: number;
+  temperatura_celsius?: number;
   itens_ingredientes?: FichaTecnicaPassoItemIngrediente[];
 }
 
@@ -594,14 +677,28 @@ export interface FichaTecnica {
   codigo_externo?: string; // código para integração com ERP EaseEat
   nome: string;
   descricao?: string;
+  foto_url?: string;
+  tipo_receita?: TipoReceitaFichaTecnica;
+  categoria_id?: string;
+  dificuldade?: DificuldadeReceitaFichaTecnica;
+  tempo_preparo_minutos?: number;
+  tempo_coccao_minutos?: number;
+  equipamentos?: string[];
+  instrucoes_armazenamento?: string;
   status: FichaTecnicaStatus;
   versao: string; // ex: "1.0.0"
   rendimento_quantidade: number; // ex: 1.5 (quilos)
   rendimento_unidade_id: string; // FK -> unidades.id (ex: id de 'kg' ou 'L')
   configuracoes_porcionamento?: FichaTecnicaConfiguracaoPorcionamento[];
+  porcionamento_ativo_id?: string;
   porcoes_config?: FichaTecnicaPorcoesConfig;
+  canais_preco?: FichaTecnicaCanalPreco[];
+  custo_preparacao_centavos?: number;
+  custo_coccao_centavos?: number;
+  custo_montagem_centavos?: number;
   ingredientes: FichaTecnicaIngrediente[];
   passos: FichaTecnicaPasso[];
+  midias?: FichaTecnicaMidia[];
   alergenicos: FichaTecnicaAlergenicos;
   informacao_nutricional?: InformacaoNutricional;
   pegada_carbono?: PegadaCarbono;
@@ -614,6 +711,8 @@ export interface ReceitaFichaTecnica {
   codigo: string;
   nome: string;
   descricao?: string;
+  tipo?: TipoReceitaFichaTecnica;
+  categoria_id?: string;
   versao_vigente_id?: string;
   criado_por?: string;
   atualizado_por?: string;

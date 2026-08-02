@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { CircleCheckBig, FileUp, Plus, TriangleAlert, WalletCards } from "lucide-react";
+import { CircleCheckBig, Copy, FileUp, Plus, TriangleAlert, WalletCards } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
@@ -14,6 +14,10 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
+import {
+  montarTextoConfirmacaoRecebimento,
+  montarTextoReciboPagamentoPessoa,
+} from "@/lib/domain/recibo-pagamento-pessoa";
 import {
   aplicarDescontosNoPagamento,
   pagamentoUsaConsumoDiario,
@@ -321,6 +325,32 @@ export default function RhPagamentosPage() {
     setMensagem("Divergência registrada. Segue aguardando conciliação.");
   }
 
+  async function copiarRecibo(pagamento: PagamentoPessoa, variante: "recibo" | "confirmacao" = "recibo") {
+    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
+    if (!pessoa) {
+      setMensagem("Pessoa do pagamento não encontrada.");
+      return;
+    }
+    const texto =
+      variante === "confirmacao"
+        ? montarTextoConfirmacaoRecebimento({ pessoa, pagamento })
+        : montarTextoReciboPagamentoPessoa({
+            pessoa,
+            pagamento,
+            consumos: db.consumos_pessoas ?? [],
+          });
+    try {
+      await navigator.clipboard.writeText(texto);
+      setMensagem(
+        variante === "confirmacao"
+          ? "Texto de confirmação copiado — envie para a pessoa responder no WhatsApp."
+          : "Recibo discriminado copiado — pode colar no WhatsApp ou arquivar."
+      );
+    } catch {
+      setMensagem("Não foi possível copiar neste navegador.");
+    }
+  }
+
   function abrirImportacao() {
     setImportAberto(true);
     setImportPasso("arquivo");
@@ -543,6 +573,20 @@ export default function RhPagamentosPage() {
                       }}
                     >
                       <TriangleAlert size={16} /> Divergente
+                    </button>
+                  </>
+                )}
+                {(pagamento.status === "aguardando_conciliacao" || pagamento.status === "pago") && (
+                  <>
+                    <button type="button" className="btn-secundario" onClick={() => void copiarRecibo(pagamento, "recibo")}>
+                      <Copy size={16} /> Copiar recibo
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      onClick={() => void copiarRecibo(pagamento, "confirmacao")}
+                    >
+                      <Copy size={16} /> Confirmação (empregado)
                     </button>
                   </>
                 )}

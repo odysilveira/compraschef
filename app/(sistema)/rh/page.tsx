@@ -12,6 +12,9 @@ import {
   permissoesVazias,
   rotuloFuncao,
   rotuloTipoPessoa,
+  somenteDigitosCpf,
+  somenteDigitosTelefone,
+  validarCpf,
 } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
@@ -103,6 +106,11 @@ export default function RhPage() {
       setErro("Informe o login para quem terá acesso ao sistema.");
       return;
     }
+    const checagemCpf = validarCpf(form.cpf);
+    if (form.cpf.trim() && !checagemCpf.valido) {
+      setErro(checagemCpf.mensagem ?? "CPF inválido.");
+      return;
+    }
 
     const agora = new Date().toISOString();
     const permissoes = form.tem_acesso_sistema ? permissoesPorPapel(form.papel_sistema) : permissoesVazias();
@@ -116,7 +124,7 @@ export default function RhPage() {
         funcao_custom: form.funcao === "custom" ? form.funcao_custom.trim() || undefined : undefined,
         cargo: form.cargo.trim() || undefined,
         telefone: form.telefone.trim() || undefined,
-        cpf: form.cpf.trim() || undefined,
+        cpf: form.cpf.trim() ? somenteDigitosCpf(form.cpf) : undefined,
         observacao: form.observacao.trim() || undefined,
         tem_acesso_sistema: form.tem_acesso_sistema,
         login: form.tem_acesso_sistema ? form.login.trim().toLowerCase() : undefined,
@@ -271,15 +279,36 @@ export default function RhPage() {
               <Campo rotulo="Cargo">
                 <input className="campo" value={form.cargo} onChange={(e) => setForm({ ...form, cargo: e.target.value })} />
               </Campo>
-              <Campo rotulo="Telefone">
+              <Campo rotulo="Telefone / WhatsApp (com DDD)">
                 <input
                   className="campo"
                   value={form.telefone}
-                  onChange={(e) => setForm({ ...form, telefone: e.target.value })}
+                  onChange={(e) => setForm({ ...form, telefone: somenteDigitosTelefone(e.target.value) })}
+                  placeholder="43999990000"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="tel-national"
                 />
               </Campo>
               <Campo rotulo="CPF">
-                <input className="campo" value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} />
+                <input
+                  className="campo"
+                  value={form.cpf}
+                  onChange={(e) => setForm({ ...form, cpf: somenteDigitosCpf(e.target.value) })}
+                  placeholder="00000000000"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
+                />
+                {form.cpf && (
+                  <p
+                    className={`mt-1 text-xs font-medium ${
+                      validarCpf(form.cpf).valido && form.cpf.length === 11 ? "text-emerald-700" : "text-destaque"
+                    }`}
+                  >
+                    {validarCpf(form.cpf).mensagem}
+                  </p>
+                )}
               </Campo>
             </div>
             <Campo rotulo="Observação">

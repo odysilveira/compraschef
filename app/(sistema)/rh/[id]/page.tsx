@@ -14,6 +14,9 @@ import {
   permissoesVazias,
   rotuloFuncao,
   rotuloTipoPessoa,
+  somenteDigitosCpf,
+  somenteDigitosTelefone,
+  validarCpf,
 } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
@@ -85,6 +88,11 @@ export default function RhPerfilPage() {
       setErro("Nome é obrigatório.");
       return;
     }
+    const checagemCpf = validarCpf(editando.cpf);
+    if (editando.cpf?.trim() && !checagemCpf.valido) {
+      setErro(checagemCpf.mensagem ?? "CPF inválido.");
+      return;
+    }
     mutate((banco) => {
       const i = banco.pessoas.findIndex((p) => p.id === editando.id);
       if (i < 0) return;
@@ -94,7 +102,7 @@ export default function RhPerfilPage() {
         nome: editando.nome.trim(),
         cargo: editando.cargo?.trim() || undefined,
         telefone: editando.telefone?.trim() || undefined,
-        cpf: editando.cpf?.trim() || undefined,
+        cpf: editando.cpf?.trim() ? somenteDigitosCpf(editando.cpf) : undefined,
         observacao: editando.observacao?.trim() || undefined,
         chave_pix: editando.chave_pix?.trim() || undefined,
         funcao_custom: editando.funcao === "custom" ? editando.funcao_custom?.trim() || undefined : undefined,
@@ -288,15 +296,38 @@ export default function RhPerfilPage() {
                   onChange={(e) => atualizar("cargo", e.target.value)}
                 />
               </Campo>
-              <Campo rotulo="Telefone">
+              <Campo rotulo="Telefone / WhatsApp (com DDD)">
                 <input
                   className="campo"
                   value={editando.telefone ?? ""}
-                  onChange={(e) => atualizar("telefone", e.target.value)}
+                  onChange={(e) => atualizar("telefone", somenteDigitosTelefone(e.target.value))}
+                  placeholder="43999990000"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="tel-national"
                 />
               </Campo>
               <Campo rotulo="CPF">
-                <input className="campo" value={editando.cpf ?? ""} onChange={(e) => atualizar("cpf", e.target.value)} />
+                <input
+                  className="campo"
+                  value={editando.cpf ?? ""}
+                  onChange={(e) => atualizar("cpf", somenteDigitosCpf(e.target.value))}
+                  placeholder="00000000000"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
+                />
+                {editando.cpf && (
+                  <p
+                    className={`mt-1 text-xs font-medium ${
+                      validarCpf(editando.cpf).valido && editando.cpf.length === 11
+                        ? "text-emerald-700"
+                        : "text-destaque"
+                    }`}
+                  >
+                    {validarCpf(editando.cpf).mensagem}
+                  </p>
+                )}
               </Campo>
               <Campo rotulo="Admissão">
                 <input

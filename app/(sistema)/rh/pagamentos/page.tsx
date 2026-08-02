@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { CircleCheckBig, Plus, TriangleAlert, WalletCards } from "lucide-react";
+import { CircleCheckBig, FileUp, Plus, TriangleAlert, WalletCards } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
@@ -21,6 +21,13 @@ import {
   previewFechamentoSalario,
   validarAdiantamento,
 } from "@/lib/domain/consumos-pessoas";
+import {
+  criarPagamentosDaFolha,
+  parseRecibosFolhaTexto,
+  vincularRecibosAPessoas,
+  type ReciboFolhaVinculado,
+} from "@/lib/domain/folha-recibo-pdf";
+import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { PagamentoPessoa, TipoPagamentoPessoa } from "@/lib/types";
@@ -102,6 +109,13 @@ export default function RhPagamentosPage() {
   const [divergenciaId, setDivergenciaId] = useState<string | null>(null);
   const [motivoDivergencia, setMotivoDivergencia] = useState("");
   const [erroDivergencia, setErroDivergencia] = useState<string | null>(null);
+
+  const [importAberto, setImportAberto] = useState(false);
+  const [importPasso, setImportPasso] = useState<"arquivo" | "revisao">("arquivo");
+  const [importLinhas, setImportLinhas] = useState<ReciboFolhaVinculado[]>([]);
+  const [importCarregando, setImportCarregando] = useState(false);
+  const [erroImport, setErroImport] = useState<string | null>(null);
+  const [vencimentoImport, setVencimentoImport] = useState(hojeISO());
 
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
@@ -306,6 +320,77 @@ export default function RhPagamentosPage() {
     setMensagem("Divergência registrada. Segue aguardando conciliação.");
   }
 
+  function abrirImportacao() {
+    setImportAberto(true);
+    setImportPasso("arquivo");
+    setImportLinhas([]);
+    setErroImport(null);
+    setVencimentoImport(hojeISO());
+  }
+
+  async function onArquivoFolha(file: File | null) {
+    if (!file) return;
+    setImportCarregando(true);
+    setErroImport(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const texto = await extrairTextoPdfBrowser(buffer);
+      const recibos = parseRecibosFolhaTexto(texto);
+      if (recibos.length === 0) {
+        setErroImport("Não encontrei recibos neste PDF. Confira se é o arquivo de Recibos de Salários do contador.");
+        return;
+      }
+      const vinculados = vincularRecibosAPessoas(recibos, db.pessoas ?? [], db.pagamentos_pessoas ?? []);
+      setImportLinhas(vinculados);
+      setImportPasso("revisao");
+    } catch (err) {
+      setErroImport(err instanceof Error ? err.message : "Falha ao ler o PDF.");
+    } finally {
+      setImportCarregando(false);
+    }
+  }
+
+  function atualizarLinhaImport(idx: number, patch: Partial<ReciboFolhaVinculado>) {
+    setImportLinhas((atual) =>
+      atual.map((linha, i) => {
+        if (i !== idx) return linha;
+        const proxima = { ...linha, ...patch };
+        if (patch.pessoa_id !== undefined) {
+          const pessoa = db.pessoas.find((p) => p.id === patch.pessoa_id);
+          proxima.pessoa_nome = pessoa?.nome;
+          proxima.alerta = pessoa
+            ? proxima.ja_existe
+              ? "Já existe pagamento igual nesta competência."
+              : undefined
+            : "Pessoa não encontrada — selecione manualmente.";
+        }
+        return proxima;
+      })
+    );
+  }
+
+  function confirmarImportacao() {
+    const selecionadas = importLinhas.filter((l) => l.selecionado);
+    if (selecionadas.length === 0) {
+      setErroImport("Selecione ao menos um recibo para importar.");
+      return;
+    }
+    let resultado = { criados: 0, ignorados: 0, erros: [] as string[] };
+    mutate((banco) => {
+      resultado = criarPagamentosDaFolha(banco, importLinhas, {
+        vencimento: vencimentoImport,
+        idFactory: () => uid("pagp"),
+      });
+    });
+    setImportAberto(false);
+    setImportLinhas([]);
+    setMensagem(
+      `Folha importada: ${resultado.criados} pagamento(s) criado(s)${
+        resultado.ignorados ? ` · ${resultado.ignorados} ignorado(s)` : ""
+      }.`
+    );
+  }
+
   const pagamentoInformar = informarId ? db.pagamentos_pessoas.find((p) => p.id === informarId) : null;
   const pagamentoConciliar = conciliarId ? db.pagamentos_pessoas.find((p) => p.id === conciliarId) : null;
   const pagamentoDivergencia = divergenciaId ? db.pagamentos_pessoas.find((p) => p.id === divergenciaId) : null;
@@ -316,9 +401,14 @@ export default function RhPagamentosPage() {
         titulo="Pagamentos de pessoas"
         subtitulo="Informar pagamento ≠ pago. A baixa definitiva depende da conciliação bancária."
         acao={
-          <button type="button" className="btn-primario" onClick={() => setFormNovo(formNovoVazio(pessoasAtivas[0]?.id ?? ""))}>
-            <Plus size={16} /> Novo pagamento
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-secundario" onClick={abrirImportacao}>
+              <FileUp size={16} /> Importar folha PDF
+            </button>
+            <button type="button" className="btn-primario" onClick={() => setFormNovo(formNovoVazio(pessoasAtivas[0]?.id ?? ""))}>
+              <Plus size={16} /> Novo pagamento
+            </button>
+          </div>
         }
       />
 
@@ -691,6 +781,120 @@ export default function RhPagamentosPage() {
               </button>
             </div>
           </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={importAberto}
+        titulo="Importar folha PDF"
+        onFechar={() => {
+          if (!importCarregando) setImportAberto(false);
+        }}
+        fecharAoClicarFundo={false}
+      >
+        {importPasso === "arquivo" && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Baixe o PDF de recibos que o contador enviou no WhatsApp e selecione aqui. O sistema lê o líquido,
+              adiantamento e consumo de cada pessoa.
+            </p>
+            <Campo rotulo="Arquivo PDF *">
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                className="campo"
+                disabled={importCarregando}
+                onChange={(e) => void onArquivoFolha(e.target.files?.[0] ?? null)}
+              />
+            </Campo>
+            {importCarregando && <p className="text-sm text-slate-600">Lendo PDF…</p>}
+            {erroImport && <p className="text-sm font-medium text-destaque">{erroImport}</p>}
+            <div className="flex justify-end">
+              <button type="button" className="btn-secundario" onClick={() => setImportAberto(false)} disabled={importCarregando}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {importPasso === "revisao" && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Confira os vínculos e o valor líquido. Só as linhas marcadas serão lançadas como pagamento previsto.
+            </p>
+            <Campo rotulo="Vencimento dos pagamentos">
+              <input
+                type="date"
+                className="campo"
+                value={vencimentoImport}
+                onChange={(e) => setVencimentoImport(e.target.value)}
+              />
+            </Campo>
+            <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+              {importLinhas.map((linha, idx) => (
+                <div key={`${linha.codigo_funcionario}-${linha.liquido}-${idx}`} className="rounded-lg border border-stone-200 p-3">
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={linha.selecionado}
+                      onChange={(e) => atualizarLinhaImport(idx, { selecionado: e.target.checked })}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-slate-900">
+                        {linha.codigo_funcionario}-{linha.nome}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {linha.tipo_recibo === "pro_labore" ? "Pró-labore" : "Salário"} · {linha.competencia_rotulo}
+                      </p>
+                      <p className="text-sm">
+                        Líquido <strong>{moeda(linha.liquido)}</strong>
+                        {linha.adiantamento != null ? ` · Adiant. ${moeda(linha.adiantamento)}` : ""}
+                        {linha.consumo != null ? ` · Consumo ${moeda(linha.consumo)}` : ""}
+                      </p>
+                      <Campo rotulo="Pessoa no ComprasChef">
+                        <select
+                          className="campo"
+                          value={linha.pessoa_id ?? ""}
+                          onChange={(e) =>
+                            atualizarLinhaImport(idx, {
+                              pessoa_id: e.target.value || undefined,
+                              selecionado: Boolean(e.target.value) && !linha.ja_existe && linha.liquido > 0,
+                            })
+                          }
+                        >
+                          <option value="">Selecione</option>
+                          {pessoasAtivas.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nome}
+                            </option>
+                          ))}
+                        </select>
+                      </Campo>
+                      {linha.alerta && <p className="mt-1 text-xs font-medium text-destaque">{linha.alerta}</p>}
+                    </div>
+                  </label>
+                </div>
+              ))}
+            </div>
+            {erroImport && <p className="text-sm font-medium text-destaque">{erroImport}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={() => {
+                  setImportPasso("arquivo");
+                  setImportLinhas([]);
+                  setErroImport(null);
+                }}
+              >
+                Outro arquivo
+              </button>
+              <button type="button" className="btn-primario" onClick={confirmarImportacao}>
+                Confirmar importação ({importLinhas.filter((l) => l.selecionado).length})
+              </button>
+            </div>
+          </div>
         )}
       </Modal>
     </div>

@@ -51,6 +51,8 @@ export interface PessoaRH {
   data_admissao?: string;
   valor_hora?: number;
   salario?: number;
+  /** Valor fixo de adiantamento mensal (CLT). Não pode passar de 50% do salário. */
+  adiantamento_valor?: number;
   chave_pix?: string;
   contrato_assinado?: boolean;
   esocial_ok?: boolean;
@@ -87,6 +89,12 @@ export interface PagamentoPessoa {
   competencia?: string;
   vencimento: string;
   valor: number;
+  /** Valor antes de descontos (salário bruto ou diária bruta). */
+  valor_bruto?: number;
+  desconto_consumo?: number;
+  desconto_adiantamento?: number;
+  /** Consumos abatidos neste pagamento. */
+  consumo_ids?: string[];
   horas?: number;
   valor_hora?: number;
   status: StatusPagamentoPessoa;
@@ -101,6 +109,28 @@ export interface PagamentoPessoa {
   conciliacao_divergente?: boolean;
   conciliacao_divergencia_motivo?: string;
   conciliacao_divergencia_em?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type StatusConsumoPessoa = "pendente" | "descontado";
+
+/** Consumo do restaurante pelo funcionário (item a item, com desconto). */
+export interface ConsumoPessoa {
+  id: string;
+  pessoa_id: string;
+  /** Data do consumo YYYY-MM-DD. */
+  data: string;
+  /** Competência YYYY-MM. */
+  competencia: string;
+  descricao: string;
+  quantidade: number;
+  preco_unitario: number;
+  desconto_percentual: number;
+  valor_bruto: number;
+  valor_liquido: number;
+  status: StatusConsumoPessoa;
+  pagamento_id?: string;
   criado_em: string;
   atualizado_em: string;
 }
@@ -564,6 +594,7 @@ export interface DB {
   perfis: Perfil[];
   pessoas: PessoaRH[];
   pagamentos_pessoas: PagamentoPessoa[];
+  consumos_pessoas: ConsumoPessoa[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];

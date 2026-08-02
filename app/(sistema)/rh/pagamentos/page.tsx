@@ -14,6 +14,13 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
+import {
+  aplicarDescontosNoPagamento,
+  pagamentoUsaConsumoDiario,
+  previewFechamentoIntermitente,
+  previewFechamentoSalario,
+  validarAdiantamento,
+} from "@/lib/domain/consumos-pessoas";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { PagamentoPessoa, TipoPagamentoPessoa } from "@/lib/types";
@@ -125,6 +132,19 @@ export default function RhPagamentosPage() {
     };
   }, [db.pagamentos_pessoas]);
 
+  const previewNovo = useMemo(() => {
+    if (!formNovo?.pessoa_id) return null;
+    const bruto = Number(formNovo.valor.replace(",", "."));
+    if (!Number.isFinite(bruto) || bruto <= 0) return null;
+    if (formNovo.tipo === "salario") {
+      return previewFechamentoSalario(db, formNovo.pessoa_id, formNovo.competencia || competenciaAtual(), bruto);
+    }
+    if (pagamentoUsaConsumoDiario(formNovo.tipo)) {
+      return previewFechamentoIntermitente(db, formNovo.pessoa_id, bruto);
+    }
+    return null;
+  }, [db, formNovo]);
+
   if (!podeVerValores(papel)) {
     return (
       <div className="mx-auto max-w-lg">
@@ -144,34 +164,77 @@ export default function RhPagamentosPage() {
       setErroNovo("Selecione a pessoa.");
       return;
     }
-    const valor = Number(formNovo.valor.replace(",", "."));
-    if (!Number.isFinite(valor) || valor <= 0) {
+    const pessoa = db.pessoas.find((p) => p.id === formNovo.pessoa_id);
+    const valorBruto = Number(formNovo.valor.replace(",", "."));
+    if (!Number.isFinite(valorBruto) || valorBruto <= 0) {
       setErroNovo("Informe um valor válido.");
       return;
     }
+
+    if (formNovo.tipo === "adiantamento") {
+      const checagem = validarAdiantamento(pessoa?.salario, valorBruto);
+      if (!checagem.ok) {
+        setErroNovo(checagem.erros.join(" "));
+        return;
+      }
+    }
+
     const agora = new Date().toISOString();
     const horas = formNovo.horas ? Number(formNovo.horas.replace(",", ".")) : undefined;
     const valorHora = formNovo.valor_hora ? Number(formNovo.valor_hora.replace(",", ".")) : undefined;
+    const competencia = formNovo.competencia || undefined;
 
     mutate((banco) => {
-      banco.pagamentos_pessoas.push({
-        id: uid("pagp"),
+      const id = uid("pagp");
+      const pagamento: PagamentoPessoa = {
+        id,
         pessoa_id: formNovo.pessoa_id,
         tipo: formNovo.tipo,
         descricao: formNovo.descricao.trim() || undefined,
-        competencia: formNovo.competencia || undefined,
+        competencia,
         vencimento: formNovo.vencimento,
-        valor: Number(valor.toFixed(2)),
+        valor: Number(valorBruto.toFixed(2)),
+        valor_bruto: Number(valorBruto.toFixed(2)),
         horas: Number.isFinite(horas) ? horas : undefined,
         valor_hora: Number.isFinite(valorHora) ? valorHora : undefined,
         status: "previsto",
         criado_em: agora,
         atualizado_em: agora,
-      });
+      };
+      banco.pagamentos_pessoas.push(pagamento);
+
+      if (formNovo.tipo === "salario" || pagamentoUsaConsumoDiario(formNovo.tipo)) {
+        aplicarDescontosNoPagamento(banco, id);
+      }
     });
     setFormNovo(null);
     setErroNovo(null);
     setMensagem("Pagamento lançado como previsto.");
+  }
+
+  function aoMudarPessoaOuTipo(pessoaId: string, tipo: TipoPagamentoPessoa) {
+    if (!formNovo) return;
+    const pessoa = db.pessoas.find((p) => p.id === pessoaId);
+    let valor = formNovo.valor;
+    let valorHora = formNovo.valor_hora;
+    let horas = formNovo.horas;
+
+    if (tipo === "adiantamento" && pessoa?.adiantamento_valor != null) {
+      valor = pessoa.adiantamento_valor.toFixed(2);
+    } else if (tipo === "salario" && pessoa?.salario != null) {
+      valor = pessoa.salario.toFixed(2);
+    } else if (pagamentoUsaConsumoDiario(tipo) && pessoa?.valor_hora != null && !formNovo.valor) {
+      valorHora = pessoa.valor_hora.toFixed(2);
+    }
+
+    setFormNovo({
+      ...formNovo,
+      pessoa_id: pessoaId,
+      tipo,
+      valor,
+      valor_hora: valorHora,
+      horas,
+    });
   }
 
   function abrirInformar(pagamento: PagamentoPessoa) {
@@ -296,6 +359,9 @@ export default function RhPagamentosPage() {
         <Link href="/rh" className="btn-secundario ml-auto">
           Ver pessoas
         </Link>
+        <Link href="/rh/consumos" className="btn-secundario">
+          Consumos
+        </Link>
       </div>
 
       {lista.length === 0 ? (
@@ -312,6 +378,15 @@ export default function RhPagamentosPage() {
                     {pagamento.descricao ? ` · ${pagamento.descricao}` : ""}
                   </p>
                   <p className="text-xl font-bold">{moeda(pagamento.pagamento_valor ?? pagamento.valor)}</p>
+                  {(pagamento.desconto_consumo || pagamento.desconto_adiantamento) && (
+                    <p className="text-xs text-slate-500">
+                      Bruto {moeda(pagamento.valor_bruto ?? pagamento.valor)}
+                      {pagamento.desconto_adiantamento
+                        ? ` − adiant. ${moeda(pagamento.desconto_adiantamento)}`
+                        : ""}
+                      {pagamento.desconto_consumo ? ` − consumo ${moeda(pagamento.desconto_consumo)}` : ""}
+                    </p>
+                  )}
                   <p className="text-sm text-slate-500">Vencimento {dataBR(pagamento.vencimento)}</p>
                   {pagamento.status === "aguardando_conciliacao" && pagamento.pagamento_banco_conta && (
                     <p className="text-sm text-blue-800">
@@ -393,7 +468,7 @@ export default function RhPagamentosPage() {
                 className="campo"
                 required
                 value={formNovo.pessoa_id}
-                onChange={(e) => setFormNovo({ ...formNovo, pessoa_id: e.target.value })}
+                onChange={(e) => aoMudarPessoaOuTipo(e.target.value, formNovo.tipo)}
               >
                 <option value="">Selecione</option>
                 {pessoasAtivas.map((p) => (
@@ -408,7 +483,7 @@ export default function RhPagamentosPage() {
                 <select
                   className="campo"
                   value={formNovo.tipo}
-                  onChange={(e) => setFormNovo({ ...formNovo, tipo: e.target.value as TipoPagamentoPessoa })}
+                  onChange={(e) => aoMudarPessoaOuTipo(formNovo.pessoa_id, e.target.value as TipoPagamentoPessoa)}
                 >
                   {TIPOS_PAGAMENTO_PESSOA.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -434,7 +509,13 @@ export default function RhPagamentosPage() {
                   onChange={(e) => setFormNovo({ ...formNovo, vencimento: e.target.value })}
                 />
               </Campo>
-              <Campo rotulo="Valor *">
+              <Campo
+                rotulo={
+                  formNovo.tipo === "salario" || pagamentoUsaConsumoDiario(formNovo.tipo)
+                    ? "Valor bruto *"
+                    : "Valor *"
+                }
+              >
                 <input
                   className="campo"
                   required
@@ -467,6 +548,25 @@ export default function RhPagamentosPage() {
                 onChange={(e) => setFormNovo({ ...formNovo, descricao: e.target.value })}
               />
             </Campo>
+            {previewNovo && (previewNovo.desconto_consumo > 0 || previewNovo.desconto_adiantamento > 0) && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                <p>
+                  Bruto: <strong>{moeda(previewNovo.valor_bruto)}</strong>
+                </p>
+                {previewNovo.desconto_adiantamento > 0 && (
+                  <p>− Adiantamento: {moeda(previewNovo.desconto_adiantamento)}</p>
+                )}
+                {previewNovo.desconto_consumo > 0 && (
+                  <p>
+                    − Consumo ({previewNovo.itens_consumo.length} itens): {moeda(previewNovo.desconto_consumo)}
+                  </p>
+                )}
+                <p className="mt-1 font-semibold">A pagar: {moeda(previewNovo.valor_liquido)}</p>
+              </div>
+            )}
+            {formNovo.tipo === "adiantamento" && (
+              <p className="text-xs text-slate-500">Teto: 50% do salário cadastrado da pessoa.</p>
+            )}
             {erroNovo && <p className="text-sm font-medium text-erro">{erroNovo}</p>}
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-secundario" onClick={() => setFormNovo(null)}>

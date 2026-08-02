@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Save, Users } from "lucide-react";
 import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, useDB } from "@/lib/data";
+import { validarAdiantamento, TETO_ADIANTAMENTO_PCT } from "@/lib/domain/consumos-pessoas";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -19,6 +20,7 @@ import {
   validarCpf,
 } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
+import { moeda } from "@/lib/format";
 import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
 type AbaPerfil = "dados" | "acesso" | "proximos";
@@ -92,6 +94,13 @@ export default function RhPerfilPage() {
     if (editando.cpf?.trim() && !checagemCpf.valido) {
       setErro(checagemCpf.mensagem ?? "CPF inválido.");
       return;
+    }
+    if (editando.adiantamento_valor != null && editando.adiantamento_valor > 0) {
+      const checagemAdiant = validarAdiantamento(editando.salario, editando.adiantamento_valor);
+      if (!checagemAdiant.ok) {
+        setErro(checagemAdiant.erros.join(" "));
+        return;
+      }
     }
     mutate((banco) => {
       const i = banco.pessoas.findIndex((p) => p.id === editando.id);
@@ -346,6 +355,35 @@ export default function RhPerfilPage() {
                   onChange={(e) => atualizar("salario", e.target.value ? Number(e.target.value) : undefined)}
                 />
               </Campo>
+              <Campo rotulo="Adiantamento (valor fixo)">
+                <input
+                  type="number"
+                  step="0.01"
+                  className="campo"
+                  value={editando.adiantamento_valor ?? ""}
+                  onChange={(e) =>
+                    atualizar("adiantamento_valor", e.target.value ? Number(e.target.value) : undefined)
+                  }
+                />
+                {editando.salario != null && editando.salario > 0 && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Teto {TETO_ADIANTAMENTO_PCT}% = {moeda((editando.salario * TETO_ADIANTAMENTO_PCT) / 100)}
+                  </p>
+                )}
+                {editando.adiantamento_valor != null && editando.adiantamento_valor > 0 && (
+                  <p
+                    className={`mt-1 text-xs font-medium ${
+                      validarAdiantamento(editando.salario, editando.adiantamento_valor).ok
+                        ? "text-emerald-700"
+                        : "text-destaque"
+                    }`}
+                  >
+                    {validarAdiantamento(editando.salario, editando.adiantamento_valor).ok
+                      ? "Dentro do limite."
+                      : validarAdiantamento(editando.salario, editando.adiantamento_valor).erros.join(" ")}
+                  </p>
+                )}
+              </Campo>
               <Campo rotulo="Valor-hora (intermitente/entregador)">
                 <input
                   type="number"
@@ -515,6 +553,12 @@ export default function RhPerfilPage() {
             <li>
               <Link href="/rh/pagamentos" className="text-primaria-escura underline">
                 Pagamentos com conciliação bancária
+              </Link>{" "}
+              (já disponível)
+            </li>
+            <li>
+              <Link href="/rh/consumos" className="text-primaria-escura underline">
+                Consumo no restaurante (20% off)
               </Link>{" "}
               (já disponível)
             </li>

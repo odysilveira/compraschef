@@ -117,6 +117,11 @@ export function atualizarComNovidades(db: DB): boolean {
     mudou = true;
   }
 
+  if (!Array.isArray(db.consumos_pessoas)) {
+    db.consumos_pessoas = [];
+    mudou = true;
+  }
+
   // Migração do mock anterior: transforma cada caixa ocupada em um lote canônico,
   // preservando exatamente o saldo que já estava salvo no navegador.
   if (!Array.isArray(db.lotes_estoque)) {

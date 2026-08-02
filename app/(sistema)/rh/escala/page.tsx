@@ -25,7 +25,7 @@ import {
   type PadraoEscalaClt,
 } from "@/lib/domain/escala";
 import { rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
-import { podeVerValores, usePapel } from "@/lib/roles";
+import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
 import type { ConvocacaoIntermitente, EscalaSlot, StatusConvocacao } from "@/lib/types";
 
@@ -93,7 +93,7 @@ function BadgeConvocacao({ status }: { status: StatusConvocacao }) {
 
 export default function RhEscalaPage() {
   const db = useDB();
-  const { papel } = usePapel();
+  const podeRh = usePodeAcessarModulo("rh");
   const [form, setForm] = useState<FormPlantao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
@@ -134,7 +134,7 @@ export default function RhEscalaPage() {
     return nome.split(/\s+/)[0] ?? nome;
   };
 
-  if (!podeVerValores(papel)) {
+  if (!podeRh) {
     return (
       <div className="mx-auto max-w-lg">
         <TituloPagina titulo="Escala" />

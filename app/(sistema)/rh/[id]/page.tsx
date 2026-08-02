@@ -33,7 +33,7 @@ import {
   somenteDigitosTelefone,
   validarCpf,
 } from "@/lib/domain/rh";
-import { podeVerValores, usePapel } from "@/lib/roles";
+import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
 import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -43,7 +43,7 @@ export default function RhPerfilPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const db = useDB();
-  const { papel } = usePapel();
+  const podeRh = usePodeAcessarModulo("rh");
   const [aba, setAba] = useState<AbaPerfil>("dados");
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -78,7 +78,7 @@ export default function RhPerfilPage() {
     else setForm(null);
   }, [pessoa]);
 
-  if (!podeVerValores(papel)) {
+  if (!podeRh) {
     return (
       <div className="mx-auto max-w-lg">
         <TituloPagina titulo="Perfil" />
@@ -637,8 +637,8 @@ export default function RhPerfilPage() {
               <div>
                 <h2 className="text-base font-bold">Módulos de acesso</h2>
                 <p className="text-sm text-slate-600">
-                  Clique para autorizar ou negar. Na fase 1 isso fica registrado no perfil; o menu ainda segue o seletor
-                  de papel do rodapé.
+                  Clique para autorizar ou negar. Esses toggles controlam o menu lateral quando essa pessoa está
+                  ligada ao papel escolhido no rodapé (demo).
                 </p>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">

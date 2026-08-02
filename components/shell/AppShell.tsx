@@ -27,15 +27,16 @@ import {
   UtensilsCrossed,
   CalendarDays,
 } from "lucide-react";
-import { PapelProvider, usePapel, podeVerValores, ROTULO_PAPEL } from "@/lib/roles";
+import { PapelProvider, usePapel, usePermissoes, ROTULO_PAPEL } from "@/lib/roles";
 import { useDB } from "@/lib/data";
-import type { Papel } from "@/lib/types";
+import { moduloDaRota, podeAcessarModulo } from "@/lib/domain/acesso";
+import type { ModuloAcesso, Papel } from "@/lib/types";
 
 interface ItemMenu {
   href: string;
   rotulo: string;
   icone: React.ComponentType<{ size?: number | string; className?: string }>;
-  precisaVerValores?: boolean;
+  modulo: ModuloAcesso;
 }
 
 interface SecaoMenu {
@@ -47,38 +48,38 @@ const MENU: SecaoMenu[] = [
   {
     titulo: "Operação",
     itens: [
-      { href: "/", rotulo: "Painel", icone: LayoutDashboard },
-      { href: "/recebimento", rotulo: "Recebimento", icone: PackageCheck },
-      { href: "/estoque", rotulo: "Estoque", icone: Boxes },
+      { href: "/", rotulo: "Painel", icone: LayoutDashboard, modulo: "painel" },
+      { href: "/recebimento", rotulo: "Recebimento", icone: PackageCheck, modulo: "recebimento" },
+      { href: "/estoque", rotulo: "Estoque", icone: Boxes, modulo: "estoque" },
     ],
   },
   {
     titulo: "Suprimentos",
     itens: [
-      { href: "/lista-compras", rotulo: "Lista de compras", icone: FileSpreadsheet },
-      { href: "/cotacoes", rotulo: "Cotações", icone: MessagesSquare, precisaVerValores: true },
-      { href: "/pedidos", rotulo: "Pedidos", icone: ShoppingCart },
+      { href: "/lista-compras", rotulo: "Lista de compras", icone: FileSpreadsheet, modulo: "lista_compras" },
+      { href: "/cotacoes", rotulo: "Cotações", icone: MessagesSquare, modulo: "cotacoes" },
+      { href: "/pedidos", rotulo: "Pedidos", icone: ShoppingCart, modulo: "pedidos" },
     ],
   },
   {
     titulo: "Financeiro",
     itens: [
-      { href: "/financeiro", rotulo: "Boletos e contas", icone: Wallet, precisaVerValores: true },
-      { href: "/relatorios", rotulo: "Relatórios", icone: BarChart3, precisaVerValores: true },
+      { href: "/financeiro", rotulo: "Boletos e contas", icone: Wallet, modulo: "financeiro" },
+      { href: "/relatorios", rotulo: "Relatórios", icone: BarChart3, modulo: "relatorios" },
     ],
   },
   {
     titulo: "RH",
     itens: [
-      { href: "/rh", rotulo: "Pessoas", icone: Users, precisaVerValores: true },
-      { href: "/rh/pagamentos", rotulo: "Pagamentos", icone: WalletCards, precisaVerValores: true },
-      { href: "/rh/consumos", rotulo: "Consumos", icone: UtensilsCrossed, precisaVerValores: true },
-      { href: "/rh/escala", rotulo: "Escala", icone: CalendarDays, precisaVerValores: true },
+      { href: "/rh", rotulo: "Pessoas", icone: Users, modulo: "rh" },
+      { href: "/rh/pagamentos", rotulo: "Pagamentos", icone: WalletCards, modulo: "rh" },
+      { href: "/rh/consumos", rotulo: "Consumos", icone: UtensilsCrossed, modulo: "rh" },
+      { href: "/rh/escala", rotulo: "Escala", icone: CalendarDays, modulo: "rh" },
     ],
   },
   {
     titulo: "Sistema",
-    itens: [{ href: "/cadastros", rotulo: "Cadastros", icone: FolderCog }],
+    itens: [{ href: "/cadastros", rotulo: "Cadastros", icone: FolderCog, modulo: "cadastros" }],
   },
 ];
 
@@ -132,13 +133,13 @@ function RodapeUsuario() {
 
 function Navegacao({ aoNavegar }: { aoNavegar?: () => void }) {
   const pathname = usePathname();
-  const { papel } = usePapel();
+  const perms = usePermissoes();
   const [busca, setBusca] = useState("");
 
   const secoes = MENU.map((secao) => ({
     ...secao,
     itens: secao.itens
-      .filter((i) => !i.precisaVerValores || podeVerValores(papel))
+      .filter((i) => podeAcessarModulo(perms, i.modulo))
       .filter((i) => i.rotulo.toLowerCase().includes(busca.trim().toLowerCase())),
   })).filter((secao) => secao.itens.length > 0);
 
@@ -212,6 +213,29 @@ function BarraSuperior({ onAbrirMenu }: { onAbrirMenu: () => void }) {
   );
 }
 
+function ConteudoProtegido({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const perms = usePermissoes();
+  const modulo = moduloDaRota(pathname);
+
+  if (modulo && !podeAcessarModulo(perms, modulo)) {
+    return (
+      <div className="mx-auto max-w-lg py-10 text-center">
+        <p className="text-lg font-bold text-slate-900">Sem permissão</p>
+        <p className="mt-2 text-sm text-slate-600">
+          Este módulo não está liberado para o perfil atual. Peça ao dono/gerente para autorizar em RH →
+          pessoa → Acesso.
+        </p>
+        <Link href="/" className="btn-primario mt-4 inline-flex">
+          Voltar ao painel
+        </Link>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 function Moldura({ children }: { children: React.ReactNode }) {
   const [menuAberto, setMenuAberto] = useState(false);
 
@@ -247,7 +271,9 @@ function Moldura({ children }: { children: React.ReactNode }) {
       {/* Conteúdo */}
       <div className="flex min-w-0 flex-1 flex-col">
         <BarraSuperior onAbrirMenu={() => setMenuAberto(true)} />
-        <main className="min-w-0 flex-1 p-4 lg:p-6">{children}</main>
+        <main className="min-w-0 flex-1 p-4 lg:p-6">
+          <ConteudoProtegido>{children}</ConteudoProtegido>
+        </main>
       </div>
     </div>
   );

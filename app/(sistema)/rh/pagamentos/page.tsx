@@ -28,7 +28,7 @@ import {
   type ReciboFolhaVinculado,
 } from "@/lib/domain/folha-recibo-pdf";
 import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
-import { podeVerValores, usePapel } from "@/lib/roles";
+import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { PagamentoPessoa, TipoPagamentoPessoa } from "@/lib/types";
 
@@ -86,7 +86,7 @@ function BadgeStatusPagamento({ pagamento }: { pagamento: PagamentoPessoa }) {
 
 export default function RhPagamentosPage() {
   const db = useDB();
-  const { papel } = usePapel();
+  const podeRh = usePodeAcessarModulo("rh");
   const [filtro, setFiltro] = useState<"abertos" | "aguardando" | "pagos" | "todos">("abertos");
   const [formNovo, setFormNovo] = useState<FormNovo | null>(null);
   const [erroNovo, setErroNovo] = useState<string | null>(null);
@@ -159,7 +159,7 @@ export default function RhPagamentosPage() {
     return null;
   }, [db, formNovo]);
 
-  if (!podeVerValores(papel)) {
+  if (!podeRh) {
     return (
       <div className="mx-auto max-w-lg">
         <TituloPagina titulo="Pagamentos de pessoas" />

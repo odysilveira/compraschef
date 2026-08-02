@@ -11,7 +11,7 @@ import {
   criarConsumoPessoa,
   rotuloStatusConsumo,
 } from "@/lib/domain/consumos-pessoas";
-import { podeVerValores, usePapel } from "@/lib/roles";
+import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { ConsumoPessoa } from "@/lib/types";
 
@@ -39,7 +39,7 @@ function formVazio(pessoaId = ""): FormNovo {
 
 export default function RhConsumosPage() {
   const db = useDB();
-  const { papel } = usePapel();
+  const podeRh = usePodeAcessarModulo("rh");
   const [filtro, setFiltro] = useState<"pendentes" | "descontados" | "todos">("pendentes");
   const [form, setForm] = useState<FormNovo | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export default function RhConsumosPage() {
     return calcularLinhaConsumo(qtd, preco, DESCONTO_CONSUMO_PADRAO);
   }, [form]);
 
-  if (!podeVerValores(papel)) {
+  if (!podeRh) {
     return (
       <div className="mx-auto max-w-lg">
         <TituloPagina titulo="Consumos" />

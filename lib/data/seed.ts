@@ -320,6 +320,52 @@ export const seedDB: DB = {
     },
   ],
 
+  escala_slots: [
+    {
+      id: "esc-1",
+      pessoa_id: "pes-lider",
+      data: soData(diasAFrente(2)),
+      hora_inicio: "09:00",
+      hora_fim: "17:00",
+      intervalo_min: 60,
+      funcao: "Cozinha",
+      local: "Vera Bela Restaurante",
+      criado_em: diasAtras(1),
+      atualizado_em: diasAtras(1),
+    },
+    {
+      id: "esc-2",
+      pessoa_id: "pes-inter-1",
+      data: soData(diasAFrente(5)),
+      hora_inicio: "18:00",
+      hora_fim: "23:30",
+      intervalo_min: 30,
+      funcao: "Garçom",
+      local: "Vera Bela Restaurante",
+      criado_em: diasAtras(1),
+      atualizado_em: diasAtras(1),
+    },
+  ],
+
+  convocacoes: [
+    {
+      id: "conv-1",
+      escala_slot_id: "esc-2",
+      pessoa_id: "pes-inter-1",
+      convocada_em: diasAtras(1),
+      status: "rascunho",
+      texto_mensagem:
+        "Olá, Carlos, tudo bem?\n\nNos termos do seu contrato de trabalho intermitente, a Vera Bela Restaurante Ltda apresenta a seguinte convocação:\n\n• Data: (seed)\n• Horário: das 18:00 às 23:30\n• Intervalo: 30 min (não remunerado)\n• Local: Vera Bela Restaurante\n• Função: Garçom\n• Valor-hora: R$ 12,50\n• Horas brutas previstas: 5,50 h\n• Horas pagas previstas: 5,00 h (brutas menos intervalo)\n• Valor bruto estimado das horas: R$ 62,50, acrescido das verbas proporcionais previstas em lei (13º, férias + 1/3 e DSR)\n\nVocê tem até 1 dia útil para responder \"ACEITO\" ou \"NÃO ACEITO\". A ausência de resposta será considerada recusa, e a recusa não gera nenhuma penalidade.\n\nEsta mensagem integra o registro do contrato de trabalho intermitente.",
+      valor_hora: 12.5,
+      horas_brutas: 5.5,
+      horas_pagas: 5,
+      valor_estimado: 62.5,
+      antecedencia_ok: true,
+      criado_em: diasAtras(1),
+      atualizado_em: diasAtras(1),
+    },
+  ],
+
   unidades: [
     { id: "un-kg", codigo_externo: "KG", nome: "quilograma", sigla: "kg" },
     { id: "un-l", codigo_externo: "L", nome: "litro", sigla: "L" },

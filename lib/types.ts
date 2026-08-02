@@ -135,6 +135,48 @@ export interface ConsumoPessoa {
   atualizado_em: string;
 }
 
+export interface EscalaSlot {
+  id: string;
+  pessoa_id: string;
+  /** Data do plantão YYYY-MM-DD. */
+  data: string;
+  /** HH:MM */
+  hora_inicio: string;
+  /** HH:MM */
+  hora_fim: string;
+  intervalo_min: number;
+  funcao?: string;
+  local?: string;
+  observacao?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type StatusConvocacao =
+  | "rascunho"
+  | "enviada"
+  | "aceita"
+  | "recusada"
+  | "silencio";
+
+export interface ConvocacaoIntermitente {
+  id: string;
+  escala_slot_id: string;
+  pessoa_id: string;
+  /** ISO datetime da convocação. */
+  convocada_em: string;
+  status: StatusConvocacao;
+  respondida_em?: string;
+  texto_mensagem: string;
+  valor_hora: number;
+  horas_brutas: number;
+  horas_pagas: number;
+  valor_estimado: number;
+  antecedencia_ok: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
+
 export interface Unidade {
   id: string;
   /** Código da unidade no EASE EAT. O id interno continua sendo próprio do ComprasChef. */
@@ -595,6 +637,8 @@ export interface DB {
   pessoas: PessoaRH[];
   pagamentos_pessoas: PagamentoPessoa[];
   consumos_pessoas: ConsumoPessoa[];
+  escala_slots: EscalaSlot[];
+  convocacoes: ConvocacaoIntermitente[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];

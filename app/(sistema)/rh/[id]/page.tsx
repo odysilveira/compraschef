@@ -216,6 +216,9 @@ export default function RhPerfilPage() {
         subtitulo={`${rotuloTipoPessoa(pessoa.tipo)} · ${rotuloFuncao(pessoa)}`}
         acao={
           <div className="flex flex-wrap gap-2">
+            <Link href="/rh/escala" className="btn-secundario">
+              Ver na escala
+            </Link>
             <Badge cor={pessoa.ativo ? "verde" : "cinza"}>{pessoa.ativo ? "Ativo" : "Inativo"}</Badge>
             <Badge cor="azul">{rotuloTipoPessoa(pessoa.tipo)}</Badge>
           </div>
@@ -562,8 +565,12 @@ export default function RhPerfilPage() {
               </Link>{" "}
               (já disponível)
             </li>
-            <li>Escala e calendário dos próximos 28 dias</li>
-            <li>Convocações de intermitentes (WhatsApp + prova)</li>
+            <li>
+              <Link href="/rh/escala" className="text-primaria-escura underline">
+                Escala 28 dias e convocações
+              </Link>{" "}
+              (já disponível)
+            </li>
             <li>Avaliações e histórico de atividades</li>
             <li>Porcionamentos / feituras (quando função = cozinha)</li>
           </ul>

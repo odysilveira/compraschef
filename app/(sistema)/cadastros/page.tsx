@@ -1,18 +1,20 @@
 "use client";
 
 // Cadastros — requisitos 1 a 6: fornecedores, produtos, unidades, locais e caixas.
+// + contas bancárias do restaurante (origem dos pagamentos).
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { TituloPagina } from "@/components/ui";
 import { AbaCategorias } from "@/components/cadastros/AbaCategorias";
+import { AbaContasBancarias } from "@/components/cadastros/AbaContasBancarias";
 import { AbaFornecedores } from "@/components/cadastros/AbaFornecedores";
 import { AbaProdutos } from "@/components/cadastros/AbaProdutos";
 import { AbaUnidades } from "@/components/cadastros/AbaUnidades";
 import { AbaLocais } from "@/components/cadastros/AbaLocais";
 import { AbaCaixas } from "@/components/cadastros/AbaCaixas";
 
-type Aba = "fornecedores" | "categorias" | "produtos" | "unidades" | "locais" | "caixas";
+type Aba = "fornecedores" | "categorias" | "produtos" | "unidades" | "locais" | "caixas" | "contas";
 
 const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "fornecedores", rotulo: "Fornecedores" },
@@ -21,6 +23,7 @@ const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "unidades", rotulo: "Unidades" },
   { id: "locais", rotulo: "Locais" },
   { id: "caixas", rotulo: "Caixas" },
+  { id: "contas", rotulo: "Contas bancárias" },
 ];
 
 export default function CadastrosPage() {
@@ -41,7 +44,7 @@ export default function CadastrosPage() {
     <div>
       <TituloPagina
         titulo="Cadastros"
-        subtitulo="Fornecedores, produtos, unidades, locais e caixas — a base de tudo"
+        subtitulo="Fornecedores, produtos, unidades, locais, caixas e contas bancárias"
       />
 
       <div className="mb-5 flex gap-1 overflow-x-auto rounded-card bg-stone-100 p-1">
@@ -64,6 +67,7 @@ export default function CadastrosPage() {
       {aba === "unidades" && <AbaUnidades />}
       {aba === "locais" && <AbaLocais />}
       {aba === "caixas" && <AbaCaixas />}
+      {aba === "contas" && <AbaContasBancarias />}
     </div>
   );
 }

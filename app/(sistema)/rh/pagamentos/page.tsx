@@ -28,6 +28,8 @@ import {
   type ReciboFolhaVinculado,
 } from "@/lib/domain/folha-recibo-pdf";
 import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
+import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
+import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { PagamentoPessoa, TipoPagamentoPessoa } from "@/lib/types";
@@ -252,12 +254,11 @@ export default function RhPagamentosPage() {
   }
 
   function abrirInformar(pagamento: PagamentoPessoa) {
-    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
     setInformarId(pagamento.id);
     setFormInformar({
       dataPagamento: hojeISO(),
       valorPago: pagamento.valor.toFixed(2),
-      bancoConta: pessoa?.chave_pix ? `PIX ${pessoa.chave_pix}` : "",
+      bancoConta: contaPadraoOrigem(db),
       responsavel: "usuário local",
       observacao: "",
     });
@@ -481,8 +482,8 @@ export default function RhPagamentosPage() {
                   <p className="text-sm text-slate-500">Vencimento {dataBR(pagamento.vencimento)}</p>
                   {pagamento.status === "aguardando_conciliacao" && pagamento.pagamento_banco_conta && (
                     <p className="text-sm text-blue-800">
-                      Informado em {pagamento.pagamento_data ? dataBR(pagamento.pagamento_data) : "—"} ·{" "}
-                      {pagamento.pagamento_banco_conta}
+                      Informado em {pagamento.pagamento_data ? dataBR(pagamento.pagamento_data) : "—"} · saiu de{" "}
+                      <span className="font-semibold">{pagamento.pagamento_banco_conta}</span>
                     </p>
                   )}
                   {pagamento.conciliacao_divergente && pagamento.conciliacao_divergencia_motivo && (
@@ -685,6 +686,16 @@ export default function RhPagamentosPage() {
             <p className="text-sm text-slate-700">
               {nomePessoa(pagamentoInformar.pessoa_id)} · {moeda(pagamentoInformar.valor)}
             </p>
+            {(() => {
+              const pessoa = db.pessoas.find((p) => p.id === pagamentoInformar.pessoa_id);
+              if (!pessoa?.chave_pix) return null;
+              return (
+                <p className="text-xs text-slate-500">
+                  Destino (PIX da pessoa): <span className="font-medium text-slate-700">{pessoa.chave_pix}</span> — isso
+                  não substitui a conta de onde o restaurante pagou.
+                </p>
+              );
+            })()}
             <div className="grid gap-3 sm:grid-cols-2">
               <Campo rotulo="Data *">
                 <input
@@ -703,14 +714,19 @@ export default function RhPagamentosPage() {
                   onChange={(e) => setFormInformar({ ...formInformar, valorPago: e.target.value })}
                 />
               </Campo>
-              <Campo rotulo="Banco/conta ou PIX *">
-                <input
-                  className="campo"
-                  required
-                  value={formInformar.bancoConta}
-                  onChange={(e) => setFormInformar({ ...formInformar, bancoConta: e.target.value })}
-                />
-              </Campo>
+              <div className="sm:col-span-2 space-y-2">
+                <Campo rotulo="De qual banco/conta saiu o pagamento? *">
+                  <SeletorContaOrigem
+                    db={db}
+                    valor={formInformar.bancoConta}
+                    onChange={(bancoConta) => setFormInformar({ ...formInformar, bancoConta })}
+                    listId="contas-origem-rh"
+                  />
+                </Campo>
+                <p className="text-xs text-slate-500">
+                  Essa informação facilita achar o débito no extrato na hora de conciliar.
+                </p>
+              </div>
               <Campo rotulo="Responsável">
                 <input
                   className="campo"

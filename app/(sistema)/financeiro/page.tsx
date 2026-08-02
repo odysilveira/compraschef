@@ -3,27 +3,389 @@
 // Financeiro — agenda de boletos (requisitos 27–30).
 // Protegida: líder/caixa não veem nada daqui (podeVerValores).
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import {
   Ban,
+  Barcode,
+  CalendarDays,
   CircleCheck,
   CircleCheckBig,
+  Clock3,
+  Copy,
   Lock,
   Phone,
+  Plus,
+  ReceiptText,
+  Search,
+  ScanLine,
   ShieldAlert,
+  Eye,
+  EyeOff,
+  RefreshCcw,
   TriangleAlert,
+  Upload,
 } from "lucide-react";
-import { Badge, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
-import { mutate, nomeFornecedor, useDB } from "@/lib/data";
+import { Badge, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
+import { calcularValorFinal, criarContaManual, mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
+import { identificarFormatoBoleto, normalizarLinhaBoleto } from "@/lib/domain/boletos";
+import { calcularHashSHA256, receberBoletoContaPagar, validarArquivoDocumentoBoleto } from "@/lib/domain/documentos-boleto";
+import { filtrarContasPagar, resumirContasPagar, type FiltroVencimentoConta } from "@/lib/domain/financeiro";
+import {
+  combinarTextosPdfFragmentados,
+  identificarCodigoBoletoNoArquivoLocal,
+  type DiagnosticoIdentificacaoBoleto,
+  type ResultadoIdentificacaoArquivoBoleto,
+} from "@/lib/domain/identificacao-boleto-browser";
+import type { BoletoValidoIdentificado } from "@/lib/domain/identificacao-boleto";
+import {
+  confrontarBoletoComNfe,
+  extrairDadosEstruturadosDoBoleto,
+  type DadosBoletoExtraidos,
+  type ResultadoConfrontoBoletoNfe,
+} from "@/lib/domain/boleto-nfe-confronto";
+import { confirmarConfrontoBoleto } from "@/lib/domain/confirmacao-confronto-boleto";
+import { corrigirFornecedorNotaFiscal } from "@/lib/domain/nfe-completude";
+import {
+  abrirModalCorrecaoNfe,
+  detalharNotaFiscalFinanceiro,
+  listarNotasFiscaisFinanceiro,
+  type EstadoModalCorrecaoNfe,
+  type IndicadorCompletudeFinanceiro,
+} from "@/lib/domain/nfe-financeiro";
+import {
+  apresentarResultadoConfronto,
+  candidatoSelecionadoEhValido,
+  mascararLinhaDigitavel,
+  valorValidadoComoMoeda,
+} from "@/lib/domain/importar-boleto-ui";
+import {
+  alternarCodigoAberto,
+  acoesPagamentoDisponiveisNoLayout,
+  avaliarElegibilidadePagamentoBoleto,
+  conciliarBoleto,
+  criarSnapshotPagamentoBoleto,
+  gerarPadraoInterleaved2of5,
+  informarPagamentoBoleto,
+  montarEstadoAgendaPagamentoBoleto,
+  registrarDivergenciaBoleto,
+  type SegmentoCodigoBarrasItf,
+  type SnapshotPagamentoBoleto,
+} from "@/lib/domain/pagar-boleto";
+import {
+  CLASSE_CAIXA_CODIGO_SEM_ROLAGEM,
+  CLASSE_GRID_CODIGO_PAGAMENTO,
+  acoesUnicasQuandoCodigoAberto,
+  fecharCodigoAmpliado,
+  montarConfiguracaoSvgCodigo,
+  type EstadoCodigoAmpliado,
+} from "@/lib/domain/codigo-pagamento-ui";
 import { podeVerValores, usePapel } from "@/lib/roles";
-import { dataBR, diasAte, moeda } from "@/lib/format";
-import type { Boleto, DB, StatusBoleto } from "@/lib/types";
+import { cnpjBR, dataBR, diasAte, moeda } from "@/lib/format";
+import type { Boleto, ContaPagar, DB, OrigemContaPagar, StatusBoleto, StatusContaPagar } from "@/lib/types";
 
 const MARCA_GOLPE = "GOLPE CONFIRMADO";
+
+type FormContaState = {
+  fornecedor_id: string;
+  descricao: string;
+  categoria: string;
+  centro_custo: string;
+  documento_id: string;
+  data_emissao: string;
+  data_vencimento: string;
+  valor_original: string;
+  juros: string;
+  desconto: string;
+  observacoes: string;
+};
+
+type FormReceberBoletoState = {
+  arquivo: File | null;
+  linha: string;
+};
+
+type FormPagamentoBoletoState = {
+  dataPagamento: string;
+  valorPago: string;
+  bancoConta: string;
+  responsavel: string;
+  observacao: string;
+  confirmouAviso: boolean;
+};
+
+type FormConciliarBoletoState = {
+  dataLiquidacao: string;
+  responsavel: string;
+  observacao: string;
+};
+
+type FormDivergenciaBoletoState = {
+  motivo: string;
+  responsavel: string;
+};
+
+type EtapaImportacaoBoleto = "lendo_documento" | "validando_codigo" | "procurando_nfe" | "resultado";
+
+type EstadoImportacaoBoleto = {
+  arquivo: File | null;
+  conteudo?: ArrayBuffer;
+  hash?: string;
+  linhaSelecionada?: string;
+  dadosExtraidos?: DadosBoletoExtraidos;
+  confronto?: ResultadoConfrontoBoletoNfe;
+  diagnostico?: DiagnosticoIdentificacaoBoleto | null;
+  etapa?: EtapaImportacaoBoleto;
+  falha?: string;
+};
+
+const STATUS_CONTA_OPCOES: Array<{ valor: StatusContaPagar | "todos"; rotulo: string }> = [
+  { valor: "todos", rotulo: "Todos os status" },
+  { valor: "aguardando_boleto", rotulo: "Aguardando boleto" },
+  { valor: "boleto_recebido", rotulo: "Boleto recebido" },
+  { valor: "em_conferencia", rotulo: "Em conferência" },
+  { valor: "compativel", rotulo: "Compatível" },
+  { valor: "divergente", rotulo: "Divergente" },
+  { valor: "bloqueado", rotulo: "Bloqueado" },
+  { valor: "aguardando_conciliacao", rotulo: "Aguardando conciliação" },
+  { valor: "conciliado", rotulo: "Conciliado" },
+  { valor: "cancelado", rotulo: "Cancelado" },
+];
+
+const FILTRO_VENCIMENTO_OPCOES: Array<{ valor: FiltroVencimentoConta; rotulo: string }> = [
+  { valor: "todas", rotulo: "Todos os vencimentos" },
+  { valor: "hoje", rotulo: "Vencendo hoje" },
+  { valor: "proximos_7_dias", rotulo: "Próximos 7 dias" },
+  { valor: "atrasadas", rotulo: "Atrasadas" },
+];
+
+const FILTRO_COMPLETUDE_NFE_OPCOES: Array<{ valor: "todas" | IndicadorCompletudeFinanceiro; rotulo: string }> = [
+  { valor: "todas", rotulo: "Todas" },
+  { valor: "Completa", rotulo: "Completa" },
+  { valor: "Falta fornecedor", rotulo: "Falta fornecedor" },
+  { valor: "Faltam dados fiscais", rotulo: "Faltam dados fiscais" },
+  { valor: "Faltam dados de parcela", rotulo: "Faltam dados de parcela" },
+  { valor: "Sem boleto informado", rotulo: "Sem boleto informado" },
+];
+
+function hojeISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function novaContaInicial(): FormContaState {
+  return {
+    fornecedor_id: "",
+    descricao: "",
+    categoria: "",
+    centro_custo: "",
+    documento_id: "",
+    data_emissao: hojeISO(),
+    data_vencimento: "",
+    valor_original: "",
+    juros: "",
+    desconto: "",
+    observacoes: "",
+  };
+}
+
+function novoRecebimentoBoletoInicial(): FormReceberBoletoState {
+  return {
+    arquivo: null,
+    linha: "",
+  };
+}
+
+function novoPagamentoBoletoInicial(): FormPagamentoBoletoState {
+  return {
+    dataPagamento: hojeISO(),
+    valorPago: "",
+    bancoConta: "",
+    responsavel: "usuário local",
+    observacao: "",
+    confirmouAviso: false,
+  };
+}
+
+function novaConciliacaoBoletoInicial(boleto?: Boleto): FormConciliarBoletoState {
+  return {
+    dataLiquidacao: boleto?.pagamento_data || hojeISO(),
+    responsavel: boleto?.pagamento_responsavel || "usuário local",
+    observacao: "",
+  };
+}
+
+function novaDivergenciaBoletoInicial(): FormDivergenciaBoletoState {
+  return {
+    motivo: "",
+    responsavel: "usuário local",
+  };
+}
+
+function novoEstadoImportacaoBoleto(): EstadoImportacaoBoleto {
+  return {
+    arquivo: null,
+    diagnostico: null,
+  };
+}
+
+function resumirCodigoParaEscolha(codigo: string): string {
+  if (codigo.length <= 12) return codigo;
+  return `${codigo.slice(0, 8)}...${codigo.slice(-6)}`;
+}
+
+function lerNumero(valor: string): number | undefined {
+  if (valor.trim() === "") return undefined;
+  const numero = Number(valor.replace(",", "."));
+  return Number.isFinite(numero) ? numero : undefined;
+}
+
+function mascararCnpj(valor?: string): string {
+  const digitos = (valor ?? "").replace(/\D+/g, "");
+  if (digitos.length !== 14) return "—";
+  return `**.***.${digitos.slice(5, 8)}/${digitos.slice(8, 12)}-${digitos.slice(12)}`;
+}
+
+function mascararChaveNfe(chave?: string): string {
+  if (!chave) return "—";
+  const digitos = chave.replace(/\D+/g, "");
+  if (digitos.length <= 8) return digitos;
+  return `${digitos.slice(0, 6)}...${digitos.slice(-4)}`;
+}
+
+function rotuloParcela(numeroParcela?: string): string {
+  const numero = (numeroParcela ?? "").trim();
+  if (!numero) return "Parcela —";
+  if (/^\d+$/.test(numero)) return `Parcela ${numero.padStart(3, "0")}`;
+  return `Parcela ${numero}`;
+}
+
+function rotuloOrigemConta(origem: OrigemContaPagar): string {
+  return {
+    manual: "Manual",
+    nfe: "NF-e",
+    recorrente: "Recorrente",
+  }[origem];
+}
+
+function rotuloStatusConta(status: StatusContaPagar): string {
+  return {
+    aguardando_boleto: "Aguardando boleto",
+    boleto_recebido: "Boleto recebido",
+    em_conferencia: "Em conferência",
+    compativel: "Compatível",
+    divergente: "Divergente",
+    bloqueado: "Bloqueado",
+    aguardando_conciliacao: "Aguardando conciliação",
+    conciliado: "Conciliado",
+    cancelado: "Cancelado",
+  }[status];
+}
+
+function BadgeStatusConta({ status }: { status: StatusContaPagar }) {
+  switch (status) {
+    case "aguardando_boleto":
+      return (
+        <Badge cor="cinza">
+          <ReceiptText size={14} /> aguardando boleto
+        </Badge>
+      );
+    case "boleto_recebido":
+      return (
+        <Badge cor="azul">
+          <ReceiptText size={14} /> boleto recebido
+        </Badge>
+      );
+    case "em_conferencia":
+      return (
+        <Badge cor="laranja">
+          <Clock3 size={14} /> em conferência
+        </Badge>
+      );
+    case "compativel":
+      return (
+        <Badge cor="verde">
+          <CircleCheck size={14} /> compatível
+        </Badge>
+      );
+    case "divergente":
+      return (
+        <Badge cor="vermelho">
+          <TriangleAlert size={14} /> divergente
+        </Badge>
+      );
+    case "bloqueado":
+      return (
+        <Badge cor="cinza">
+          <Lock size={14} /> bloqueado
+        </Badge>
+      );
+    case "aguardando_conciliacao":
+      return (
+        <Badge cor="azul">
+          <Clock3 size={14} /> aguardando conciliação
+        </Badge>
+      );
+    case "conciliado":
+      return (
+        <Badge cor="verde">
+          <CircleCheckBig size={14} /> conciliado
+        </Badge>
+      );
+    case "cancelado":
+      return (
+        <Badge cor="cinza">
+          <Ban size={14} /> cancelado
+        </Badge>
+      );
+  }
+}
+
+function BadgeCompletudeNfeFinanceiro({ indicador }: { indicador: IndicadorCompletudeFinanceiro }) {
+  if (indicador === "Completa") {
+    return (
+      <Badge cor="verde">
+        <CircleCheckBig size={14} /> Completa
+      </Badge>
+    );
+  }
+
+  if (indicador === "Falta fornecedor") {
+    return (
+      <Badge cor="vermelho">
+        <TriangleAlert size={14} /> Falta fornecedor
+      </Badge>
+    );
+  }
+
+  if (indicador === "Faltam dados fiscais") {
+    return (
+      <Badge cor="vermelho">
+        <TriangleAlert size={14} /> Faltam dados fiscais
+      </Badge>
+    );
+  }
+
+  if (indicador === "Faltam dados de parcela") {
+    return (
+      <Badge cor="laranja">
+        <TriangleAlert size={14} /> Faltam dados de parcela
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge cor="laranja">
+      <ReceiptText size={14} /> Sem boleto informado
+    </Badge>
+  );
+}
 
 function fornecedorDoBoleto(db: DB, boleto: Boleto): string {
   const nota = db.notas_fiscais.find((n) => n.id === boleto.nota_id);
   return nomeFornecedor(db, nota?.fornecedor_id);
+}
+
+function notaDoBoleto(db: DB, boleto: Boleto) {
+  return db.notas_fiscais.find((n) => n.id === boleto.nota_id);
 }
 
 function golpeConfirmado(b: Boleto): boolean {
@@ -57,6 +419,12 @@ function BadgeStatus({ boleto }: { boleto: Boleto }) {
           <CircleCheckBig size={14} /> pago
         </Badge>
       );
+    case "aguardando_conciliacao":
+      return (
+        <Badge cor="azul">
+          <Clock3 size={14} /> aguardando conciliação
+        </Badge>
+      );
     case "suspeito":
       return (
         <Badge cor="vermelho">
@@ -70,6 +438,74 @@ export default function FinanceiroPage() {
   const db = useDB();
   const { papel } = usePapel();
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
+  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas">("boletos");
+  const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
+  const [buscaConta, setBuscaConta] = useState("");
+  const [filtroStatusConta, setFiltroStatusConta] = useState<StatusContaPagar | "todos">("todos");
+  const [filtroVencimentoConta, setFiltroVencimentoConta] = useState<FiltroVencimentoConta>("todas");
+  const [buscaNfe, setBuscaNfe] = useState("");
+  const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | IndicadorCompletudeFinanceiro>("todas");
+  const [notaDetalhesId, setNotaDetalhesId] = useState<string | null>(null);
+  const [estadoCorrecaoNfe, setEstadoCorrecaoNfe] = useState<EstadoModalCorrecaoNfe | null>(null);
+  const [mensagemCorrecaoNfe, setMensagemCorrecaoNfe] = useState<string | null>(null);
+  const [erroCorrecaoNfe, setErroCorrecaoNfe] = useState<string | null>(null);
+  const [salvandoCorrecaoNfe, setSalvandoCorrecaoNfe] = useState(false);
+  const [formConta, setFormConta] = useState<FormContaState>(novaContaInicial());
+  const [erroFormConta, setErroFormConta] = useState<string | null>(null);
+  const [contaSelecionadaBoletoId, setContaSelecionadaBoletoId] = useState<string | null>(null);
+  const [formReceberBoleto, setFormReceberBoleto] = useState<FormReceberBoletoState>(novoRecebimentoBoletoInicial());
+  const [erroReceberBoleto, setErroReceberBoleto] = useState<string | null>(null);
+  const [mensagemReceberBoleto, setMensagemReceberBoleto] = useState<string | null>(null);
+  const [processandoRecebimentoBoleto, setProcessandoRecebimentoBoleto] = useState(false);
+  const [identificandoCodigoBoleto, setIdentificandoCodigoBoleto] = useState(false);
+  const [mensagemIdentificacaoBoleto, setMensagemIdentificacaoBoleto] = useState<string | null>(null);
+  const [opcoesIdentificacaoBoleto, setOpcoesIdentificacaoBoleto] = useState<BoletoValidoIdentificado[]>([]);
+  const [diagnosticoIdentificacao, setDiagnosticoIdentificacao] = useState<DiagnosticoIdentificacaoBoleto | null>(null);
+  const [modalImportarBoletoAberto, setModalImportarBoletoAberto] = useState(false);
+  const [boletoImportacaoAlvoId, setBoletoImportacaoAlvoId] = useState<string | null>(null);
+  const [estadoImportacaoBoleto, setEstadoImportacaoBoleto] = useState<EstadoImportacaoBoleto>(novoEstadoImportacaoBoleto());
+  const [processandoImportacaoBoleto, setProcessandoImportacaoBoleto] = useState(false);
+  const [mostrarLinhaCompletaImportada, setMostrarLinhaCompletaImportada] = useState(false);
+  const [mostrarDetalhesTecnicos, setMostrarDetalhesTecnicos] = useState(false);
+  const [justificativaImportacao, setJustificativaImportacao] = useState("");
+  const [parcelaSelecionadaMultipla, setParcelaSelecionadaMultipla] = useState("");
+  const [mensagemImportacaoBoleto, setMensagemImportacaoBoleto] = useState<string | null>(null);
+  const [boletoResumoId, setBoletoResumoId] = useState<string | null>(null);
+  const [boletoCodigoAbertoId, setBoletoCodigoAbertoId] = useState<string | null>(null);
+  const [codigoAmpliado, setCodigoAmpliado] = useState<EstadoCodigoAmpliado | null>(null);
+  const [boletoLinhaCompletaId, setBoletoLinhaCompletaId] = useState<string | null>(null);
+  const [boletoPagamentoId, setBoletoPagamentoId] = useState<string | null>(null);
+  const [snapshotPagamento, setSnapshotPagamento] = useState<SnapshotPagamentoBoleto | null>(null);
+  const [formPagamentoBoleto, setFormPagamentoBoleto] = useState<FormPagamentoBoletoState>(novoPagamentoBoletoInicial());
+  const [erroPagamentoBoleto, setErroPagamentoBoleto] = useState<string | null>(null);
+  const [mensagemPagamentoBoleto, setMensagemPagamentoBoleto] = useState<string | null>(null);
+  const [processandoPagamentoBoleto, setProcessandoPagamentoBoleto] = useState(false);
+  const [boletoConciliarId, setBoletoConciliarId] = useState<string | null>(null);
+  const [formConciliarBoleto, setFormConciliarBoleto] = useState<FormConciliarBoletoState>(novaConciliacaoBoletoInicial());
+  const [erroConciliarBoleto, setErroConciliarBoleto] = useState<string | null>(null);
+  const [processandoConciliarBoleto, setProcessandoConciliarBoleto] = useState(false);
+  const [boletoDivergenciaId, setBoletoDivergenciaId] = useState<string | null>(null);
+  const [formDivergenciaBoleto, setFormDivergenciaBoleto] = useState<FormDivergenciaBoletoState>(novaDivergenciaBoletoInicial());
+  const [erroDivergenciaBoleto, setErroDivergenciaBoleto] = useState<string | null>(null);
+  const [processandoDivergenciaBoleto, setProcessandoDivergenciaBoleto] = useState(false);
+  const inputLinhaRef = useRef<HTMLInputElement | null>(null);
+  const execucaoIdentificacaoRef = useRef(0);
+  const contaSelecionadaBoletoIdRef = useRef<string | null>(null);
+  const salvandoCorrecaoNfeRef = useRef(false);
+  const processandoPagamentoBoletoRef = useRef(false);
+  const processandoConciliarBoletoRef = useRef(false);
+  const processandoDivergenciaBoletoRef = useRef(false);
+
+  useEffect(() => {
+    if (!codigoAmpliado) return;
+    function aoTeclar(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setCodigoAmpliado(fecharCodigoAmpliado());
+      }
+    }
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [codigoAmpliado]);
 
   if (!podeVerValores(papel)) {
     return (
@@ -94,10 +530,225 @@ export default function FinanceiroPage() {
     });
   }
 
-  function marcarPago(b: Boleto) {
-    mudarBoleto(b.id, (x) => {
-      x.status = "pago";
+  function abrirPagamentoBoleto(boleto: Boleto) {
+    const elegibilidade = avaliarElegibilidadePagamentoBoleto(boleto);
+    if (!elegibilidade.permitido) {
+      setMensagemReceberBoleto(elegibilidade.mensagem);
+      return;
+    }
+
+    setBoletoPagamentoId(boleto.id);
+    setSnapshotPagamento(criarSnapshotPagamentoBoleto(boleto));
+    setFormPagamentoBoleto({
+      ...novoPagamentoBoletoInicial(),
+      valorPago: boleto.valor.toFixed(2),
     });
+    setErroPagamentoBoleto(null);
+    setMensagemPagamentoBoleto(null);
+  }
+
+  function fecharPagamentoBoleto() {
+    if (processandoPagamentoBoleto) return;
+    setBoletoPagamentoId(null);
+    setSnapshotPagamento(null);
+    setFormPagamentoBoleto(novoPagamentoBoletoInicial());
+    setErroPagamentoBoleto(null);
+    setMensagemPagamentoBoleto(null);
+  }
+
+  function abrirConciliarBoleto(boleto: Boleto) {
+    if (boleto.status !== "aguardando_conciliacao") {
+      setMensagemReceberBoleto("Só é possível conciliar boletos aguardando conciliação.");
+      return;
+    }
+    setBoletoConciliarId(boleto.id);
+    setFormConciliarBoleto(novaConciliacaoBoletoInicial(boleto));
+    setErroConciliarBoleto(null);
+  }
+
+  function fecharConciliarBoleto() {
+    if (processandoConciliarBoleto) return;
+    setBoletoConciliarId(null);
+    setFormConciliarBoleto(novaConciliacaoBoletoInicial());
+    setErroConciliarBoleto(null);
+  }
+
+  function abrirDivergenciaBoleto(boleto: Boleto) {
+    if (boleto.status !== "aguardando_conciliacao") {
+      setMensagemReceberBoleto("Só é possível registrar divergência em boletos aguardando conciliação.");
+      return;
+    }
+    setBoletoDivergenciaId(boleto.id);
+    setFormDivergenciaBoleto(novaDivergenciaBoletoInicial());
+    setErroDivergenciaBoleto(null);
+  }
+
+  function fecharDivergenciaBoleto() {
+    if (processandoDivergenciaBoleto) return;
+    setBoletoDivergenciaId(null);
+    setFormDivergenciaBoleto(novaDivergenciaBoletoInicial());
+    setErroDivergenciaBoleto(null);
+  }
+
+  function confirmarConciliarBoleto(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (processandoConciliarBoletoRef.current || !boletoConciliarId) return;
+    processandoConciliarBoletoRef.current = true;
+    setProcessandoConciliarBoleto(true);
+    setErroConciliarBoleto(null);
+
+    try {
+      const proximo = structuredClone(db) as DB;
+      const resultado = conciliarBoleto(
+        proximo,
+        boletoConciliarId,
+        {
+          dataLiquidacao: formConciliarBoleto.dataLiquidacao,
+          responsavel: formConciliarBoleto.responsavel,
+          observacao: formConciliarBoleto.observacao,
+        },
+        {
+          responsavelPadrao: "usuário local",
+          gerarIdHistorico: () => uid("bph"),
+        }
+      );
+
+      if (!resultado.sucesso) {
+        setErroConciliarBoleto(resultado.erros.join(" "));
+        return;
+      }
+
+      mutate((atual) => {
+        Object.assign(atual, proximo);
+      });
+
+      setBoletoConciliarId(null);
+      setFormConciliarBoleto(novaConciliacaoBoletoInicial());
+      setMensagemReceberBoleto("Boleto conciliado e marcado como pago.");
+    } finally {
+      processandoConciliarBoletoRef.current = false;
+      setProcessandoConciliarBoleto(false);
+    }
+  }
+
+  function confirmarDivergenciaBoleto(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (processandoDivergenciaBoletoRef.current || !boletoDivergenciaId) return;
+    processandoDivergenciaBoletoRef.current = true;
+    setProcessandoDivergenciaBoleto(true);
+    setErroDivergenciaBoleto(null);
+
+    try {
+      const proximo = structuredClone(db) as DB;
+      const resultado = registrarDivergenciaBoleto(
+        proximo,
+        boletoDivergenciaId,
+        {
+          motivo: formDivergenciaBoleto.motivo,
+          responsavel: formDivergenciaBoleto.responsavel,
+        },
+        {
+          responsavelPadrao: "usuário local",
+          gerarIdHistorico: () => uid("bph"),
+        }
+      );
+
+      if (!resultado.sucesso) {
+        setErroDivergenciaBoleto(resultado.erros.join(" "));
+        return;
+      }
+
+      mutate((atual) => {
+        Object.assign(atual, proximo);
+      });
+
+      setBoletoDivergenciaId(null);
+      setFormDivergenciaBoleto(novaDivergenciaBoletoInicial());
+      setMensagemReceberBoleto("Divergência registrada. O boleto segue aguardando conciliação.");
+    } finally {
+      processandoDivergenciaBoletoRef.current = false;
+      setProcessandoDivergenciaBoleto(false);
+    }
+  }
+
+  async function copiarLinhaAgenda(linha?: string) {
+    if (!linha) {
+      setMensagemReceberBoleto("Não há linha digitável disponível para cópia neste boleto.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(linha);
+      setMensagemReceberBoleto("Linha digitável copiada.");
+    } catch {
+      setMensagemReceberBoleto("Não foi possível copiar a linha digitável neste navegador.");
+    }
+  }
+
+  function atualizarCampoPagamento<K extends keyof FormPagamentoBoletoState>(
+    campo: K,
+    valor: FormPagamentoBoletoState[K]
+  ) {
+    setFormPagamentoBoleto((atual) => ({ ...atual, [campo]: valor }));
+  }
+
+  function confirmarPagamentoBoleto(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (processandoPagamentoBoletoRef.current) return;
+
+    const boletoId = boletoPagamentoId;
+    const snapshot = snapshotPagamento;
+    if (!boletoId || !snapshot) return;
+
+    const valorPago = lerNumero(formPagamentoBoleto.valorPago);
+    if (valorPago === undefined) {
+      setErroPagamentoBoleto("Informe o valor pago.");
+      return;
+    }
+
+    processandoPagamentoBoletoRef.current = true;
+    setProcessandoPagamentoBoleto(true);
+    setErroPagamentoBoleto(null);
+    setMensagemPagamentoBoleto(null);
+
+    try {
+      const proximo = structuredClone(db) as DB;
+      const resultado = informarPagamentoBoleto(
+        proximo,
+        boletoId,
+        snapshot,
+        {
+          dataPagamento: formPagamentoBoleto.dataPagamento,
+          valorPago,
+          bancoConta: formPagamentoBoleto.bancoConta,
+          responsavel: formPagamentoBoleto.responsavel,
+          observacao: formPagamentoBoleto.observacao,
+          confirmouAviso: formPagamentoBoleto.confirmouAviso,
+        },
+        {
+          responsavelPadrao: "usuário local",
+          gerarIdHistorico: () => uid("bph"),
+        }
+      );
+
+      if (!resultado.sucesso) {
+        setErroPagamentoBoleto(resultado.erros.join(" "));
+        return;
+      }
+
+      mutate((atual) => {
+        Object.assign(atual, proximo);
+      });
+
+      setMensagemReceberBoleto("Pagamento informado. O boleto agora aguarda conciliação bancária.");
+      setBoletoPagamentoId(null);
+      setSnapshotPagamento(null);
+      setFormPagamentoBoleto(novoPagamentoBoletoInicial());
+      setErroPagamentoBoleto(null);
+      setMensagemPagamentoBoleto(null);
+    } finally {
+      processandoPagamentoBoletoRef.current = false;
+      setProcessandoPagamentoBoleto(false);
+    }
   }
 
   function liberarMesmoAssim(b: Boleto) {
@@ -126,32 +777,83 @@ export default function FinanceiroPage() {
   }
 
   const suspeitos = db.boletos.filter((b) => b.status === "suspeito" && !golpeConfirmado(b));
+  const contas = Array.isArray(db.contas_pagar) ? db.contas_pagar : [];
+  const fornecedoresPorId = useMemo(
+    () => Object.fromEntries(db.fornecedores.map((fornecedor) => [fornecedor.id, fornecedor.nome])),
+    [db.fornecedores]
+  );
+  const resumoContas = useMemo(() => resumirContasPagar(contas), [contas]);
+  const contasFiltradas = useMemo(
+    () =>
+      filtrarContasPagar(contas, {
+        texto: buscaConta,
+        status: filtroStatusConta,
+        vencimento: filtroVencimentoConta,
+        fornecedorPorId: fornecedoresPorId,
+      }),
+    [contas, buscaConta, filtroStatusConta, filtroVencimentoConta, fornecedoresPorId]
+  );
+  const contaSelecionadaBoleto = contaSelecionadaBoletoId
+    ? contas.find((conta) => conta.id === contaSelecionadaBoletoId) ?? null
+    : null;
+  const notasFiscaisFinanceiro = useMemo(
+    () =>
+      listarNotasFiscaisFinanceiro(db, {
+        pesquisa: buscaNfe,
+        completude: filtroCompletudeNfe,
+      }),
+    [db, buscaNfe, filtroCompletudeNfe]
+  );
+  const notaDetalhes = notaDetalhesId ? detalharNotaFiscalFinanceiro(db, notaDetalhesId) ?? null : null;
+  const notaCorrecao = estadoCorrecaoNfe ? db.notas_fiscais.find((nota) => nota.id === estadoCorrecaoNfe.notaId) ?? null : null;
+  const correcaoSemMudanca = Boolean(
+    estadoCorrecaoNfe && notaCorrecao && estadoCorrecaoNfe.fornecedorCorrecaoId === notaCorrecao.fornecedor_id
+  );
+
+  const linhaNormalizadaPreview = useMemo(() => {
+    if (!formReceberBoleto.linha.trim()) return undefined;
+    try {
+      return normalizarLinhaBoleto(formReceberBoleto.linha);
+    } catch {
+      return undefined;
+    }
+  }, [formReceberBoleto.linha]);
+
+  const formatoBoletoPreview = linhaNormalizadaPreview ? identificarFormatoBoleto(linhaNormalizadaPreview) : undefined;
+
+  useEffect(() => {
+    contaSelecionadaBoletoIdRef.current = contaSelecionadaBoletoId;
+  }, [contaSelecionadaBoletoId]);
+
+  useEffect(() => {
+    if (!contaSelecionadaBoletoId) return;
+    inputLinhaRef.current?.focus();
+    inputLinhaRef.current?.select();
+  }, [contaSelecionadaBoletoId]);
 
   // Agenda: atrasados + próximos 7 dias
-  const naJanela = db.boletos.filter((b) => {
-    const dias = diasAte(b.vencimento);
-    return dias !== undefined && dias <= 7;
-  });
-  const depoisDaSemana = db.boletos.filter((b) => {
-    const dias = diasAte(b.vencimento);
-    return dias !== undefined && dias > 7;
-  });
+  const boletosAtivos = db.boletos.filter((boleto) => !golpeConfirmado(boleto));
+  const boletosAguardandoConciliacao = boletosAtivos.filter((boleto) => boleto.status === "aguardando_conciliacao");
+  const boletosPagos = boletosAtivos.filter((boleto) => boleto.status === "pago");
+  const boletosPendentesAgenda = boletosAtivos.filter(
+    (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
+  );
 
-  // Totais da semana por status
-  const totais: Record<StatusBoleto, number> = { travado: 0, liberado: 0, pago: 0, suspeito: 0 };
-  naJanela.forEach((b) => {
+  const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
+  const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
+  const boletosAVencer = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) > 0);
+
+  // Totais por status
+  const totais: Record<StatusBoleto, number> = {
+    travado: 0,
+    liberado: 0,
+    aguardando_conciliacao: 0,
+    pago: 0,
+    suspeito: 0,
+  };
+  boletosAtivos.forEach((b) => {
     totais[b.status] += b.valor;
   });
-
-  // Agrupa por dia de vencimento
-  const porDia = new Map<string, Boleto[]>();
-  [...naJanela]
-    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
-    .forEach((b) => {
-      const lista = porDia.get(b.vencimento) ?? [];
-      lista.push(b);
-      porDia.set(b.vencimento, lista);
-    });
 
   function rotuloDia(iso: string): string {
     const dias = diasAte(iso);
@@ -162,148 +864,1276 @@ export default function FinanceiroPage() {
     return `${dataBR(iso)} (em ${dias} dias)`;
   }
 
+  function nomeFornecedorConta(conta: ContaPagar): string {
+    if (!conta.fornecedor_id) return "Fornecedor não identificado";
+    return db.fornecedores.find((fornecedor) => fornecedor.id === conta.fornecedor_id)?.nome ?? "Fornecedor não identificado";
+  }
+
+  function nomeFornecedorDoConfronto(confronto?: ResultadoConfrontoBoletoNfe): string {
+    if (!confronto?.nota_id) return "—";
+    const nota = db.notas_fiscais.find((item) => item.id === confronto.nota_id);
+    if (!nota) return "—";
+    return nomeFornecedor(db, nota.fornecedor_id);
+  }
+
+  function parcelaDoConfronto(confronto?: ResultadoConfrontoBoletoNfe): Boleto | undefined {
+    if (!confronto) return undefined;
+    if (confronto.parcela_id) return db.boletos.find((item) => item.id === confronto.parcela_id);
+    if (parcelaSelecionadaMultipla) return db.boletos.find((item) => item.id === parcelaSelecionadaMultipla);
+    return undefined;
+  }
+
+  function alterarCampoConta<K extends keyof FormContaState>(campo: K, valor: FormContaState[K]) {
+    setFormConta((atual) => ({ ...atual, [campo]: valor }));
+  }
+
+  function impedirEnterAcidental(event: KeyboardEvent<HTMLFormElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+    }
+  }
+
+  function abrirNovaConta() {
+    setErroFormConta(null);
+    setFormConta(novaContaInicial());
+    setModalNovaContaAberto(true);
+    setAbaFinanceira("contas");
+  }
+
+  function fecharNovaConta() {
+    setErroFormConta(null);
+    setModalNovaContaAberto(false);
+  }
+
+  function abrirDetalhesNfe(notaId: string) {
+    setNotaDetalhesId(notaId);
+  }
+
+  function fecharDetalhesNfe() {
+    setNotaDetalhesId(null);
+  }
+
+  function iniciarCorrecaoNfe(notaId: string) {
+    const estado = abrirModalCorrecaoNfe(db, notaId);
+    if (!estado) return;
+    setEstadoCorrecaoNfe(estado);
+    setErroCorrecaoNfe(null);
+    setMensagemCorrecaoNfe(null);
+  }
+
+  function fecharCorrecaoNfe() {
+    setEstadoCorrecaoNfe(null);
+    setErroCorrecaoNfe(null);
+    setMensagemCorrecaoNfe(null);
+    setSalvandoCorrecaoNfe(false);
+    salvandoCorrecaoNfeRef.current = false;
+  }
+
+  function salvarCorrecaoFornecedorNfe() {
+    if (salvandoCorrecaoNfeRef.current) return;
+    if (!estadoCorrecaoNfe) return;
+    if (!estadoCorrecaoNfe.fornecedorCorrecaoId) {
+      setErroCorrecaoNfe("Selecione um fornecedor válido.");
+      return;
+    }
+    if (correcaoSemMudanca) {
+      setErroCorrecaoNfe("Selecione um fornecedor diferente do já vinculado para salvar a correção.");
+      return;
+    }
+
+    salvandoCorrecaoNfeRef.current = true;
+    setSalvandoCorrecaoNfe(true);
+
+    try {
+      const proximo = structuredClone(db) as DB;
+      const resultado = corrigirFornecedorNotaFiscal(proximo, {
+        notaId: estadoCorrecaoNfe.notaId,
+        fornecedorIdNovo: estadoCorrecaoNfe.fornecedorCorrecaoId,
+        responsavel: "usuário local",
+        justificativa: estadoCorrecaoNfe.justificativaCorrecao,
+        gerarIdRegistro: () => uid("nfe-corr"),
+      });
+
+      if (!resultado.sucesso) {
+        setErroCorrecaoNfe(resultado.mensagem ?? "Não foi possível corrigir fornecedor da NF-e.");
+        setMensagemCorrecaoNfe(null);
+        return;
+      }
+
+      mutate((atual) => {
+        Object.assign(atual, proximo);
+      });
+
+      setErroCorrecaoNfe(null);
+      setMensagemCorrecaoNfe(
+        resultado.alterou ? "Fornecedor da NF-e corrigido com sucesso." : resultado.mensagem ?? "Nenhuma alteração necessária."
+      );
+    } finally {
+      salvandoCorrecaoNfeRef.current = false;
+      setSalvandoCorrecaoNfe(false);
+    }
+  }
+
+  function contaPodeReceberBoleto(conta: ContaPagar): boolean {
+    return conta.status !== "cancelado" && conta.status !== "conciliado";
+  }
+
+  function abrirReceberBoleto(conta: ContaPagar) {
+    execucaoIdentificacaoRef.current += 1;
+    setContaSelecionadaBoletoId(conta.id);
+    setFormReceberBoleto(novoRecebimentoBoletoInicial());
+    setErroReceberBoleto(null);
+    setMensagemReceberBoleto(null);
+    setMensagemIdentificacaoBoleto(null);
+    setOpcoesIdentificacaoBoleto([]);
+    setIdentificandoCodigoBoleto(false);
+    setDiagnosticoIdentificacao(null);
+  }
+
+  function fecharReceberBoleto() {
+    if (processandoRecebimentoBoleto) return;
+    execucaoIdentificacaoRef.current += 1;
+    setContaSelecionadaBoletoId(null);
+    setFormReceberBoleto(novoRecebimentoBoletoInicial());
+    setErroReceberBoleto(null);
+    setMensagemIdentificacaoBoleto(null);
+    setOpcoesIdentificacaoBoleto([]);
+    setIdentificandoCodigoBoleto(false);
+    setDiagnosticoIdentificacao(null);
+  }
+
+  function aplicarIdentificacaoUnica(identificado: BoletoValidoIdentificado) {
+    setFormReceberBoleto((atual) => ({ ...atual, linha: identificado.valorNormalizado }));
+    setMensagemIdentificacaoBoleto("Código identificado automaticamente e dígitos verificadores válidos");
+    setOpcoesIdentificacaoBoleto([identificado]);
+  }
+
+  function aplicarResultadoIdentificacao(resultado: ResultadoIdentificacaoArquivoBoleto) {
+    setDiagnosticoIdentificacao(resultado.diagnostico);
+
+    if (resultado.validos.length === 1) {
+      aplicarIdentificacaoUnica(resultado.validos[0]);
+      return;
+    }
+
+    if (resultado.validos.length > 1) {
+      setMensagemIdentificacaoBoleto("Mais de um boleto válido foi identificado. Selecione uma opção.");
+      setOpcoesIdentificacaoBoleto(resultado.validos);
+      return;
+    }
+
+    setOpcoesIdentificacaoBoleto([]);
+    if (resultado.quantidadeCandidatos > 0) {
+      setMensagemIdentificacaoBoleto("Foram encontrados números no arquivo, mas nenhum passou na validação dos dígitos verificadores.");
+    } else {
+      setMensagemIdentificacaoBoleto("Não foi possível identificar automaticamente. Leia com o leitor ou informe manualmente.");
+    }
+    inputLinhaRef.current?.focus();
+  }
+
+  async function identificarCodigoAutomaticamente(arquivo: File) {
+    const execucao = execucaoIdentificacaoRef.current + 1;
+    execucaoIdentificacaoRef.current = execucao;
+
+    setIdentificandoCodigoBoleto(true);
+    setMensagemIdentificacaoBoleto("Identificando código do boleto...");
+    setOpcoesIdentificacaoBoleto([]);
+    setDiagnosticoIdentificacao(null);
+
+    try {
+      const resultado = await identificarCodigoBoletoNoArquivoLocal(
+        arquivo,
+        () => execucaoIdentificacaoRef.current !== execucao || !contaSelecionadaBoletoIdRef.current
+      );
+
+      if (execucaoIdentificacaoRef.current !== execucao || !contaSelecionadaBoletoIdRef.current) return;
+      aplicarResultadoIdentificacao(resultado);
+    } catch {
+      if (execucaoIdentificacaoRef.current !== execucao || !contaSelecionadaBoletoIdRef.current) return;
+      setOpcoesIdentificacaoBoleto([]);
+      setMensagemIdentificacaoBoleto("Não foi possível identificar automaticamente. Leia com o leitor ou informe manualmente.");
+      setDiagnosticoIdentificacao({
+        pdfAberto: false,
+        paginasProcessadas: 0,
+        textoEncontrado: false,
+        candidatosNumericosEncontrados: 0,
+        barcodeDetectorDisponivel: false,
+        barcodeDetectorExecutado: false,
+        zxingExecutado: false,
+        resultadoValidoEncontrado: false,
+        falhaTecnica: "Falha técnica durante a identificação automática.",
+      });
+      inputLinhaRef.current?.focus();
+    } finally {
+      if (execucaoIdentificacaoRef.current === execucao) {
+        setIdentificandoCodigoBoleto(false);
+      }
+    }
+  }
+
+  function alterarArquivoReceberBoleto(event: ChangeEvent<HTMLInputElement>) {
+    const arquivo = event.target.files?.[0] ?? null;
+    setFormReceberBoleto((atual) => ({ ...atual, arquivo }));
+    setErroReceberBoleto(null);
+    setMensagemIdentificacaoBoleto(null);
+    setOpcoesIdentificacaoBoleto([]);
+    setDiagnosticoIdentificacao(null);
+    if (!arquivo) return;
+    void identificarCodigoAutomaticamente(arquivo);
+  }
+
+  function alterarLinhaReceberBoleto(valor: string) {
+    setFormReceberBoleto((atual) => ({ ...atual, linha: valor }));
+    setErroReceberBoleto(null);
+  }
+
+  async function salvarReceberBoleto(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!contaSelecionadaBoleto || !formReceberBoleto.arquivo || processandoRecebimentoBoleto) return;
+
+    if (!formReceberBoleto.linha.trim()) {
+      setErroReceberBoleto("Informe a linha digitável ou o código de barras do boleto.");
+      return;
+    }
+
+    setProcessandoRecebimentoBoleto(true);
+    setErroReceberBoleto(null);
+    setMensagemReceberBoleto(null);
+
+    try {
+      const conteudo = await formReceberBoleto.arquivo.arrayBuffer();
+      const proximo = structuredClone(db) as DB;
+      const resultado = await receberBoletoContaPagar(
+        proximo,
+        {
+          contaPagarId: contaSelecionadaBoleto.id,
+          arquivo: {
+            nomeArquivo: formReceberBoleto.arquivo.name,
+            tipoArquivo: formReceberBoleto.arquivo.type,
+            tamanhoBytes: formReceberBoleto.arquivo.size,
+            conteudo,
+          },
+          linhaInformada: formReceberBoleto.linha,
+        },
+        { criadoPor: "usuário local" }
+      );
+
+      if (!resultado.sucesso) {
+        setErroReceberBoleto(resultado.erros.join(" "));
+        return;
+      }
+
+      mutate((atual) => {
+        Object.assign(atual, proximo);
+      });
+      setMensagemReceberBoleto(resultado.mensagem ?? "Boleto recebido e aguardando conferência.");
+      execucaoIdentificacaoRef.current += 1;
+      setContaSelecionadaBoletoId(null);
+      setFormReceberBoleto(novoRecebimentoBoletoInicial());
+      setMensagemIdentificacaoBoleto(null);
+      setOpcoesIdentificacaoBoleto([]);
+      setIdentificandoCodigoBoleto(false);
+      setDiagnosticoIdentificacao(null);
+    } catch (erro) {
+      setErroReceberBoleto(erro instanceof Error ? erro.message : "Não foi possível receber o boleto.");
+    } finally {
+      setProcessandoRecebimentoBoleto(false);
+    }
+  }
+
+  async function extrairTextoEstruturadoEmMemoria(arquivo: File): Promise<string> {
+    const nome = arquivo.name.toLowerCase();
+    if (!nome.endsWith(".pdf")) return "";
+
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => null);
+    if (!pdfjs?.GlobalWorkerOptions) return "";
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+
+    const buffer = await arquivo.arrayBuffer();
+    const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer.slice(0)) });
+    const documento = await loadingTask.promise.catch(() => null);
+    if (!documento) return "";
+
+    const blocos: string[] = [];
+    try {
+      const total = Math.min(documento.numPages, 5);
+      for (let pagina = 1; pagina <= total; pagina += 1) {
+        const p = await documento.getPage(pagina).catch(() => null);
+        if (!p) continue;
+        const textContent = await p.getTextContent().catch(() => null);
+        if (!textContent) continue;
+        const texto = combinarTextosPdfFragmentados(textContent as { items: Array<{ str?: string; hasEOL?: boolean }> });
+        if (texto.trim()) blocos.push(texto);
+      }
+    } finally {
+      await loadingTask.destroy?.().catch(() => undefined);
+    }
+
+    return blocos.join("\n");
+  }
+
+  function abrirImportarBoleto(boletoIdAlvo?: string) {
+    setBoletoImportacaoAlvoId(boletoIdAlvo ?? null);
+    setModalImportarBoletoAberto(true);
+    setEstadoImportacaoBoleto(novoEstadoImportacaoBoleto());
+    setMensagemImportacaoBoleto(null);
+    setJustificativaImportacao("");
+    setParcelaSelecionadaMultipla("");
+    setMostrarLinhaCompletaImportada(false);
+    setMostrarDetalhesTecnicos(false);
+  }
+
+  function fecharImportarBoleto() {
+    if (processandoImportacaoBoleto) return;
+    setModalImportarBoletoAberto(false);
+    setBoletoImportacaoAlvoId(null);
+  }
+
+  async function analisarImportacaoBoleto(arquivo: File) {
+    setProcessandoImportacaoBoleto(true);
+    setMensagemImportacaoBoleto(null);
+    setEstadoImportacaoBoleto({ arquivo, etapa: "lendo_documento", diagnostico: null });
+    setJustificativaImportacao("");
+    setParcelaSelecionadaMultipla("");
+
+    try {
+      const conteudo = await arquivo.arrayBuffer();
+      const validacaoArquivo = validarArquivoDocumentoBoleto({
+        nomeArquivo: arquivo.name,
+        tipoArquivo: arquivo.type,
+        tamanhoBytes: arquivo.size,
+        conteudo,
+      });
+
+      if (!validacaoArquivo.valido) {
+        setEstadoImportacaoBoleto({ arquivo, conteudo, falha: validacaoArquivo.erros.join(" "), diagnostico: null });
+        return;
+      }
+
+      const hash = await calcularHashSHA256(conteudo);
+      setEstadoImportacaoBoleto((atual) => ({ ...atual, conteudo, hash, etapa: "validando_codigo" }));
+
+      const identificado = await identificarCodigoBoletoNoArquivoLocal(arquivo, () => false);
+      if (identificado.validos.length === 0) {
+        setEstadoImportacaoBoleto({
+          arquivo,
+          conteudo,
+          hash,
+          diagnostico: identificado.diagnostico,
+          falha: "Não foi possível identificar um código de boleto válido.",
+        });
+        return;
+      }
+
+      const escolhido = identificado.validos[0];
+      const textoEstruturado = await extrairTextoEstruturadoEmMemoria(arquivo);
+      const dados = extrairDadosEstruturadosDoBoleto(escolhido.valorNormalizado, textoEstruturado);
+
+      setEstadoImportacaoBoleto((atual) => ({
+        ...atual,
+        linhaSelecionada: escolhido.valorNormalizado,
+        dadosExtraidos: dados,
+        diagnostico: identificado.diagnostico,
+        etapa: "procurando_nfe",
+      }));
+
+      const confronto = confrontarBoletoComNfe(db, dados, hash);
+      setEstadoImportacaoBoleto((atual) => ({ ...atual, confronto, etapa: "resultado" }));
+      setMostrarDetalhesTecnicos(false);
+    } catch (erro) {
+      setEstadoImportacaoBoleto((atual) => ({
+        ...atual,
+        falha: erro instanceof Error ? erro.message : "Falha durante a análise do boleto.",
+      }));
+    } finally {
+      setProcessandoImportacaoBoleto(false);
+    }
+  }
+
+  function selecionarArquivoImportacao(event: ChangeEvent<HTMLInputElement>) {
+    const arquivo = event.target.files?.[0] ?? null;
+    if (!arquivo) return;
+    void analisarImportacaoBoleto(arquivo);
+  }
+
+  async function confirmarImportacaoPrincipal() {
+    if (processandoImportacaoBoleto) return;
+    const arquivo = estadoImportacaoBoleto.arquivo;
+    const conteudo = estadoImportacaoBoleto.conteudo;
+    const dados = estadoImportacaoBoleto.dadosExtraidos;
+    const confronto = estadoImportacaoBoleto.confronto;
+    if (!arquivo || !conteudo || !dados || !confronto || !estadoImportacaoBoleto.linhaSelecionada) return;
+
+    if (confronto.classificacao === "multiplas_possibilidades") {
+      if (!candidatoSelecionadoEhValido(confronto.candidatos, parcelaSelecionadaMultipla)) {
+        setMensagemImportacaoBoleto("Selecione uma parcela candidata válida.");
+        return;
+      }
+      if (!justificativaImportacao.trim()) {
+        setMensagemImportacaoBoleto("Informe justificativa para confirmar por seleção manual.");
+        return;
+      }
+    }
+
+    if (confronto.classificacao === "parcial" && !justificativaImportacao.trim()) {
+      setMensagemImportacaoBoleto("Justificativa obrigatória para confirmação parcial.");
+      return;
+    }
+
+    setProcessandoImportacaoBoleto(true);
+    setMensagemImportacaoBoleto(null);
+
+    try {
+      const proximo = structuredClone(db) as DB;
+      const resultado = await confirmarConfrontoBoleto(
+        proximo,
+        {
+          arquivo: {
+            nomeArquivo: arquivo.name,
+            tipoArquivo: arquivo.type,
+            tamanhoBytes: arquivo.size,
+            conteudo,
+          },
+          linhaInformada: estadoImportacaoBoleto.linhaSelecionada,
+          dadosExtraidos: dados,
+          resultadoConfrontoInformado: confronto,
+          parcelaSelecionadaId: confronto.classificacao === "multiplas_possibilidades" ? parcelaSelecionadaMultipla : undefined,
+          boletoEsperadoId: boletoImportacaoAlvoId ?? undefined,
+          confirmacaoHumana: true,
+          responsavel: "usuário local",
+          justificativaConfirmacao: justificativaImportacao.trim() || undefined,
+        },
+        {}
+      );
+
+      if (!resultado.sucesso) {
+        setMensagemImportacaoBoleto(resultado.erros.join(" "));
+        return;
+      }
+
+      mutate((atual) => {
+        Object.assign(atual, proximo);
+      });
+
+      setMensagemReceberBoleto("Boleto conferido e adicionado aos boletos a vencer");
+      setModalImportarBoletoAberto(false);
+      setBoletoImportacaoAlvoId(null);
+    } catch (erro) {
+      setMensagemImportacaoBoleto(erro instanceof Error ? erro.message : "Falha ao confirmar importação de boleto.");
+    } finally {
+      setProcessandoImportacaoBoleto(false);
+    }
+  }
+
+  const valorOriginal = lerNumero(formConta.valor_original);
+  const juros = lerNumero(formConta.juros) ?? 0;
+  const desconto = lerNumero(formConta.desconto) ?? 0;
+  const valorFinalPreview = valorOriginal === undefined ? undefined : calcularValorFinal(valorOriginal, juros, desconto);
+
+  function salvarNovaConta(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+
+    const valorOriginalNumero = lerNumero(formConta.valor_original);
+    const jurosNumero = lerNumero(formConta.juros) ?? 0;
+    const descontoNumero = lerNumero(formConta.desconto) ?? 0;
+
+    if (valorOriginalNumero === undefined) {
+      setErroFormConta("Informe o valor original da conta.");
+      return;
+    }
+    if (valorOriginalNumero < 0 || jurosNumero < 0 || descontoNumero < 0) {
+      setErroFormConta("Valores monetários não podem ser negativos.");
+      return;
+    }
+    if (!formConta.data_vencimento) {
+      setErroFormConta("A data de vencimento é obrigatória.");
+      return;
+    }
+
+    mutate((d) => {
+      criarContaManual(d, {
+        fornecedor_id: formConta.fornecedor_id || undefined,
+        descricao: formConta.descricao.trim(),
+        origem: "manual",
+        documento_id: formConta.documento_id.trim() || undefined,
+        categoria: formConta.categoria.trim(),
+        centro_custo: formConta.centro_custo.trim() || undefined,
+        data_emissao: formConta.data_emissao,
+        data_vencimento: formConta.data_vencimento,
+        valor_original: valorOriginalNumero,
+        juros: jurosNumero,
+        desconto: descontoNumero,
+        observacoes: formConta.observacoes.trim() || undefined,
+        status: "aguardando_boleto",
+      });
+    });
+
+    setErroFormConta(null);
+    setFormConta(novaContaInicial());
+    setModalNovaContaAberto(false);
+    setAbaFinanceira("contas");
+  }
+
   function CartaoBoleto({ boleto }: { boleto: Boleto }) {
     const cancelado = golpeConfirmado(boleto);
-    const atrasado = (diasAte(boleto.vencimento) ?? 0) < 0 && boleto.status !== "pago";
+    const atrasado = (diasAte(boleto.vencimento) ?? 0) < 0 && boleto.status !== "pago" && boleto.status !== "aguardando_conciliacao";
+    const documentoBoleto = boleto.documento_boleto_id
+      ? db.documentos_boleto.find((documento) => documento.id === boleto.documento_boleto_id)
+      : undefined;
+    const estadoAgendaPagamento = montarEstadoAgendaPagamentoBoleto(boleto, documentoBoleto);
+    const codigoAberto = boletoCodigoAbertoId === boleto.id && estadoAgendaPagamento.podeExibirCodigo;
+    const mostrarLinhaCompleta = boletoLinhaCompletaId === boleto.id;
+    const linhaParaPagamento =
+      (boleto.linha_digitavel ?? "").trim() ||
+      (documentoBoleto?.linha_informada ?? "").trim() ||
+      estadoAgendaPagamento.codigoCanonico;
+    const linhaMascarada = linhaParaPagamento ? mascararLinhaDigitavel(linhaParaPagamento, mostrarLinhaCompleta) : "—";
+    const fornecedor = fornecedorDoBoleto(db, boleto);
+    const segmentosCodigoPagamento: SegmentoCodigoBarrasItf[] = useMemo(() => {
+      if (!codigoAberto || !estadoAgendaPagamento.codigoCanonico) return [];
+      try {
+        return gerarPadraoInterleaved2of5(estadoAgendaPagamento.codigoCanonico);
+      } catch {
+        return [];
+      }
+    }, [codigoAberto, estadoAgendaPagamento.codigoCanonico]);
+    const acoesDesktop = acoesPagamentoDisponiveisNoLayout("desktop", estadoAgendaPagamento);
+    const acoesMobile = acoesPagamentoDisponiveisNoLayout("mobile", estadoAgendaPagamento);
+    const configuracaoCodigoSvg = useMemo(() => {
+      if (!codigoAberto || segmentosCodigoPagamento.length === 0) return null;
+      return montarConfiguracaoSvgCodigo(segmentosCodigoPagamento, "linha");
+    }, [codigoAberto, segmentosCodigoPagamento]);
+    const mostrarAcoesInlineCodigo = codigoAberto && acoesUnicasQuandoCodigoAberto().length > 0;
+
     return (
       <Card
         className={`space-y-2 ${cancelado ? "opacity-60" : ""} ${
           boleto.status === "suspeito" && !cancelado ? "border-2 border-erro" : ""
         }`}
       >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className={cancelado ? "line-through" : ""}>
-            <p className="font-bold">{fornecedorDoBoleto(db, boleto)}</p>
-            <p className="text-xl font-bold">{moeda(boleto.valor)}</p>
+        <div className={CLASSE_GRID_CODIGO_PAGAMENTO}>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className={cancelado ? "line-through" : ""}>
+                <p className="font-bold">{fornecedor}</p>
+                <p className="text-sm text-slate-600">NF-e {notaDoBoleto(db, boleto)?.numero ?? "—"} · {rotuloParcela(boleto.numero_parcela)}</p>
+                <p className="text-xl font-bold">{moeda(boleto.valor)}</p>
+                <p className="text-sm text-slate-600">Vencimento: {dataBR(boleto.vencimento)}</p>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                <BadgeStatus boleto={boleto} />
+                {boleto.conciliacao_divergente && boleto.status === "aguardando_conciliacao" && (
+                  <Badge cor="laranja">
+                    <TriangleAlert size={14} /> Divergente
+                  </Badge>
+                )}
+                {boleto.status_conferencia === "conferido" && <Badge cor="verde">Conferido</Badge>}
+                {atrasado && !cancelado && <Badge cor="vermelho">atrasado</Badge>}
+              </div>
+            </div>
+
+            {boleto.status === "travado" && (
+              <p className="flex items-center gap-1.5 text-sm text-slate-500">
+                <Lock size={14} /> aguardando conferência da mercadoria
+              </p>
+            )}
+
+            {estadoAgendaPagamento.motivoBloqueio && !estadoAgendaPagamento.podeExibirCodigo && (
+              <p className="rounded-card border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                {estadoAgendaPagamento.motivoBloqueio}
+              </p>
+            )}
+
+            {boleto.status === "aguardando_conciliacao" && (
+              <div className="rounded-card border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                <p>
+                  Pagamento informado em {boleto.pagamento_data ? dataBR(boleto.pagamento_data) : "—"}
+                  {boleto.pagamento_valor != null ? ` · ${moeda(boleto.pagamento_valor)}` : ""}
+                  {boleto.pagamento_banco_conta ? ` · ${boleto.pagamento_banco_conta}` : ""}
+                </p>
+                {boleto.conciliacao_divergente && boleto.conciliacao_divergencia_motivo && (
+                  <p className="mt-1 font-medium text-destaque">Divergência: {boleto.conciliacao_divergencia_motivo}</p>
+                )}
+              </div>
+            )}
+
+            {boleto.observacao && (
+              <p className={`text-sm ${boleto.status === "suspeito" && !cancelado ? "font-semibold text-erro" : "text-slate-600"}`}>
+                {boleto.observacao}
+              </p>
+            )}
+
+            {!cancelado && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {boleto.documento_boleto_id && (
+                  <button className="btn-secundario" onClick={() => setBoletoResumoId(boleto.id)}>
+                    Resumo da conferência
+                  </button>
+                )}
+                {estadoAgendaPagamento.mostrarImportarBoleto && (
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={() => abrirImportarBoleto(boleto.id)}
+                  >
+                    <Upload size={16} /> {estadoAgendaPagamento.rotuloImportarBoleto ?? "Importar boleto"}
+                  </button>
+                )}
+                {boleto.status === "aguardando_conciliacao" && (
+                  <>
+                    <button type="button" className="btn-primario" onClick={() => abrirConciliarBoleto(boleto)}>
+                      <CircleCheckBig size={16} /> Conciliar
+                    </button>
+                    <button type="button" className="btn-secundario" onClick={() => abrirDivergenciaBoleto(boleto)}>
+                      <TriangleAlert size={16} /> Divergente
+                    </button>
+                  </>
+                )}
+                {boleto.status === "travado" && (
+                  <button className="btn-secundario" onClick={() => setConfirmandoLiberacao(boleto.id)}>
+                    Liberar mesmo assim
+                  </button>
+                )}
+                {boleto.status === "suspeito" && (
+                  <>
+                    <button className="btn-secundario" onClick={() => confirmarLegitimo(boleto)}>
+                      <Phone size={18} /> Confirmei — é legítimo
+                    </button>
+                    <button className="btn-perigo" onClick={() => confirmarGolpe(boleto)}>
+                      <Ban size={18} /> Confirmado golpe — cancelar
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <BadgeStatus boleto={boleto} />
-            {atrasado && !cancelado && <Badge cor="vermelho">atrasado</Badge>}
+
+          <div className="space-y-2 border-slate-200 lg:border-l lg:pl-4">
+            {acoesDesktop.includes("exibir_codigo") && (
+              <button
+                type="button"
+                className="btn-secundario w-full justify-center"
+                onClick={() => {
+                  setBoletoCodigoAbertoId((atual) => alternarCodigoAberto(atual, boleto.id));
+                  setBoletoLinhaCompletaId(null);
+                }}
+              >
+                <Barcode size={16} /> {codigoAberto ? "Ocultar código" : "Exibir código para pagamento"}
+              </button>
+            )}
+
+            {!codigoAberto && (acoesDesktop.includes("copiar_linha") || acoesDesktop.includes("informar_pagamento")) && (
+              <div className="flex flex-wrap gap-2">
+                {acoesDesktop.includes("copiar_linha") && (
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={() => void copiarLinhaAgenda(linhaParaPagamento)}
+                  >
+                    <Copy size={16} /> Copiar linha
+                  </button>
+                )}
+                {acoesDesktop.includes("informar_pagamento") && (
+                  <button type="button" className="btn-primario" onClick={() => abrirPagamentoBoleto(boleto)}>
+                    <CircleCheckBig size={16} /> Informar pagamento realizado
+                  </button>
+                )}
+              </div>
+            )}
+
+            {codigoAberto && (
+              <div className="space-y-2 rounded-card border border-slate-200 bg-white p-3">
+                <p className="text-sm font-semibold text-slate-800">
+                  Valor {moeda(boleto.valor)} · Vencimento {dataBR(boleto.vencimento)}
+                </p>
+                <div className={CLASSE_CAIXA_CODIGO_SEM_ROLAGEM}>
+                  {configuracaoCodigoSvg ? (
+                    <svg
+                      aria-label="Codigo de barras Interleaved 2 of 5"
+                      role="img"
+                      viewBox={configuracaoCodigoSvg.viewBox}
+                      className="h-[120px] w-full max-w-[1100px]"
+                      preserveAspectRatio="xMidYMid meet"
+                      shapeRendering="crispEdges"
+                    >
+                      <rect x={0} y={0} width="100%" height="100%" fill="white" />
+                      {configuracaoCodigoSvg.retangulos.map((barra, indice) => (
+                        <rect
+                          key={`barra-${indice}`}
+                          x={barra.x}
+                          y={0}
+                          width={barra.largura}
+                          height={configuracaoCodigoSvg.altura}
+                          fill="black"
+                        />
+                      ))}
+                    </svg>
+                  ) : (
+                    <p className="text-sm text-slate-600">Codigo indisponivel para renderizacao.</p>
+                  )}
+                </div>
+                <p className="text-sm text-slate-700">Linha: {linhaMascarada}</p>
+                {mostrarAcoesInlineCodigo && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      onClick={() => setBoletoLinhaCompletaId((atual) => (atual === boleto.id ? null : boleto.id))}
+                    >
+                      {mostrarLinhaCompleta ? <EyeOff size={16} /> : <Eye size={16} />} {mostrarLinhaCompleta ? "Ocultar linha" : "Mostrar linha"}
+                    </button>
+                    {(acoesDesktop.includes("copiar_linha") || acoesMobile.includes("copiar_linha")) && (
+                      <button
+                        type="button"
+                        className="btn-secundario"
+                        onClick={() => void copiarLinhaAgenda(linhaParaPagamento)}
+                      >
+                        <Copy size={16} /> Copiar linha
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      onClick={() =>
+                        estadoAgendaPagamento.codigoCanonico &&
+                        setCodigoAmpliado({
+                          boletoId: boleto.id,
+                          codigoCanonico: estadoAgendaPagamento.codigoCanonico,
+                          fornecedor,
+                          valor: boleto.valor,
+                          vencimento: boleto.vencimento,
+                        })
+                      }
+                    >
+                      <Barcode size={16} /> Ampliar codigo
+                    </button>
+                    {(acoesDesktop.includes("informar_pagamento") || acoesMobile.includes("informar_pagamento")) && (
+                      <button type="button" className="btn-primario" onClick={() => abrirPagamentoBoleto(boleto)}>
+                        <CircleCheckBig size={16} /> Informar pagamento realizado
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      onClick={() => {
+                        setBoletoCodigoAbertoId(null);
+                        setBoletoLinhaCompletaId(null);
+                      }}
+                    >
+                      <EyeOff size={16} /> Ocultar codigo
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!estadoAgendaPagamento.podeExibirCodigo && estadoAgendaPagamento.motivoBloqueio && (
+              <p className="text-sm text-slate-600">{estadoAgendaPagamento.motivoBloqueio}</p>
+            )}
           </div>
         </div>
-
-        {boleto.status === "travado" && (
-          <p className="flex items-center gap-1.5 text-sm text-slate-500">
-            <Lock size={14} /> aguardando conferência da mercadoria
-          </p>
-        )}
-        {boleto.observacao && (
-          <p className={`text-sm ${boleto.status === "suspeito" && !cancelado ? "font-semibold text-erro" : "text-slate-600"}`}>
-            {boleto.observacao}
-          </p>
-        )}
-
-        {!cancelado && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {boleto.status === "liberado" && (
-              <button className="btn-primario" onClick={() => marcarPago(boleto)}>
-                <CircleCheckBig size={18} /> Marcar como pago
-              </button>
-            )}
-            {boleto.status === "travado" && (
-              <button className="btn-secundario" onClick={() => setConfirmandoLiberacao(boleto.id)}>
-                Liberar mesmo assim
-              </button>
-            )}
-            {boleto.status === "suspeito" && (
-              <>
-                <button className="btn-secundario" onClick={() => confirmarLegitimo(boleto)}>
-                  <Phone size={18} /> Confirmei — é legítimo
-                </button>
-                <button className="btn-perigo" onClick={() => confirmarGolpe(boleto)}>
-                  <Ban size={18} /> Confirmado golpe — cancelar
-                </button>
-              </>
-            )}
-          </div>
-        )}
       </Card>
     );
   }
 
   const boletoLiberando = db.boletos.find((b) => b.id === confirmandoLiberacao);
+  const boletoResumo = boletoResumoId ? db.boletos.find((boleto) => boleto.id === boletoResumoId) ?? null : null;
+  const boletoPagamento = boletoPagamentoId ? db.boletos.find((boleto) => boleto.id === boletoPagamentoId) ?? null : null;
+  const boletoConciliar = boletoConciliarId ? db.boletos.find((boleto) => boleto.id === boletoConciliarId) ?? null : null;
+  const boletoDivergencia = boletoDivergenciaId ? db.boletos.find((boleto) => boleto.id === boletoDivergenciaId) ?? null : null;
+  const notaPagamento = boletoPagamento ? notaDoBoleto(db, boletoPagamento) : null;
+  const documentoResumo = boletoResumo?.documento_boleto_id
+    ? db.documentos_boleto.find((documento) => documento.id === boletoResumo.documento_boleto_id) ?? null
+    : null;
+  const notaResumo = documentoResumo?.nota_id
+    ? db.notas_fiscais.find((nota) => nota.id === documentoResumo.nota_id) ?? null
+    : null;
+  const apresentacaoConfronto = estadoImportacaoBoleto.confronto
+    ? apresentarResultadoConfronto(estadoImportacaoBoleto.confronto)
+    : null;
+  const segmentosCodigoAmpliado: SegmentoCodigoBarrasItf[] = useMemo(() => {
+    if (!codigoAmpliado) return [];
+    try {
+      return gerarPadraoInterleaved2of5(codigoAmpliado.codigoCanonico);
+    } catch {
+      return [];
+    }
+  }, [codigoAmpliado]);
+  const configuracaoCodigoAmpliado = useMemo(() => {
+    if (!codigoAmpliado || segmentosCodigoAmpliado.length === 0) return null;
+    return montarConfiguracaoSvgCodigo(segmentosCodigoAmpliado, "ampliado");
+  }, [codigoAmpliado, segmentosCodigoAmpliado]);
 
   return (
     <div className="space-y-4">
-      <TituloPagina titulo="Financeiro" />
+      <TituloPagina titulo="Financeiro" subtitulo="Boletos e contas" />
 
-      {/* Alerta de boleto suspeito */}
-      {suspeitos.map((b) => (
-        <div key={b.id} className="rounded-card border-2 border-erro bg-erro-clara p-4">
-          <div className="flex items-start gap-3">
-            <ShieldAlert size={32} className="mt-0.5 shrink-0 text-erro" />
-            <div className="space-y-1">
-              <p className="text-lg font-bold text-erro">Atenção: possível golpe do boleto!</p>
-              <p className="text-sm text-texto">
-                Boleto de <span className="font-bold">{moeda(b.valor)}</span> em nome de{" "}
-                <span className="font-bold">{fornecedorDoBoleto(db, b)}</span>, vencendo {dataBR(b.vencimento)}.
-              </p>
-              {b.observacao && <p className="text-sm font-semibold text-erro">{b.observacao}</p>}
-              {b.cnpj_beneficiario && (
-                <p className="text-sm text-texto">CNPJ do beneficiário no boleto: {b.cnpj_beneficiario}</p>
-              )}
-              <p className="flex items-center gap-1.5 text-sm font-bold text-erro">
-                <Phone size={16} /> NÃO pague — confirme com o fornecedor por telefone antes de qualquer coisa.
-              </p>
-            </div>
-          </div>
-        </div>
-      ))}
-
-      {/* Totais da semana */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Card className="py-3">
-          <p className="rotulo flex items-center gap-1">
-            <Lock size={13} /> Travados
-          </p>
-          <p className="text-xl font-bold text-slate-600">{moeda(totais.travado)}</p>
-        </Card>
-        <Card className="py-3">
-          <p className="rotulo flex items-center gap-1">
-            <CircleCheck size={13} /> Liberados
-          </p>
-          <p className="text-xl font-bold text-primaria">{moeda(totais.liberado)}</p>
-        </Card>
-        <Card className="py-3">
-          <p className="rotulo flex items-center gap-1">
-            <CircleCheckBig size={13} /> Pagos
-          </p>
-          <p className="text-xl font-bold text-primaria-escura">{moeda(totais.pago)}</p>
-        </Card>
-        <Card className="py-3">
-          <p className="rotulo flex items-center gap-1">
-            <TriangleAlert size={13} /> Suspeitos
-          </p>
-          <p className="text-xl font-bold text-erro">{moeda(totais.suspeito)}</p>
-        </Card>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={`btn-secundario ${abaFinanceira === "boletos" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
+          onClick={() => setAbaFinanceira("boletos")}
+        >
+          Boletos
+        </button>
+        <button
+          type="button"
+          className={`btn-secundario ${abaFinanceira === "contas" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
+          onClick={() => setAbaFinanceira("contas")}
+        >
+          Contas a pagar
+        </button>
+        <button
+          type="button"
+          className={`btn-secundario ${abaFinanceira === "notas" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
+          onClick={() => setAbaFinanceira("notas")}
+        >
+          Notas fiscais
+        </button>
       </div>
 
-      {/* Agenda da semana */}
-      <section className="space-y-4">
-        <h2>Agenda da semana</h2>
-        {porDia.size === 0 ? (
-          <Vazio mensagem="Nenhum boleto vencendo nos próximos 7 dias. Semana tranquila!" />
-        ) : (
-          Array.from(porDia.entries()).map(([dia, boletos]) => (
-            <div key={dia} className="space-y-2">
-              <p className={`rotulo ${(diasAte(dia) ?? 0) < 0 ? "text-erro" : ""}`}>{rotuloDia(dia)}</p>
-              {boletos.map((b) => (
-                <CartaoBoleto key={b.id} boleto={b} />
-              ))}
-            </div>
-          ))
-        )}
-      </section>
+      {abaFinanceira === "boletos" ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2>Boletos a vencer</h2>
+            <button type="button" className="btn-primario" onClick={() => abrirImportarBoleto()}>
+              <Upload size={18} /> Importar boleto
+            </button>
+          </div>
 
-      {/* Depois da semana */}
-      {depoisDaSemana.length > 0 && (
-        <section className="space-y-2">
-          <h2>Depois desta semana</h2>
-          {[...depoisDaSemana]
-            .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
-            .map((b) => (
-              <CartaoBoleto key={b.id} boleto={b} />
-            ))}
+          {mensagemReceberBoleto && (
+            <div className="rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
+              {mensagemReceberBoleto}
+            </div>
+          )}
+
+          {/* Alerta de boleto suspeito */}
+          {suspeitos.map((b) => (
+            <div key={b.id} className="rounded-card border-2 border-erro bg-erro-clara p-4">
+              <div className="flex items-start gap-3">
+                <ShieldAlert size={32} className="mt-0.5 shrink-0 text-erro" />
+                <div className="space-y-1">
+                  <p className="text-lg font-bold text-erro">Atenção: possível golpe do boleto!</p>
+                  <p className="text-sm text-texto">
+                    Boleto de <span className="font-bold">{moeda(b.valor)}</span> em nome de{" "}
+                    <span className="font-bold">{fornecedorDoBoleto(db, b)}</span>, vencendo {dataBR(b.vencimento)}.
+                  </p>
+                  {b.observacao && <p className="text-sm font-semibold text-erro">{b.observacao}</p>}
+                  {b.cnpj_beneficiario && (
+                    <p className="text-sm text-texto">CNPJ do beneficiário no boleto: {b.cnpj_beneficiario}</p>
+                  )}
+                  <p className="flex items-center gap-1.5 text-sm font-bold text-erro">
+                    <Phone size={16} /> NÃO pague — confirme com o fornecedor por telefone antes de qualquer coisa.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Totais da semana */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <Card className="py-3">
+              <p className="rotulo flex items-center gap-1">
+                <Lock size={13} /> Travados
+              </p>
+              <p className="text-xl font-bold text-slate-600">{moeda(totais.travado)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="rotulo flex items-center gap-1">
+                <CircleCheck size={13} /> Liberados
+              </p>
+              <p className="text-xl font-bold text-primaria">{moeda(totais.liberado)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="rotulo flex items-center gap-1">
+                <Clock3 size={13} /> Aguardando conciliação
+              </p>
+              <p className="text-xl font-bold text-blue-700">{moeda(totais.aguardando_conciliacao)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="rotulo flex items-center gap-1">
+                <CircleCheckBig size={13} /> Pagos
+              </p>
+              <p className="text-xl font-bold text-primaria-escura">{moeda(totais.pago)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="rotulo flex items-center gap-1">
+                <TriangleAlert size={13} /> Suspeitos
+              </p>
+              <p className="text-xl font-bold text-erro">{moeda(totais.suspeito)}</p>
+            </Card>
+          </div>
+
+          {/* Agenda financeira */}
+          <section className="space-y-4">
+            <h2>Agenda financeira</h2>
+
+            <div className="space-y-2">
+              <p className="rotulo text-erro">Atrasados</p>
+              {boletosAtrasados.length === 0 ? (
+                <Vazio mensagem="Nenhum boleto atrasado." />
+              ) : (
+                [...boletosAtrasados]
+                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="rotulo">Vencendo hoje</p>
+              {boletosVencendoHoje.length === 0 ? (
+                <Vazio mensagem="Nenhum boleto vencendo hoje." />
+              ) : (
+                [...boletosVencendoHoje]
+                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="rotulo">A vencer</p>
+              {boletosAVencer.length === 0 ? (
+                <Vazio mensagem="Nenhum boleto a vencer." />
+              ) : (
+                [...boletosAVencer]
+                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                  .map((boleto) => (
+                    <div key={boleto.id} className="space-y-1">
+                      <p className="rotulo">{rotuloDia(boleto.vencimento)}</p>
+                      <CartaoBoleto boleto={boleto} />
+                    </div>
+                  ))
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="rotulo text-blue-700">Aguardando conciliação</p>
+              {boletosAguardandoConciliacao.length === 0 ? (
+                <Vazio mensagem="Nenhum boleto aguardando conciliação." />
+              ) : (
+                [...boletosAguardandoConciliacao]
+                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="rotulo text-primaria-escura">Pagos</p>
+              {boletosPagos.length === 0 ? (
+                <Vazio mensagem="Nenhum boleto marcado como pago." />
+              ) : (
+                [...boletosPagos]
+                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+              )}
+            </div>
+          </section>
+        </>
+      ) : abaFinanceira === "contas" ? (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2>Contas a pagar</h2>
+              <p className="text-sm text-slate-600">Mesma área financeira, reunindo contas manuais e originadas de NF-e.</p>
+            </div>
+            <button type="button" className="btn-primario" onClick={abrirNovaConta}>
+              <Plus size={18} /> Nova conta
+            </button>
+          </div>
+
+          {mensagemReceberBoleto && (
+            <div className="rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
+              {mensagemReceberBoleto}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Card className="space-y-2 py-3">
+              <p className="rotulo flex items-center gap-1">
+                <CalendarDays size={14} /> Vencendo hoje
+              </p>
+              <p className="text-2xl font-bold text-slate-900">{resumoContas.vencendoHoje.quantidade}</p>
+              <p className="text-sm text-slate-600">{moeda(resumoContas.vencendoHoje.total)}</p>
+            </Card>
+            <Card className="space-y-2 py-3">
+              <p className="rotulo flex items-center gap-1">
+                <Clock3 size={14} /> Próximos 7 dias
+              </p>
+              <p className="text-2xl font-bold text-slate-900">{resumoContas.proximos7Dias.quantidade}</p>
+              <p className="text-sm text-slate-600">{moeda(resumoContas.proximos7Dias.total)}</p>
+            </Card>
+            <Card className="space-y-2 py-3">
+              <p className="rotulo flex items-center gap-1 text-erro">
+                <TriangleAlert size={14} /> Atrasadas
+              </p>
+              <p className="text-2xl font-bold text-erro">{resumoContas.atrasadas.quantidade}</p>
+              <p className="text-sm text-slate-600">{moeda(resumoContas.atrasadas.total)}</p>
+            </Card>
+            <Card className="space-y-2 py-3">
+              <p className="rotulo flex items-center gap-1 text-blue-700">
+                <CircleCheckBig size={14} /> Aguardando conciliação
+              </p>
+              <p className="text-2xl font-bold text-blue-700">{resumoContas.aguardandoConciliacao.quantidade}</p>
+              <p className="text-sm text-slate-600">{moeda(resumoContas.aguardandoConciliacao.total)}</p>
+            </Card>
+          </div>
+
+          <Card className="space-y-3">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
+              <label className="block">
+                <span className="rotulo mb-1 flex items-center gap-1">
+                  <Search size={14} /> Pesquisa
+                </span>
+                <input
+                  type="search"
+                  value={buscaConta}
+                  onChange={(event) => setBuscaConta(event.target.value)}
+                  className="input w-full"
+                  placeholder="Fornecedor, descrição ou documento"
+                />
+              </label>
+              <label className="block">
+                <span className="rotulo mb-1 block">Status</span>
+                <select
+                  className="input w-full"
+                  value={filtroStatusConta}
+                  onChange={(event) => setFiltroStatusConta(event.target.value as StatusContaPagar | "todos")}
+                >
+                  {STATUS_CONTA_OPCOES.map((opcao) => (
+                    <option key={opcao.valor} value={opcao.valor}>
+                      {opcao.rotulo}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="rotulo mb-1 block">Vencimento</span>
+                <select
+                  className="input w-full"
+                  value={filtroVencimentoConta}
+                  onChange={(event) => setFiltroVencimentoConta(event.target.value as FiltroVencimentoConta)}
+                >
+                  {FILTRO_VENCIMENTO_OPCOES.map((opcao) => (
+                    <option key={opcao.valor} value={opcao.valor}>
+                      {opcao.rotulo}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </Card>
+
+          {contasFiltradas.length === 0 ? (
+            <Vazio mensagem={contas.length === 0 ? "Nenhuma conta a pagar cadastrada." : "Nenhuma conta encontrada com os filtros atuais."} />
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <Card className="p-0">
+                  <Tabela cabecalho={["Fornecedor", "Descrição", "Origem", "Documento", "Vencimento", "Valor final", "Status", "Ações"]}>
+                    {contasFiltradas.map((conta) => (
+                      <tr key={conta.id}>
+                        <td className="px-3 py-3 text-sm text-slate-700">{nomeFornecedorConta(conta)}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{conta.descricao}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{rotuloOrigemConta(conta.origem)}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{conta.documento_id ?? "—"}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{dataBR(conta.data_vencimento)}</td>
+                        <td className="px-3 py-3 text-sm font-bold text-slate-900">{moeda(conta.valor_final)}</td>
+                        <td className="px-3 py-3">
+                          <BadgeStatusConta status={conta.status} />
+                        </td>
+                        <td className="px-3 py-3">
+                          {contaPodeReceberBoleto(conta) && (
+                            <button type="button" className="btn-secundario" onClick={() => abrirReceberBoleto(conta)}>
+                              <Upload size={16} /> Receber boleto
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </Tabela>
+                </Card>
+              </div>
+
+              <div className="space-y-3 md:hidden">
+                {contasFiltradas.map((conta) => (
+                  <Card key={conta.id} className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-slate-900">{nomeFornecedorConta(conta)}</p>
+                        <p className="text-sm text-slate-600">{conta.descricao}</p>
+                      </div>
+                      <BadgeStatusConta status={conta.status} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm text-slate-600">
+                      <div>
+                        <p className="rotulo">Origem</p>
+                        <p>{rotuloOrigemConta(conta.origem)}</p>
+                      </div>
+                      <div>
+                        <p className="rotulo">Documento</p>
+                        <p>{conta.documento_id ?? "—"}</p>
+                      </div>
+                      <div>
+                        <p className="rotulo">Vencimento</p>
+                        <p>{dataBR(conta.data_vencimento)}</p>
+                      </div>
+                      <div>
+                        <p className="rotulo">Valor final</p>
+                        <p className="font-bold text-slate-900">{moeda(conta.valor_final)}</p>
+                      </div>
+                    </div>
+                    {contaPodeReceberBoleto(conta) && (
+                      <div className="pt-1">
+                        <button type="button" className="btn-secundario w-full" onClick={() => abrirReceberBoleto(conta)}>
+                          <Upload size={16} /> Receber boleto
+                        </button>
+                      </div>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      ) : (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2>Notas fiscais</h2>
+              <p className="text-sm text-slate-600">Visualização completa das NF-e importadas para conferência e correção.</p>
+            </div>
+          </div>
+
+          <Card className="space-y-3">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
+              <label className="block">
+                <span className="rotulo mb-1 flex items-center gap-1">
+                  <Search size={14} /> Pesquisa
+                </span>
+                <input
+                  type="search"
+                  value={buscaNfe}
+                  onChange={(event) => setBuscaNfe(event.target.value)}
+                  className="input w-full"
+                  placeholder="Número, fornecedor, CNPJ emitente ou chave"
+                />
+              </label>
+              <label className="block">
+                <span className="rotulo mb-1 block">Completude</span>
+                <select
+                  className="input w-full"
+                  value={filtroCompletudeNfe}
+                  onChange={(event) => setFiltroCompletudeNfe(event.target.value as "todas" | IndicadorCompletudeFinanceiro)}
+                >
+                  {FILTRO_COMPLETUDE_NFE_OPCOES.map((opcao) => (
+                    <option key={opcao.valor} value={opcao.valor}>
+                      {opcao.rotulo}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </Card>
+
+          {notasFiscaisFinanceiro.length === 0 ? (
+            <Vazio mensagem={db.notas_fiscais.length === 0 ? "Nenhuma nota fiscal importada." : "Nenhuma nota fiscal encontrada com os filtros atuais."} />
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <Card className="p-0">
+                  <Tabela
+                    cabecalho={[
+                      "NF-e",
+                      "Fornecedor vinculado",
+                      "Emitente (XML)",
+                      "Emissão",
+                      "Total",
+                      "Parcelas",
+                      "Soma parcelas",
+                      "Status",
+                      "Completude",
+                      "Ações",
+                    ]}
+                  >
+                    {notasFiscaisFinanceiro.map((resumo) => (
+                      <tr key={resumo.nota.id}>
+                        <td className="px-3 py-3 text-sm font-semibold text-slate-900">{resumo.nota.numero || "—"}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{resumo.fornecedorNome}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">
+                          <p>{resumo.emitenteNome}</p>
+                          <p className="text-xs text-slate-500">{resumo.emitenteCnpj}</p>
+                        </td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{resumo.nota.emitida_em ? dataBR(resumo.nota.emitida_em) : "—"}</td>
+                        <td className="px-3 py-3 text-sm font-semibold text-slate-900">{moeda(resumo.nota.valor_total)}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{resumo.quantidadeParcelas}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{moeda(resumo.somaParcelas)}</td>
+                        <td className="px-3 py-3 text-sm text-slate-700">{resumo.nota.status}</td>
+                        <td className="px-3 py-3">
+                          <BadgeCompletudeNfeFinanceiro indicador={resumo.indicadorCompletude} />
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" className="btn-secundario" onClick={() => abrirDetalhesNfe(resumo.nota.id)}>
+                              Ver detalhes
+                            </button>
+                            <button type="button" className="btn-secundario" onClick={() => iniciarCorrecaoNfe(resumo.nota.id)}>
+                              Completar ou corrigir dados
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </Tabela>
+                </Card>
+              </div>
+
+              <div className="space-y-3 md:hidden">
+                {notasFiscaisFinanceiro.map((resumo) => (
+                  <Card key={resumo.nota.id} className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-slate-900">NF-e {resumo.nota.numero || "—"}</p>
+                        <p className="text-sm text-slate-600">{resumo.fornecedorNome}</p>
+                        <p className="text-xs text-slate-500">{resumo.emitenteNome} · {resumo.emitenteCnpj}</p>
+                      </div>
+                      <BadgeCompletudeNfeFinanceiro indicador={resumo.indicadorCompletude} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm text-slate-600">
+                      <div>
+                        <p className="rotulo">Emissão</p>
+                        <p>{resumo.nota.emitida_em ? dataBR(resumo.nota.emitida_em) : "—"}</p>
+                      </div>
+                      <div>
+                        <p className="rotulo">Total</p>
+                        <p className="font-semibold text-slate-900">{moeda(resumo.nota.valor_total)}</p>
+                      </div>
+                      <div>
+                        <p className="rotulo">Parcelas</p>
+                        <p>{resumo.quantidadeParcelas}</p>
+                      </div>
+                      <div>
+                        <p className="rotulo">Soma parcelas</p>
+                        <p>{moeda(resumo.somaParcelas)}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 pt-1">
+                      <button type="button" className="btn-secundario w-full" onClick={() => abrirDetalhesNfe(resumo.nota.id)}>
+                        Ver detalhes
+                      </button>
+                      <button type="button" className="btn-secundario w-full" onClick={() => iniciarCorrecaoNfe(resumo.nota.id)}>
+                        Completar ou corrigir dados
+                      </button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -334,6 +2164,946 @@ export default function FinanceiroPage() {
           </div>
         )}
       </Modal>
+
+      <Modal
+        aberto={modalImportarBoletoAberto}
+        titulo="Importar boleto"
+        onFechar={fecharImportarBoleto}
+        fecharAoClicarFundo={false}
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.preventDefault();
+          }}
+          className="space-y-4"
+        >
+          <label className="block">
+            <span className="rotulo mb-1 block">Arquivo do boleto (PDF, JPG ou PNG)</span>
+            <input
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+              className="input w-full py-2"
+              onChange={selecionarArquivoImportacao}
+              disabled={processandoImportacaoBoleto}
+            />
+          </label>
+
+          <Card className="space-y-1 bg-slate-50 py-3">
+            <p className="text-sm font-semibold text-slate-800">Etapas</p>
+            <p className="text-xs text-slate-600">1. Lendo documento</p>
+            <p className="text-xs text-slate-600">2. Validando código</p>
+            <p className="text-xs text-slate-600">3. Procurando NF-e e parcela</p>
+            <p className="text-xs text-slate-600">4. Resultado do confronto</p>
+            {estadoImportacaoBoleto.etapa && <p className="text-xs font-semibold text-primaria">Etapa atual: {estadoImportacaoBoleto.etapa.replace(/_/g, " ")}</p>}
+          </Card>
+
+          {estadoImportacaoBoleto.linhaSelecionada && (
+            <Card className="space-y-2 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-800">Linha identificada</p>
+                <button
+                  type="button"
+                  className="btn-secundario"
+                  onClick={() => setMostrarLinhaCompletaImportada((atual) => !atual)}
+                >
+                  {mostrarLinhaCompletaImportada ? <EyeOff size={16} /> : <Eye size={16} />} {mostrarLinhaCompletaImportada ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
+              <p className="text-sm text-slate-700">
+                {mascararLinhaDigitavel(estadoImportacaoBoleto.linhaSelecionada, mostrarLinhaCompletaImportada)}
+              </p>
+              <p className="text-sm text-slate-700">
+                Valor validado: {valorValidadoComoMoeda(estadoImportacaoBoleto.linhaSelecionada) === undefined ? "—" : moeda(valorValidadoComoMoeda(estadoImportacaoBoleto.linhaSelecionada) ?? 0)}
+              </p>
+            </Card>
+          )}
+
+          {estadoImportacaoBoleto.confronto && apresentacaoConfronto && (
+            <Card
+              className={`space-y-2 py-3 ${
+                apresentacaoConfronto.variante === "verde"
+                  ? "border border-sucesso bg-sucesso-clara"
+                  : apresentacaoConfronto.variante === "amarelo"
+                  ? "border border-destaque bg-destaque-clara"
+                  : apresentacaoConfronto.variante === "vermelho"
+                  ? "border border-erro bg-erro-clara"
+                  : "border border-slate-300 bg-slate-50"
+              }`}
+            >
+              <p className="font-bold">{apresentacaoConfronto.titulo}</p>
+              <p className="text-sm">Fornecedor: {nomeFornecedorDoConfronto(estadoImportacaoBoleto.confronto)}</p>
+              <p className="text-sm">
+                CNPJ emitente/beneficiário: {mascararCnpj(estadoImportacaoBoleto.dadosExtraidos?.cnpj_beneficiario)}
+              </p>
+              <p className="text-sm">NF-e: {estadoImportacaoBoleto.dadosExtraidos?.numero_nfe ?? "—"}</p>
+              <p className="text-sm">Chave NF-e: {mascararChaveNfe(estadoImportacaoBoleto.dadosExtraidos?.chave_nfe)}</p>
+              <p className="text-sm">Parcela: {estadoImportacaoBoleto.dadosExtraidos?.numero_parcela ?? "—"}</p>
+              <p className="text-sm">Valor do boleto: {estadoImportacaoBoleto.dadosExtraidos?.valor_codificado === undefined ? "—" : moeda(estadoImportacaoBoleto.dadosExtraidos.valor_codificado)}</p>
+              <p className="text-sm">Valor da parcela: {parcelaDoConfronto(estadoImportacaoBoleto.confronto) ? moeda(parcelaDoConfronto(estadoImportacaoBoleto.confronto)?.valor ?? 0) : "—"}</p>
+              <p className="text-sm">Vencimento do boleto: {estadoImportacaoBoleto.dadosExtraidos?.vencimento_extraido ? dataBR(estadoImportacaoBoleto.dadosExtraidos.vencimento_extraido) : "—"}</p>
+              <p className="text-sm">Vencimento da parcela: {parcelaDoConfronto(estadoImportacaoBoleto.confronto)?.vencimento ? dataBR(parcelaDoConfronto(estadoImportacaoBoleto.confronto)?.vencimento ?? "") : "—"}</p>
+              {estadoImportacaoBoleto.confronto.criterios_coincidentes.length > 0 && (
+                <p className="text-sm">Critérios conferidos: {estadoImportacaoBoleto.confronto.criterios_coincidentes.join(", ")}</p>
+              )}
+              {estadoImportacaoBoleto.confronto.divergencias.length > 0 && (
+                <div className="space-y-1 rounded-card border border-erro bg-white px-3 py-2 text-sm text-erro">
+                  {estadoImportacaoBoleto.confronto.divergencias.map((item, index) => (
+                    <p key={`${item}-${index}`}>{item}</p>
+                  ))}
+                </div>
+              )}
+
+              {estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades" && (
+                <div className="space-y-2 rounded-card border border-slate-200 bg-white px-3 py-2">
+                  <p className="text-sm font-semibold">Selecione uma parcela candidata</p>
+                  <select
+                    className="input w-full"
+                    value={parcelaSelecionadaMultipla}
+                    onChange={(event) => setParcelaSelecionadaMultipla(event.target.value)}
+                    disabled={processandoImportacaoBoleto}
+                  >
+                    <option value="">Selecione</option>
+                    {estadoImportacaoBoleto.confronto.candidatos.map((candidato) => {
+                      const parcela = db.boletos.find((boleto) => boleto.id === candidato.boleto_id);
+                      const nota = db.notas_fiscais.find((n) => n.id === candidato.nota_id);
+                      return (
+                        <option key={candidato.boleto_id} value={candidato.boleto_id}>
+                          {nota?.numero ?? "s/n"} · {rotuloParcela(parcela?.numero_parcela)} · {parcela ? moeda(parcela.valor) : "—"}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {(estadoImportacaoBoleto.confronto.classificacao === "parcial" ||
+                estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades") && (
+                <label className="block">
+                  <span className="rotulo mb-1 block">Justificativa da confirmação *</span>
+                  <textarea
+                    className="input min-h-20 w-full py-2"
+                    value={justificativaImportacao}
+                    onChange={(event) => setJustificativaImportacao(event.target.value)}
+                    disabled={processandoImportacaoBoleto}
+                  />
+                </label>
+              )}
+            </Card>
+          )}
+
+          {estadoImportacaoBoleto.falha && (
+            <Card className="space-y-2 border border-erro bg-erro-clara py-3">
+              <p className="text-sm font-semibold text-erro">Falha na análise do boleto</p>
+              <p className="text-sm text-erro">{estadoImportacaoBoleto.falha}</p>
+              <button type="button" className="btn-secundario" onClick={() => setMostrarDetalhesTecnicos((atual) => !atual)}>
+                Detalhes técnicos
+              </button>
+              {mostrarDetalhesTecnicos && estadoImportacaoBoleto.diagnostico && (
+                <div className="rounded-card border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                  <p>PDF aberto: {estadoImportacaoBoleto.diagnostico.pdfAberto ? "sim" : "não"}</p>
+                  <p>Páginas processadas: {estadoImportacaoBoleto.diagnostico.paginasProcessadas}</p>
+                  <p>Texto encontrado: {estadoImportacaoBoleto.diagnostico.textoEncontrado ? "sim" : "não"}</p>
+                  <p>Candidatos numéricos encontrados: {estadoImportacaoBoleto.diagnostico.candidatosNumericosEncontrados}</p>
+                  <p>BarcodeDetector disponível: {estadoImportacaoBoleto.diagnostico.barcodeDetectorDisponivel ? "sim" : "não"}</p>
+                  <p>BarcodeDetector executado: {estadoImportacaoBoleto.diagnostico.barcodeDetectorExecutado ? "sim" : "não"}</p>
+                  <p>ZXing executado: {estadoImportacaoBoleto.diagnostico.zxingExecutado ? "sim" : "não"}</p>
+                  <p>Resultado válido encontrado: {estadoImportacaoBoleto.diagnostico.resultadoValidoEncontrado ? "sim" : "não"}</p>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {mensagemImportacaoBoleto && (
+            <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">{mensagemImportacaoBoleto}</p>
+          )}
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <button type="button" className="btn-secundario" onClick={fecharImportarBoleto} disabled={processandoImportacaoBoleto}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn-primario"
+              onClick={() => void confirmarImportacaoPrincipal()}
+              disabled={
+                processandoImportacaoBoleto ||
+                !estadoImportacaoBoleto.confronto ||
+                !(
+                  estadoImportacaoBoleto.confronto.classificacao === "exata" ||
+                  estadoImportacaoBoleto.confronto.classificacao === "parcial" ||
+                  estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades"
+                )
+              }
+            >
+              <Upload size={16} />
+              {estadoImportacaoBoleto.confronto?.classificacao === "parcial" ||
+              estadoImportacaoBoleto.confronto?.classificacao === "multiplas_possibilidades"
+                ? "Confirmar vínculo e adicionar aos boletos a vencer"
+                : "Confirmar e adicionar aos boletos a vencer"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal aberto={Boolean(boletoResumo)} titulo="Resumo da conferência" onFechar={() => setBoletoResumoId(null)}>
+        {boletoResumo && (
+          <div className="space-y-2 text-sm text-slate-700">
+            <p>Fornecedor: {fornecedorDoBoleto(db, boletoResumo)}</p>
+            <p>NF-e: {notaResumo?.numero ?? "—"}</p>
+            <p>Parcela: {boletoResumo.numero_parcela ?? "—"}</p>
+            <p>Valor: {moeda(boletoResumo.valor)}</p>
+            <p>Vencimento: {dataBR(boletoResumo.vencimento)}</p>
+            <p>Status conferência: {boletoResumo.status_conferencia ?? "—"}</p>
+            <p>Conferido por: {boletoResumo.conferido_por ?? "—"}</p>
+            <p>Conferido em: {boletoResumo.conferido_em ? dataBR(boletoResumo.conferido_em) : "—"}</p>
+            {documentoResumo?.criterios_conferidos && documentoResumo.criterios_conferidos.length > 0 && (
+              <p>Critérios: {documentoResumo.criterios_conferidos.join(", ")}</p>
+            )}
+            {documentoResumo?.justificativa_confirmacao && <p>Justificativa: {documentoResumo.justificativa_confirmacao}</p>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(boletoPagamento && snapshotPagamento)}
+        titulo="Pagar boleto"
+        onFechar={fecharPagamentoBoleto}
+        fecharAoClicarFundo={false}
+      >
+        {boletoPagamento && snapshotPagamento && (
+          <form onSubmit={confirmarPagamentoBoleto} className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="font-bold text-slate-900">{fornecedorDoBoleto(db, boletoPagamento)}</p>
+              <p className="text-sm text-slate-700">NF-e: {notaPagamento?.numero ?? "—"}</p>
+              <p className="text-sm text-slate-700">Parcela: {rotuloParcela(boletoPagamento.numero_parcela)}</p>
+              <p className="text-sm text-slate-700">CNPJ beneficiário: {cnpjBR(boletoPagamento.cnpj_beneficiario)}</p>
+              <p className="text-sm text-slate-700">Valor do boleto: {moeda(boletoPagamento.valor)}</p>
+              <p className="text-sm text-slate-700">Vencimento: {dataBR(boletoPagamento.vencimento)}</p>
+              <p className="text-sm text-slate-700">Status conferência: {boletoPagamento.status_conferencia ?? "—"}</p>
+            </Card>
+
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              Informar pagamento não significa baixa financeira final. Este boleto ficará em aguardando conciliação até confirmação bancária.
+            </div>
+
+            <label className="block rounded-card border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              <span className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={formPagamentoBoleto.confirmouAviso}
+                  onChange={(event) => atualizarCampoPagamento("confirmouAviso", event.target.checked)}
+                />
+                Confirmo que revisei beneficiário, valor e vencimento antes de informar o pagamento.
+              </span>
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="rotulo mb-1 block">Data do pagamento *</span>
+                <input
+                  type="date"
+                  className="input w-full"
+                  value={formPagamentoBoleto.dataPagamento}
+                  onChange={(event) => atualizarCampoPagamento("dataPagamento", event.target.value)}
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="rotulo mb-1 block">Valor pago *</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  className="input w-full"
+                  value={formPagamentoBoleto.valorPago}
+                  onChange={(event) => atualizarCampoPagamento("valorPago", event.target.value)}
+                  required
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="rotulo mb-1 block">Banco/conta utilizada *</span>
+                <input
+                  className="input w-full"
+                  value={formPagamentoBoleto.bancoConta}
+                  onChange={(event) => atualizarCampoPagamento("bancoConta", event.target.value)}
+                  placeholder="Ex.: Banco X - Conta Operacional"
+                  required
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="rotulo mb-1 block">Responsável</span>
+                <input
+                  className="input w-full"
+                  value={formPagamentoBoleto.responsavel}
+                  onChange={(event) => atualizarCampoPagamento("responsavel", event.target.value)}
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="rotulo mb-1 block">Observação (opcional)</span>
+                <textarea
+                  className="input min-h-20 w-full py-2"
+                  value={formPagamentoBoleto.observacao}
+                  onChange={(event) => atualizarCampoPagamento("observacao", event.target.value)}
+                />
+              </label>
+            </div>
+
+            <Card className="space-y-1 py-3 text-sm text-slate-700">
+              <p>Valor do boleto: {moeda(boletoPagamento.valor)}</p>
+              <p>Vencimento: {dataBR(boletoPagamento.vencimento)}</p>
+              <p className="text-slate-600">O código para pagamento fica disponível na própria linha do boleto na agenda.</p>
+            </Card>
+
+            {erroPagamentoBoleto && (
+              <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">{erroPagamentoBoleto}</p>
+            )}
+            {mensagemPagamentoBoleto && (
+              <p className="rounded-card border border-sucesso bg-sucesso-clara px-3 py-2 text-sm font-medium text-primaria-escura">
+                {mensagemPagamentoBoleto}
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn-secundario" onClick={fecharPagamentoBoleto} disabled={processandoPagamentoBoleto}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario" disabled={processandoPagamentoBoleto}>
+                <CircleCheckBig size={16} /> {processandoPagamentoBoleto ? "Informando..." : "Informar pagamento"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(boletoConciliar)}
+        titulo="Conciliar boleto"
+        onFechar={fecharConciliarBoleto}
+        fecharAoClicarFundo={false}
+      >
+        {boletoConciliar && (
+          <form onSubmit={confirmarConciliarBoleto} className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="font-bold text-slate-900">{fornecedorDoBoleto(db, boletoConciliar)}</p>
+              <p className="text-sm text-slate-700">
+                Pagamento informado: {boletoConciliar.pagamento_data ? dataBR(boletoConciliar.pagamento_data) : "—"}
+                {boletoConciliar.pagamento_valor != null ? ` · ${moeda(boletoConciliar.pagamento_valor)}` : ""}
+              </p>
+              {boletoConciliar.pagamento_banco_conta && (
+                <p className="text-sm text-slate-700">Banco/conta: {boletoConciliar.pagamento_banco_conta}</p>
+              )}
+              {boletoConciliar.conciliacao_divergente && boletoConciliar.conciliacao_divergencia_motivo && (
+                <p className="text-sm font-medium text-destaque">
+                  Divergência anterior: {boletoConciliar.conciliacao_divergencia_motivo}
+                </p>
+              )}
+            </Card>
+
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              Confirme apenas se o valor apareceu no extrato/banco. Isso marca o boleto como pago definitivo.
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="rotulo mb-1 block">Data da liquidação *</span>
+                <input
+                  type="date"
+                  className="input w-full"
+                  value={formConciliarBoleto.dataLiquidacao}
+                  onChange={(event) =>
+                    setFormConciliarBoleto((atual) => ({ ...atual, dataLiquidacao: event.target.value }))
+                  }
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="rotulo mb-1 block">Responsável</span>
+                <input
+                  className="input w-full"
+                  value={formConciliarBoleto.responsavel}
+                  onChange={(event) =>
+                    setFormConciliarBoleto((atual) => ({ ...atual, responsavel: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="rotulo mb-1 block">Observação (opcional)</span>
+                <textarea
+                  className="input min-h-20 w-full py-2"
+                  value={formConciliarBoleto.observacao}
+                  onChange={(event) =>
+                    setFormConciliarBoleto((atual) => ({ ...atual, observacao: event.target.value }))
+                  }
+                />
+              </label>
+            </div>
+
+            {erroConciliarBoleto && (
+              <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">
+                {erroConciliarBoleto}
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={fecharConciliarBoleto}
+                disabled={processandoConciliarBoleto}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario" disabled={processandoConciliarBoleto}>
+                <CircleCheckBig size={16} /> {processandoConciliarBoleto ? "Conciliando..." : "Conciliar"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(boletoDivergencia)}
+        titulo="Registrar divergência"
+        onFechar={fecharDivergenciaBoleto}
+        fecharAoClicarFundo={false}
+      >
+        {boletoDivergencia && (
+          <form onSubmit={confirmarDivergenciaBoleto} className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="font-bold text-slate-900">{fornecedorDoBoleto(db, boletoDivergencia)}</p>
+              <p className="text-sm text-slate-700">
+                Valor informado:{" "}
+                {boletoDivergencia.pagamento_valor != null ? moeda(boletoDivergencia.pagamento_valor) : moeda(boletoDivergencia.valor)}
+              </p>
+            </Card>
+
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              O boleto permanece em aguardando conciliação. Você poderá conciliar depois de resolver a divergência.
+            </div>
+
+            <label className="block">
+              <span className="rotulo mb-1 block">Motivo da divergência *</span>
+              <textarea
+                className="input min-h-24 w-full py-2"
+                value={formDivergenciaBoleto.motivo}
+                onChange={(event) =>
+                  setFormDivergenciaBoleto((atual) => ({ ...atual, motivo: event.target.value }))
+                }
+                placeholder="Ex.: valor no extrato diferente, data não encontrada..."
+                required
+              />
+            </label>
+
+            <label className="block">
+              <span className="rotulo mb-1 block">Responsável</span>
+              <input
+                className="input w-full"
+                value={formDivergenciaBoleto.responsavel}
+                onChange={(event) =>
+                  setFormDivergenciaBoleto((atual) => ({ ...atual, responsavel: event.target.value }))
+                }
+              />
+            </label>
+
+            {erroDivergenciaBoleto && (
+              <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">
+                {erroDivergenciaBoleto}
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={fecharDivergenciaBoleto}
+                disabled={processandoDivergenciaBoleto}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario" disabled={processandoDivergenciaBoleto}>
+                <TriangleAlert size={16} /> {processandoDivergenciaBoleto ? "Registrando..." : "Registrar divergência"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal aberto={Boolean(notaDetalhes)} titulo="Detalhes da nota fiscal" onFechar={fecharDetalhesNfe}>
+        {notaDetalhes && (
+          <div className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="text-sm font-semibold text-slate-800">Dados fiscais importados</p>
+              <p className="text-sm text-slate-700">Nota: {notaDetalhes.nota.numero || "—"}</p>
+              <p className="text-sm text-slate-700">Chave de acesso: {notaDetalhes.nota.chave_acesso || "—"}</p>
+              <p className="text-sm text-slate-700">Fornecedor vinculado: {notaDetalhes.fornecedorNome}</p>
+              <p className="text-sm text-slate-700">Emitente no XML: {notaDetalhes.emitenteNome}</p>
+              <p className="text-sm text-slate-700">CNPJ emitente: {cnpjBR(notaDetalhes.emitenteCnpj)}</p>
+              <p className="text-sm text-slate-700">Valor total: {moeda(notaDetalhes.nota.valor_total)}</p>
+              <p className="text-sm text-slate-700">Emissão: {notaDetalhes.nota.emitida_em ? dataBR(notaDetalhes.nota.emitida_em) : "—"}</p>
+            </Card>
+
+            <Card className="space-y-2 border border-slate-200 py-3">
+              <p className="text-sm font-semibold text-slate-800">Parcelas e boletos associados</p>
+              {notaDetalhes.parcelas.length === 0 ? (
+                <p className="text-sm text-slate-600">Nenhuma parcela/boletos vinculados.</p>
+              ) : (
+                <div className="space-y-1 text-sm text-slate-700">
+                  {notaDetalhes.parcelas.map((parcela) => (
+                    <p key={parcela.id}>
+                      {rotuloParcela(parcela.numero_parcela)} · {moeda(parcela.valor)} · {parcela.vencimento ? dataBR(parcela.vencimento) : "—"} · status {parcela.status}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <p className="text-sm font-semibold text-slate-800">Soma das parcelas: {moeda(notaDetalhes.somaParcelas)}</p>
+            </Card>
+
+            {notaDetalhes.pendencias.length > 0 && (
+              <Card className="space-y-1 border border-destaque bg-destaque-clara py-3">
+                <p className="text-sm font-semibold text-destaque">Pendências detectadas</p>
+                {notaDetalhes.pendencias.map((pendencia, index) => (
+                  <p key={`${pendencia}-${index}`} className="text-sm text-destaque">
+                    {pendencia}
+                  </p>
+                ))}
+              </Card>
+            )}
+
+            {Array.isArray(notaDetalhes.nota.correcoes_fornecedor) && notaDetalhes.nota.correcoes_fornecedor.length > 0 && (
+              <Card className="space-y-1 border border-slate-200 py-3">
+                <p className="text-sm font-semibold text-slate-800">Histórico de correções de fornecedor</p>
+                {notaDetalhes.nota.correcoes_fornecedor.map((correcao) => (
+                  <p key={correcao.id} className="text-xs text-slate-600">
+                    {dataBR(correcao.corrigido_em)} · {nomeFornecedor(db, correcao.fornecedor_anterior_id)} para {nomeFornecedor(db, correcao.fornecedor_novo_id)} · {correcao.corrigido_por}
+                  </p>
+                ))}
+              </Card>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn-secundario" onClick={fecharDetalhesNfe}>
+                Fechar
+              </button>
+              <button
+                type="button"
+                className="btn-primario"
+                onClick={() => {
+                  fecharDetalhesNfe();
+                  iniciarCorrecaoNfe(notaDetalhes.nota.id);
+                }}
+              >
+                Completar ou corrigir dados
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal aberto={Boolean(estadoCorrecaoNfe && notaCorrecao)} titulo="Completar ou corrigir dados da NF-e" onFechar={fecharCorrecaoNfe}>
+        {estadoCorrecaoNfe && notaCorrecao && (
+          <div className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="text-sm font-semibold text-slate-800">Dados fiscais importados (somente leitura)</p>
+              <p className="text-sm text-slate-700">Nota: {notaCorrecao.numero || "—"}</p>
+              <p className="text-sm text-slate-700">Razão social emitente: {notaCorrecao.razao_social_emitente || "Não disponível na importação original"}</p>
+              <p className="text-sm text-slate-700">Chave de acesso: {notaCorrecao.chave_acesso || "—"}</p>
+              <p className="text-sm text-slate-700">CNPJ emitente: {cnpjBR(notaCorrecao.cnpj_emitente)}</p>
+              <p className="text-sm text-slate-700">Valor total: {moeda(notaCorrecao.valor_total)}</p>
+            </Card>
+
+            <label className="block">
+              <span className="rotulo mb-1 block">Fornecedor vinculado no ComprasChef</span>
+              <select
+                className="input w-full"
+                value={estadoCorrecaoNfe.fornecedorCorrecaoId}
+                onChange={(event) => {
+                  setEstadoCorrecaoNfe((atual) =>
+                    atual
+                      ? {
+                          ...atual,
+                          fornecedorCorrecaoId: event.target.value,
+                        }
+                      : atual
+                  );
+                  setErroCorrecaoNfe(null);
+                }}
+              >
+                <option value="">Selecione</option>
+                {db.fornecedores
+                  .filter((fornecedor) => fornecedor.ativo)
+                  .map((fornecedor) => (
+                    <option key={fornecedor.id} value={fornecedor.id}>
+                      {fornecedor.nome}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="rotulo mb-1 block">Justificativa da correção (opcional)</span>
+              <textarea
+                className="input min-h-20 w-full py-2"
+                value={estadoCorrecaoNfe.justificativaCorrecao}
+                onChange={(event) =>
+                  setEstadoCorrecaoNfe((atual) =>
+                    atual
+                      ? {
+                          ...atual,
+                          justificativaCorrecao: event.target.value,
+                        }
+                      : atual
+                  )
+                }
+              />
+            </label>
+
+            <Card className="space-y-2 border border-slate-200 py-3">
+              <p className="text-sm font-semibold text-slate-800">Reconferência de boletos</p>
+              <p className="text-sm text-slate-600">
+                As parcelas/boletos ligados a esta NF-e permanecem preservados. A correção altera apenas o vínculo do fornecedor e registra histórico.
+              </p>
+              <button type="button" className="btn-secundario" disabled>
+                <RefreshCcw size={16} /> Regras de reconferência disponíveis no Recebimento
+              </button>
+            </Card>
+
+            {erroCorrecaoNfe && <p className="rounded-card bg-erro-clara px-3 py-2 text-sm text-erro">{erroCorrecaoNfe}</p>}
+            {mensagemCorrecaoNfe && (
+              <p className="rounded-card border border-sucesso bg-sucesso-clara px-3 py-2 text-sm text-primaria-escura">
+                {mensagemCorrecaoNfe}
+              </p>
+            )}
+
+            {Array.isArray(notaCorrecao.correcoes_fornecedor) && notaCorrecao.correcoes_fornecedor.length > 0 && (
+              <Card className="space-y-1 border border-slate-200 py-3">
+                <p className="text-sm font-semibold text-slate-800">Histórico de correções de fornecedor</p>
+                {notaCorrecao.correcoes_fornecedor.map((correcao) => (
+                  <p key={correcao.id} className="text-xs text-slate-600">
+                    {dataBR(correcao.corrigido_em)} · {nomeFornecedor(db, correcao.fornecedor_anterior_id)} para {nomeFornecedor(db, correcao.fornecedor_novo_id)} · {correcao.corrigido_por}
+                  </p>
+                ))}
+              </Card>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn-secundario" onClick={fecharCorrecaoNfe}>
+                Fechar
+              </button>
+              <button
+                type="button"
+                className="btn-primario"
+                onClick={salvarCorrecaoFornecedorNfe}
+                disabled={salvandoCorrecaoNfe || correcaoSemMudanca || !estadoCorrecaoNfe.fornecedorCorrecaoId}
+              >
+                {salvandoCorrecaoNfe ? "Salvando..." : "Salvar correção"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal aberto={modalNovaContaAberto} titulo="Nova conta" onFechar={fecharNovaConta} fecharAoClicarFundo={false}>
+        <form onSubmit={salvarNovaConta} onKeyDown={impedirEnterAcidental} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="block sm:col-span-2">
+            <span className="rotulo mb-1 block">Fornecedor</span>
+            <select
+              className="input w-full"
+              value={formConta.fornecedor_id}
+              onChange={(event) => alterarCampoConta("fornecedor_id", event.target.value)}
+            >
+              <option value="">Fornecedor não identificado</option>
+              {db.fornecedores.map((fornecedor) => (
+                <option key={fornecedor.id} value={fornecedor.id}>
+                  {fornecedor.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="rotulo mb-1 block">Descrição *</span>
+            <input
+              className="input w-full"
+              required
+              value={formConta.descricao}
+              onChange={(event) => alterarCampoConta("descricao", event.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Categoria *</span>
+            <input
+              className="input w-full"
+              required
+              value={formConta.categoria}
+              onChange={(event) => alterarCampoConta("categoria", event.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Centro de custo</span>
+            <input
+              className="input w-full"
+              value={formConta.centro_custo}
+              onChange={(event) => alterarCampoConta("centro_custo", event.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Número do documento</span>
+            <input
+              className="input w-full"
+              value={formConta.documento_id}
+              onChange={(event) => alterarCampoConta("documento_id", event.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Data de emissão</span>
+            <input
+              type="date"
+              className="input w-full"
+              value={formConta.data_emissao}
+              onChange={(event) => alterarCampoConta("data_emissao", event.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Data de vencimento *</span>
+            <input
+              type="date"
+              className="input w-full"
+              required
+              value={formConta.data_vencimento}
+              onChange={(event) => alterarCampoConta("data_vencimento", event.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Valor original *</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              className="input w-full"
+              required
+              value={formConta.valor_original}
+              onChange={(event) => alterarCampoConta("valor_original", event.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Juros</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              className="input w-full"
+              value={formConta.juros}
+              onChange={(event) => alterarCampoConta("juros", event.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Desconto</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              className="input w-full"
+              value={formConta.desconto}
+              onChange={(event) => alterarCampoConta("desconto", event.target.value)}
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="rotulo mb-1 block">Observações</span>
+            <textarea
+              className="input min-h-24 w-full py-3"
+              value={formConta.observacoes}
+              onChange={(event) => alterarCampoConta("observacoes", event.target.value)}
+            />
+          </label>
+
+          <Card className="sm:col-span-2 bg-slate-50 py-3">
+            <p className="rotulo">Valor final calculado</p>
+            <p className="text-xl font-bold text-slate-900">{valorFinalPreview === undefined ? "Preencha o valor original" : moeda(valorFinalPreview)}</p>
+            <p className="text-xs text-slate-500">Status inicial: aguardando boleto · Origem: manual</p>
+          </Card>
+
+          {erroFormConta && (
+            <p className="sm:col-span-2 rounded-card bg-erro-clara px-3 py-2 text-sm font-medium text-erro">{erroFormConta}</p>
+          )}
+
+          <div className="sm:col-span-2 flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <button type="button" className="btn-secundario" onClick={fecharNovaConta}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn-primario">
+              <Plus size={18} /> Salvar conta
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        aberto={Boolean(contaSelecionadaBoleto)}
+        titulo="Receber boleto"
+        onFechar={fecharReceberBoleto}
+        fecharAoClicarFundo={false}
+      >
+        {contaSelecionadaBoleto && (
+          <form onSubmit={salvarReceberBoleto} onKeyDown={impedirEnterAcidental} className="space-y-4">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="font-bold text-slate-900">{nomeFornecedorConta(contaSelecionadaBoleto)}</p>
+              <p className="text-sm text-slate-700">{contaSelecionadaBoleto.descricao}</p>
+              <div className="grid grid-cols-2 gap-3 text-sm text-slate-600">
+                <div>
+                  <p className="rotulo">Vencimento</p>
+                  <p>{dataBR(contaSelecionadaBoleto.data_vencimento)}</p>
+                </div>
+                <div>
+                  <p className="rotulo">Valor final</p>
+                  <p className="font-bold text-slate-900">{moeda(contaSelecionadaBoleto.valor_final)}</p>
+                </div>
+              </div>
+            </Card>
+
+            <label className="block">
+              <span className="rotulo mb-1 block">Arquivo do boleto *</span>
+              <input
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                className="input w-full py-2"
+                onChange={alterarArquivoReceberBoleto}
+              />
+              <p className="mt-1 text-xs text-slate-500">Aceita PDF, JPG ou PNG com até 10 MB. Apenas metadados serão armazenados.</p>
+              {mensagemIdentificacaoBoleto && (
+                <p className="mt-2 text-sm font-medium text-slate-700">{mensagemIdentificacaoBoleto}</p>
+              )}
+              {opcoesIdentificacaoBoleto.length > 1 && (
+                <div className="mt-2 space-y-2 rounded-card border border-slate-200 bg-white p-2">
+                  {opcoesIdentificacaoBoleto.map((opcao, indice) => (
+                    <button
+                      key={`${opcao.valorNormalizado}-${indice}`}
+                      type="button"
+                      className="btn-secundario w-full justify-between"
+                      onClick={() => aplicarIdentificacaoUnica(opcao)}
+                      disabled={identificandoCodigoBoleto}
+                    >
+                      <span>{resumirCodigoParaEscolha(opcao.valorNormalizado)}</span>
+                      <span className="text-xs text-slate-500">{opcao.formato}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {diagnosticoIdentificacao && (
+                <div className="mt-2 rounded-card border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                  <p>PDF aberto: {diagnosticoIdentificacao.pdfAberto ? "sim" : "não"}</p>
+                  <p>Páginas processadas: {diagnosticoIdentificacao.paginasProcessadas}</p>
+                  <p>Texto encontrado: {diagnosticoIdentificacao.textoEncontrado ? "sim" : "não"}</p>
+                  <p>Candidatos numéricos encontrados: {diagnosticoIdentificacao.candidatosNumericosEncontrados}</p>
+                  <p>BarcodeDetector disponível: {diagnosticoIdentificacao.barcodeDetectorDisponivel ? "sim" : "não"}</p>
+                  <p>BarcodeDetector executado: {diagnosticoIdentificacao.barcodeDetectorExecutado ? "sim" : "não"}</p>
+                  <p>ZXing executado: {diagnosticoIdentificacao.zxingExecutado ? "sim" : "não"}</p>
+                  <p>Resultado válido encontrado: {diagnosticoIdentificacao.resultadoValidoEncontrado ? "sim" : "não"}</p>
+                  <p>Falha técnica: {diagnosticoIdentificacao.falhaTecnica ?? "nenhuma"}</p>
+                </div>
+              )}
+            </label>
+
+            <label className="block">
+              <span className="rotulo mb-1 flex items-center gap-1">
+                <ScanLine size={14} /> Linha digitável ou código de barras *
+              </span>
+              <input
+                ref={inputLinhaRef}
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                className="input w-full"
+                placeholder="44, 47 ou 48 dígitos"
+                value={formReceberBoleto.linha}
+                onChange={(event) => alterarLinhaReceberBoleto(event.target.value)}
+              />
+              <div className="mt-2 space-y-1 text-xs text-slate-500">
+                <p>Formato identificado: {formatoBoletoPreview ? formatoBoletoPreview : "aguardando leitura"}</p>
+                <p>Valor validado: {linhaNormalizadaPreview ?? "—"}</p>
+                {identificandoCodigoBoleto && <p>Identificando código do boleto...</p>}
+              </div>
+            </label>
+
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              Esta validação confere o formato e os dígitos verificadores. Antes de pagar, confirme no banco o nome e o CNPJ do beneficiário.
+            </div>
+
+            {erroReceberBoleto && (
+              <div className="rounded-card border border-erro bg-erro-clara px-3 py-3 text-sm font-medium text-erro">
+                {erroReceberBoleto}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn-secundario" onClick={fecharReceberBoleto} disabled={processandoRecebimentoBoleto}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario" disabled={processandoRecebimentoBoleto || !formReceberBoleto.arquivo}>
+                <Upload size={16} /> {processandoRecebimentoBoleto ? "Recebendo..." : "Receber boleto"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {codigoAmpliado && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 px-3 py-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setCodigoAmpliado(fecharCodigoAmpliado());
+            }
+          }}
+          role="presentation"
+        >
+          <div className="w-[92vw] max-w-[1320px] rounded-card border border-slate-300 bg-white p-4 shadow-lg sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-base font-bold text-slate-900">{codigoAmpliado.fornecedor}</p>
+                <p className="text-sm text-slate-700">Valor {moeda(codigoAmpliado.valor)} · Vencimento {dataBR(codigoAmpliado.vencimento)}</p>
+              </div>
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={() => setCodigoAmpliado(fecharCodigoAmpliado())}
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="mt-4 flex w-full justify-center overflow-hidden rounded-card border border-slate-200 bg-white px-6 py-4">
+              {configuracaoCodigoAmpliado ? (
+                <svg
+                  aria-label="Codigo de barras ampliado"
+                  role="img"
+                  viewBox={configuracaoCodigoAmpliado.viewBox}
+                  className="h-[160px] w-full max-w-[1400px]"
+                  preserveAspectRatio="xMidYMid meet"
+                  shapeRendering="crispEdges"
+                >
+                  <rect x={0} y={0} width="100%" height="100%" fill="white" />
+                  {configuracaoCodigoAmpliado.retangulos.map((barra, indice) => (
+                    <rect
+                      key={`barra-ampliada-${indice}`}
+                      x={barra.x}
+                      y={0}
+                      width={barra.largura}
+                      height={configuracaoCodigoAmpliado.altura}
+                      fill="black"
+                    />
+                  ))}
+                </svg>
+              ) : (
+                <p className="text-sm text-slate-600">Codigo indisponivel para renderizacao.</p>
+              )}
+            </div>
+
+            <p className="mt-3 text-sm text-slate-700">Linha: {mascararLinhaDigitavel(codigoAmpliado.codigoCanonico, true)}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

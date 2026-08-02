@@ -1,0 +1,352 @@
+"use client";
+
+import { useMemo, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { Plus, Users } from "lucide-react";
+import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
+import { mutate, uid, useDB } from "@/lib/data";
+import {
+  FUNCOES_OPERACIONAIS,
+  TIPOS_PESSOA_RH,
+  permissoesPorPapel,
+  permissoesVazias,
+  rotuloFuncao,
+  rotuloTipoPessoa,
+} from "@/lib/domain/rh";
+import { podeVerValores, usePapel } from "@/lib/roles";
+import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
+
+type FormNovaPessoa = {
+  nome: string;
+  tipo: TipoPessoaRH;
+  funcao: FuncaoOperacional;
+  funcao_custom: string;
+  cargo: string;
+  telefone: string;
+  cpf: string;
+  observacao: string;
+  tem_acesso_sistema: boolean;
+  login: string;
+  senha: string;
+  papel_sistema: Papel;
+};
+
+function formVazio(): FormNovaPessoa {
+  return {
+    nome: "",
+    tipo: "colaborador",
+    funcao: "salao",
+    funcao_custom: "",
+    cargo: "",
+    telefone: "",
+    cpf: "",
+    observacao: "",
+    tem_acesso_sistema: false,
+    login: "",
+    senha: "demo123",
+    papel_sistema: "lider",
+  };
+}
+
+function BadgeTipo({ tipo }: { tipo: TipoPessoaRH }) {
+  const cor =
+    tipo === "colaborador" ? "verde" : tipo === "intermitente" ? "azul" : tipo === "entregador" ? "laranja" : "cinza";
+  return <Badge cor={cor}>{rotuloTipoPessoa(tipo)}</Badge>;
+}
+
+export default function RhPage() {
+  const db = useDB();
+  const { papel } = usePapel();
+  const [busca, setBusca] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState<TipoPessoaRH | "todos">("todos");
+  const [form, setForm] = useState<FormNovaPessoa | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const podeGerirRh = podeVerValores(papel);
+
+  const lista = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    return (db.pessoas ?? [])
+      .filter((p) => p.ativo)
+      .filter((p) => (filtroTipo === "todos" ? true : p.tipo === filtroTipo))
+      .filter((p) => {
+        if (!termo) return true;
+        return [p.nome, p.cargo, p.telefone, p.cpf, p.login, rotuloFuncao(p), rotuloTipoPessoa(p.tipo)]
+          .filter(Boolean)
+          .some((campo) => String(campo).toLowerCase().includes(termo));
+      })
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  }, [busca, db.pessoas, filtroTipo]);
+
+  if (!podeGerirRh) {
+    return (
+      <div className="mx-auto max-w-lg">
+        <TituloPagina titulo="RH — Pessoas" />
+        <Card className="flex flex-col items-center gap-3 py-10 text-center">
+          <Users size={48} className="text-slate-400" />
+          <p className="text-lg font-bold">Área restrita</p>
+          <p className="text-sm text-slate-600">Somente dono e gerente podem gerenciar o RH nesta fase.</p>
+        </Card>
+      </div>
+    );
+  }
+
+  function salvar(e: FormEvent) {
+    e.preventDefault();
+    if (!form) return;
+    const nome = form.nome.trim();
+    if (!nome) {
+      setErro("Informe o nome.");
+      return;
+    }
+    if (form.tem_acesso_sistema && !form.login.trim()) {
+      setErro("Informe o login para quem terá acesso ao sistema.");
+      return;
+    }
+
+    const agora = new Date().toISOString();
+    const permissoes = form.tem_acesso_sistema ? permissoesPorPapel(form.papel_sistema) : permissoesVazias();
+
+    mutate((banco) => {
+      const pessoa: PessoaRH = {
+        id: uid("pes"),
+        nome,
+        tipo: form.tipo,
+        funcao: form.funcao,
+        funcao_custom: form.funcao === "custom" ? form.funcao_custom.trim() || undefined : undefined,
+        cargo: form.cargo.trim() || undefined,
+        telefone: form.telefone.trim() || undefined,
+        cpf: form.cpf.trim() || undefined,
+        observacao: form.observacao.trim() || undefined,
+        tem_acesso_sistema: form.tem_acesso_sistema,
+        login: form.tem_acesso_sistema ? form.login.trim().toLowerCase() : undefined,
+        senha: form.tem_acesso_sistema ? form.senha || "demo123" : undefined,
+        papel_sistema: form.tem_acesso_sistema ? form.papel_sistema : undefined,
+        permissoes,
+        ativo: true,
+        criado_em: agora,
+        atualizado_em: agora,
+        contrato_assinado: form.tipo === "colaborador" ? true : false,
+        esocial_ok: form.tipo === "colaborador" ? true : false,
+      };
+
+      if (form.tem_acesso_sistema) {
+        const perfilId = uid("perfil");
+        banco.perfis.push({
+          id: perfilId,
+          nome,
+          papel: form.papel_sistema,
+          ativo: true,
+        });
+        pessoa.perfil_id = perfilId;
+      }
+
+      banco.pessoas.push(pessoa);
+    });
+
+    setForm(null);
+    setErro(null);
+  }
+
+  return (
+    <div>
+      <TituloPagina
+        titulo="RH — Pessoas"
+        subtitulo="Colaboradores, intermitentes e entregadores. Escalas e pagamentos vêm na próxima fase."
+        acao={
+          <button type="button" className="btn-primario" onClick={() => setForm(formVazio())}>
+            <Plus size={16} /> Nova pessoa
+          </button>
+        }
+      />
+
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <label className="block min-w-[220px] flex-1">
+          <span className="rotulo mb-1 block">Buscar</span>
+          <input
+            className="input w-full"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Nome, cargo, telefone, login…"
+          />
+        </label>
+        <label className="block w-full sm:w-56">
+          <span className="rotulo mb-1 block">Tipo</span>
+          <select
+            className="input w-full"
+            value={filtroTipo}
+            onChange={(e) => setFiltroTipo(e.target.value as TipoPessoaRH | "todos")}
+          >
+            <option value="todos">Todos</option>
+            {TIPOS_PESSOA_RH.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.rotulo}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {lista.length === 0 ? (
+        <Vazio mensagem="Nenhuma pessoa encontrada." />
+      ) : (
+        <div className="grid gap-3">
+          {lista.map((pessoa) => (
+            <Link key={pessoa.id} href={`/rh/${pessoa.id}`} className="block">
+              <Card className="transition-colors hover:border-primaria/40 hover:bg-amber-50/40">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-lg font-bold text-slate-900">{pessoa.nome}</p>
+                    <p className="text-sm text-slate-600">
+                      {rotuloFuncao(pessoa)}
+                      {pessoa.cargo ? ` · ${pessoa.cargo}` : ""}
+                    </p>
+                    {pessoa.telefone && <p className="text-sm text-slate-500">{pessoa.telefone}</p>}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <BadgeTipo tipo={pessoa.tipo} />
+                    {pessoa.tem_acesso_sistema ? (
+                      <Badge cor="verde">Acesso ao sistema</Badge>
+                    ) : (
+                      <Badge cor="cinza">Sem login</Badge>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      <Modal aberto={form !== null} titulo="Nova pessoa" onFechar={() => setForm(null)} fecharAoClicarFundo={false}>
+        {form && (
+          <form onSubmit={salvar} className="space-y-3">
+            <Campo rotulo="Nome *">
+              <input
+                className="campo"
+                required
+                value={form.nome}
+                onChange={(e) => setForm({ ...form, nome: e.target.value })}
+              />
+            </Campo>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Campo rotulo="Tipo *">
+                <select
+                  className="campo"
+                  value={form.tipo}
+                  onChange={(e) => setForm({ ...form, tipo: e.target.value as TipoPessoaRH })}
+                >
+                  {TIPOS_PESSOA_RH.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.rotulo}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo rotulo="Função *">
+                <select
+                  className="campo"
+                  value={form.funcao}
+                  onChange={(e) => setForm({ ...form, funcao: e.target.value as FuncaoOperacional })}
+                >
+                  {FUNCOES_OPERACIONAIS.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.rotulo}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+            </div>
+            {form.funcao === "custom" && (
+              <Campo rotulo="Função personalizada *">
+                <input
+                  className="campo"
+                  required
+                  value={form.funcao_custom}
+                  onChange={(e) => setForm({ ...form, funcao_custom: e.target.value })}
+                />
+              </Campo>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Campo rotulo="Cargo">
+                <input className="campo" value={form.cargo} onChange={(e) => setForm({ ...form, cargo: e.target.value })} />
+              </Campo>
+              <Campo rotulo="Telefone">
+                <input
+                  className="campo"
+                  value={form.telefone}
+                  onChange={(e) => setForm({ ...form, telefone: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="CPF">
+                <input className="campo" value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} />
+              </Campo>
+            </div>
+            <Campo rotulo="Observação">
+              <textarea
+                className="campo min-h-20"
+                value={form.observacao}
+                onChange={(e) => setForm({ ...form, observacao: e.target.value })}
+              />
+            </Campo>
+
+            <label className="flex items-start gap-2 rounded-card border border-slate-200 bg-white px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.tem_acesso_sistema}
+                onChange={(e) => setForm({ ...form, tem_acesso_sistema: e.target.checked })}
+              />
+              <span>Criar login para acessar o ComprasChef (credenciais de demonstração)</span>
+            </label>
+
+            {form.tem_acesso_sistema && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Campo rotulo="Login *">
+                  <input
+                    className="campo"
+                    required
+                    value={form.login}
+                    onChange={(e) => setForm({ ...form, login: e.target.value })}
+                  />
+                </Campo>
+                <Campo rotulo="Senha (demo)">
+                  <input
+                    className="campo"
+                    type="text"
+                    value={form.senha}
+                    onChange={(e) => setForm({ ...form, senha: e.target.value })}
+                  />
+                </Campo>
+                <Campo rotulo="Papel no sistema">
+                  <select
+                    className="campo"
+                    value={form.papel_sistema}
+                    onChange={(e) => setForm({ ...form, papel_sistema: e.target.value as Papel })}
+                  >
+                    <option value="dono">Dono</option>
+                    <option value="gerente">Gerente</option>
+                    <option value="lider">Líder</option>
+                    <option value="caixa">Caixa</option>
+                  </select>
+                </Campo>
+              </div>
+            )}
+
+            {erro && (
+              <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">{erro}</p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secundario" onClick={() => setForm(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                Salvar
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+    </div>
+  );
+}

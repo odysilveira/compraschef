@@ -17,13 +17,21 @@ recebimento com leitor de código, fotos e divergências → entrada no estoque.
 
 **Estoque por CAIXAS físicas com QR fixo**: cada caixa registra produto, quantidade, data,
 validade e local (freezer/geladeira/estoque seco). O sistema indica qual caixa usar primeiro
-(FIFO) e onde está. Porcionamentos da cozinha são empacotados em **sacos (sc)**; validade
+(FEFO por validade; FIFO por antiguidade no desempate) e onde está. Porcionamentos da cozinha são empacotados em **sacos (sc)**; validade
 sugerida pelo destino (freezer +3 meses, geladeira +5 dias). Balanço por leitura de QR.
+O saldo canônico fica em `lotes_estoque`: recebimento ou produção cria um lote ainda que ele
+aguarde separação física. Um lote pode ser dividido entre várias caixas por `alocacoes_caixa`,
+sem criar novas entradas. Estoque seco conta unidades; produzidos contam sacos/porções G ou P.
+Lotes de produção registram `porcionado_por_id`. No balanço, cada leitura de caixa seguida da
+quantidade restante atualiza imediatamente caixa, lote e saldo, gerando ajuste auditável.
 
 **Integração futura com o ERP do parceiro (chamado "EASE EAT", restaurante "Italin House")
 pelo Caminho A**: o ComprasChef é a fonte da verdade do estoque e envia totais ao ERP;
 consulta fichas técnicas e vendas de lá. Por isso produtos/fornecedores/unidades têm campo
-`codigo_externo` (códigos compartilhados). Ainda não conectado — ver `lib/integracao/`.
+`codigo_externo` (códigos do EaseEat). Esses códigos nunca substituem o `id` interno. O código
+`cProd` da NF-e pertence ao catálogo de cada fornecedor e fica em
+`fornecedor_produtos.codigo_produto_fornecedor`; EAN/GTIN também é armazenado separadamente.
+Ainda não conectado — ver `lib/integracao/`.
 
 ## 2. Stack
 
@@ -49,6 +57,11 @@ localStorage**, com a MESMA forma dos tipos do Supabase, para trocar depois sem 
   `consumoMedioDiario`, `precoMedioHistorico`, `precoForaDoPadrao`, `siglaParaItem`, lookups).
   `atualizarComNovidades()` faz "upsert" idempotente de itens novos do catálogo em bancos
   já salvos no navegador (para o demo evoluir sem perder o que o usuário digitou).
+- Etapa 1C (fichas técnicas): arquitetura em 3 camadas.
+  Domínio puro em `lib/domain/fichas-tecnicas.ts` (sem localStorage),
+  contrato em `lib/domain/fichas-tecnicas-repositorio.ts` e adaptador local em
+  `lib/data/fichas-tecnicas-repositorio-local.ts`, usando o mesmo objeto central do banco mock.
+  Migração retrocompatível no `lib/data/index.ts` inicializa coleções ausentes de fichas.
 - `lib/supabase.ts` — cliente pronto; ativa sozinho quando `.env.local` tiver as chaves
   (`supabaseConfigurado`). Enquanto vazio, usa mock.
 - `lib/roles.tsx` — papéis (dono/gerente/lider/caixa) via seletor no rodapé do menu
@@ -86,12 +99,15 @@ Modal, Tabela, Vazio, StatCard).
 - **Recebimento**: 3 caminhos — (a) pelo pedido; (b) importar XML da NF-e e confirmar item a
   item; (c) sem XML: ler QR da DANFE (extrai chave/CNPJ/nº) ou preencher à mão (hortifrúti).
   Também lista **DANFEs importadas da Receita** (mock, via `itens_importados` no seed) para
-  escolher qual conferir. Conferência OK libera boletos travados; boleto suspeito (CNPJ
-  divergente) permanece bloqueado.
-- **Estoque**: FIFO com aviso ao escanear caixa que não é a mais antiga; validade obrigatória
+  escolher qual conferir. Na conferência do XML, fornecedor e produtos desconhecidos podem
+  ser cadastrados sem sair da nota; o vínculo grava `cProd`, EAN, unidade e conversão para
+  reconhecer as próximas notas automaticamente. Conferência OK libera boletos travados;
+  boleto suspeito (CNPJ divergente) permanece bloqueado.
+- **Estoque**: FEFO/FIFO com aviso ao escanear caixa não prioritária; validade obrigatória
   ao encher; painel de vencimentos com janela configurável (hoje/3/7/15 dias ou data escolhida);
   balanço por QR.
 - **Financeiro**: agenda de boletos, proteção anti-golpe do boleto.
+  Regra de negócio: "pagamento informado" não significa "pago" definitivo; a baixa final depende da conciliação bancária.
 
 ## 6. Como rodar
 

@@ -5,9 +5,10 @@
 
 import type { Local, Produto, Unidade } from "@/lib/types";
 
-export const UNIDADE_SACO: Unidade = { id: "un-saco", nome: "saco (porção)", sigla: "sc" };
+export const UNIDADE_SACO: Unidade = { id: "un-saco", codigo_externo: "SC", nome: "saco (porção)", sigla: "sc" };
 
 export const LOCAL_ESTOQUE_SECO: Local = { id: "loc-estoque-seco", nome: "Estoque seco", tipo: "despensa" };
+export const LOCAL_GELADEIRA_2: Local = { id: "loc-geladeira2", nome: "Geladeira 2", tipo: "geladeira" };
 
 /** Regra da casa: vencimento sugerido pelo destino do saco. */
 export const VALIDADE_FREEZER_DIAS = 90; // 3 meses
@@ -62,6 +63,8 @@ export function produtosReais(): Produto[] {
         unidade_uso_id: UNIDADE_SACO.id,
         fator_conversao: 1,
         estoque_minimo: 0,
+        controla_lote: false,
+        controla_validade: false,
         validade_padrao_dias: VALIDADE_FREEZER_DIAS,
         ativo: true,
       });
@@ -78,6 +81,8 @@ export function produtosReais(): Produto[] {
         unidade_uso_id: UNIDADE_SACO.id,
         fator_conversao: 1,
         estoque_minimo: 0,
+        controla_lote: false,
+        controla_validade: false,
         validade_padrao_dias: VALIDADE_GELADEIRA_DIAS,
         ativo: true,
       });
@@ -93,6 +98,8 @@ export function produtosReais(): Produto[] {
       unidade_uso_id: "un-un",
       fator_conversao: 1,
       estoque_minimo: 0,
+      controla_lote: false,
+      controla_validade: false,
       validade_padrao_dias: VALIDADE_ESTOQUE_SECO_DIAS,
       ativo: true,
     });

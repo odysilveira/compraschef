@@ -104,15 +104,20 @@ export function Modal({
   titulo,
   onFechar,
   children,
+  fecharAoClicarFundo = true,
 }: {
   aberto: boolean;
   titulo: string;
   onFechar: () => void;
   children: ReactNode;
+  fecharAoClicarFundo?: boolean;
 }) {
   if (!aberto) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={onFechar}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
+      onClick={fecharAoClicarFundo ? onFechar : undefined}
+    >
       <div
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-card bg-superficie p-5 shadow-xl sm:rounded-card"
         onClick={(e) => e.stopPropagation()}

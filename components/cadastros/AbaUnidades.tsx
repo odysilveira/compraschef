@@ -15,7 +15,7 @@ export function AbaUnidades() {
   const [form, setForm] = useState<Unidade | null>(null);
 
   const lista = db.unidades
-    .filter((u) => contem(busca, u.nome, u.sigla))
+    .filter((u) => contem(busca, u.nome, u.sigla, u.codigo_externo))
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
   function salvar(e: FormEvent) {
@@ -60,7 +60,7 @@ export function AbaUnidades() {
         <Vazio mensagem="Nenhuma unidade encontrada." />
       ) : (
         <div className="card p-0 sm:p-2">
-          <Tabela cabecalho={["Nome", "Sigla"]}>
+          <Tabela cabecalho={["Nome", "Sigla", "Código EaseEat"]}>
             {lista.map((u) => (
               <tr
                 key={u.id}
@@ -69,6 +69,7 @@ export function AbaUnidades() {
               >
                 <td className="px-3 py-2.5 font-medium">{u.nome}</td>
                 <td className="px-3 py-2.5">{u.sigla}</td>
+                <td className="px-3 py-2.5 text-stone-600">{u.codigo_externo ?? "—"}</td>
               </tr>
             ))}
           </Tabela>
@@ -98,6 +99,14 @@ export function AbaUnidades() {
                 placeholder="ex.: kg"
                 value={form.sigla}
                 onChange={(e) => setForm({ ...form, sigla: e.target.value })}
+              />
+            </Campo>
+            <Campo rotulo="Código no EaseEat">
+              <input
+                className="campo"
+                placeholder="ex.: KG"
+                value={form.codigo_externo ?? ""}
+                onChange={(e) => setForm({ ...form, codigo_externo: e.target.value || undefined })}
               />
             </Campo>
             <div className="sm:col-span-2">

@@ -512,9 +512,14 @@ export default function RhPerfilPage() {
         <Card className="space-y-3">
           <h2 className="text-base font-bold">Em breve neste perfil</h2>
           <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+            <li>
+              <Link href="/rh/pagamentos" className="text-primaria-escura underline">
+                Pagamentos com conciliação bancária
+              </Link>{" "}
+              (já disponível)
+            </li>
             <li>Escala e calendário dos próximos 28 dias</li>
             <li>Convocações de intermitentes (WhatsApp + prova)</li>
-            <li>Pagamentos com conciliação bancária</li>
             <li>Avaliações e histórico de atividades</li>
             <li>Porcionamentos / feituras (quando função = cozinha)</li>
           </ul>

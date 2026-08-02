@@ -1,0 +1,598 @@
+"use client";
+
+import { useMemo, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { CircleCheckBig, Plus, TriangleAlert, WalletCards } from "lucide-react";
+import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
+import { mutate, uid, useDB } from "@/lib/data";
+import {
+  TIPOS_PAGAMENTO_PESSOA,
+  conciliarPagamentoPessoa,
+  informarPagamentoPessoa,
+  liberarPagamentoPessoa,
+  registrarDivergenciaPagamentoPessoa,
+  rotuloStatusPagamentoPessoa,
+  rotuloTipoPagamentoPessoa,
+} from "@/lib/domain/pagamentos-pessoas";
+import { podeVerValores, usePapel } from "@/lib/roles";
+import { dataBR, moeda } from "@/lib/format";
+import type { PagamentoPessoa, TipoPagamentoPessoa } from "@/lib/types";
+
+function hojeISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function competenciaAtual(): string {
+  return hojeISO().slice(0, 7);
+}
+
+type FormNovo = {
+  pessoa_id: string;
+  tipo: TipoPagamentoPessoa;
+  descricao: string;
+  competencia: string;
+  vencimento: string;
+  valor: string;
+  horas: string;
+  valor_hora: string;
+};
+
+type FormInformar = {
+  dataPagamento: string;
+  valorPago: string;
+  bancoConta: string;
+  responsavel: string;
+  observacao: string;
+};
+
+function formNovoVazio(pessoaId = ""): FormNovo {
+  return {
+    pessoa_id: pessoaId,
+    tipo: "salario",
+    descricao: "",
+    competencia: competenciaAtual(),
+    vencimento: hojeISO(),
+    valor: "",
+    horas: "",
+    valor_hora: "",
+  };
+}
+
+function BadgeStatusPagamento({ pagamento }: { pagamento: PagamentoPessoa }) {
+  const cor =
+    pagamento.status === "pago"
+      ? "verde"
+      : pagamento.status === "aguardando_conciliacao"
+        ? "azul"
+        : pagamento.status === "liberado"
+          ? "laranja"
+          : "cinza";
+  return <Badge cor={cor}>{rotuloStatusPagamentoPessoa(pagamento.status)}</Badge>;
+}
+
+export default function RhPagamentosPage() {
+  const db = useDB();
+  const { papel } = usePapel();
+  const [filtro, setFiltro] = useState<"abertos" | "aguardando" | "pagos" | "todos">("abertos");
+  const [formNovo, setFormNovo] = useState<FormNovo | null>(null);
+  const [erroNovo, setErroNovo] = useState<string | null>(null);
+  const [mensagem, setMensagem] = useState<string | null>(null);
+
+  const [informarId, setInformarId] = useState<string | null>(null);
+  const [formInformar, setFormInformar] = useState<FormInformar>({
+    dataPagamento: hojeISO(),
+    valorPago: "",
+    bancoConta: "",
+    responsavel: "usuário local",
+    observacao: "",
+  });
+  const [erroInformar, setErroInformar] = useState<string | null>(null);
+
+  const [conciliarId, setConciliarId] = useState<string | null>(null);
+  const [dataLiquidacao, setDataLiquidacao] = useState(hojeISO());
+  const [erroConciliar, setErroConciliar] = useState<string | null>(null);
+
+  const [divergenciaId, setDivergenciaId] = useState<string | null>(null);
+  const [motivoDivergencia, setMotivoDivergencia] = useState("");
+  const [erroDivergencia, setErroDivergencia] = useState<string | null>(null);
+
+  const pessoasAtivas = useMemo(
+    () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
+    [db.pessoas]
+  );
+
+  const nomePessoa = (id: string) => db.pessoas.find((p) => p.id === id)?.nome ?? "—";
+
+  const lista = useMemo(() => {
+    const todos = [...(db.pagamentos_pessoas ?? [])];
+    const filtrados = todos.filter((p) => {
+      if (filtro === "todos") return true;
+      if (filtro === "aguardando") return p.status === "aguardando_conciliacao";
+      if (filtro === "pagos") return p.status === "pago";
+      return p.status === "previsto" || p.status === "liberado" || p.status === "aguardando_conciliacao";
+    });
+    return filtrados.sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  }, [db.pagamentos_pessoas, filtro]);
+
+  const totais = useMemo(() => {
+    const itens = db.pagamentos_pessoas ?? [];
+    return {
+      aguardando: itens.filter((p) => p.status === "aguardando_conciliacao").reduce((s, p) => s + (p.pagamento_valor ?? p.valor), 0),
+      pagos: itens.filter((p) => p.status === "pago").reduce((s, p) => s + (p.pagamento_valor ?? p.valor), 0),
+      abertos: itens
+        .filter((p) => p.status === "previsto" || p.status === "liberado")
+        .reduce((s, p) => s + p.valor, 0),
+    };
+  }, [db.pagamentos_pessoas]);
+
+  if (!podeVerValores(papel)) {
+    return (
+      <div className="mx-auto max-w-lg">
+        <TituloPagina titulo="Pagamentos de pessoas" />
+        <Card className="py-10 text-center">
+          <WalletCards size={40} className="mx-auto text-slate-400" />
+          <p className="mt-3 font-bold">Área restrita</p>
+        </Card>
+      </div>
+    );
+  }
+
+  function salvarNovo(e: FormEvent) {
+    e.preventDefault();
+    if (!formNovo) return;
+    if (!formNovo.pessoa_id) {
+      setErroNovo("Selecione a pessoa.");
+      return;
+    }
+    const valor = Number(formNovo.valor.replace(",", "."));
+    if (!Number.isFinite(valor) || valor <= 0) {
+      setErroNovo("Informe um valor válido.");
+      return;
+    }
+    const agora = new Date().toISOString();
+    const horas = formNovo.horas ? Number(formNovo.horas.replace(",", ".")) : undefined;
+    const valorHora = formNovo.valor_hora ? Number(formNovo.valor_hora.replace(",", ".")) : undefined;
+
+    mutate((banco) => {
+      banco.pagamentos_pessoas.push({
+        id: uid("pagp"),
+        pessoa_id: formNovo.pessoa_id,
+        tipo: formNovo.tipo,
+        descricao: formNovo.descricao.trim() || undefined,
+        competencia: formNovo.competencia || undefined,
+        vencimento: formNovo.vencimento,
+        valor: Number(valor.toFixed(2)),
+        horas: Number.isFinite(horas) ? horas : undefined,
+        valor_hora: Number.isFinite(valorHora) ? valorHora : undefined,
+        status: "previsto",
+        criado_em: agora,
+        atualizado_em: agora,
+      });
+    });
+    setFormNovo(null);
+    setErroNovo(null);
+    setMensagem("Pagamento lançado como previsto.");
+  }
+
+  function abrirInformar(pagamento: PagamentoPessoa) {
+    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
+    setInformarId(pagamento.id);
+    setFormInformar({
+      dataPagamento: hojeISO(),
+      valorPago: pagamento.valor.toFixed(2),
+      bancoConta: pessoa?.chave_pix ? `PIX ${pessoa.chave_pix}` : "",
+      responsavel: "usuário local",
+      observacao: "",
+    });
+    setErroInformar(null);
+  }
+
+  function confirmarInformar(e: FormEvent) {
+    e.preventDefault();
+    if (!informarId) return;
+    const valorPago = Number(formInformar.valorPago.replace(",", "."));
+    const proximo = structuredClone(db);
+    const resultado = informarPagamentoPessoa(proximo, informarId, {
+      dataPagamento: formInformar.dataPagamento,
+      valorPago,
+      bancoConta: formInformar.bancoConta,
+      responsavel: formInformar.responsavel,
+      observacao: formInformar.observacao,
+    });
+    if (!resultado.sucesso) {
+      setErroInformar(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setInformarId(null);
+    setMensagem("Pagamento informado. Aguardando conciliação bancária.");
+  }
+
+  function confirmarConciliar(e: FormEvent) {
+    e.preventDefault();
+    if (!conciliarId) return;
+    const proximo = structuredClone(db);
+    const resultado = conciliarPagamentoPessoa(proximo, conciliarId, {
+      dataLiquidacao,
+      responsavel: "usuário local",
+    });
+    if (!resultado.sucesso) {
+      setErroConciliar(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setConciliarId(null);
+    setMensagem("Pagamento conciliado e marcado como pago.");
+  }
+
+  function confirmarDivergencia(e: FormEvent) {
+    e.preventDefault();
+    if (!divergenciaId) return;
+    const proximo = structuredClone(db);
+    const resultado = registrarDivergenciaPagamentoPessoa(proximo, divergenciaId, {
+      motivo: motivoDivergencia,
+      responsavel: "usuário local",
+    });
+    if (!resultado.sucesso) {
+      setErroDivergencia(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setDivergenciaId(null);
+    setMotivoDivergencia("");
+    setMensagem("Divergência registrada. Segue aguardando conciliação.");
+  }
+
+  const pagamentoInformar = informarId ? db.pagamentos_pessoas.find((p) => p.id === informarId) : null;
+  const pagamentoConciliar = conciliarId ? db.pagamentos_pessoas.find((p) => p.id === conciliarId) : null;
+  const pagamentoDivergencia = divergenciaId ? db.pagamentos_pessoas.find((p) => p.id === divergenciaId) : null;
+
+  return (
+    <div>
+      <TituloPagina
+        titulo="Pagamentos de pessoas"
+        subtitulo="Informar pagamento ≠ pago. A baixa definitiva depende da conciliação bancária."
+        acao={
+          <button type="button" className="btn-primario" onClick={() => setFormNovo(formNovoVazio(pessoasAtivas[0]?.id ?? ""))}>
+            <Plus size={16} /> Novo pagamento
+          </button>
+        }
+      />
+
+      {mensagem && (
+        <div className="mb-4 rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
+          {mensagem}
+        </div>
+      )}
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <Card className="py-3">
+          <p className="rotulo">Abertos</p>
+          <p className="text-xl font-bold">{moeda(totais.abertos)}</p>
+        </Card>
+        <Card className="py-3">
+          <p className="rotulo text-blue-700">Aguardando conciliação</p>
+          <p className="text-xl font-bold text-blue-700">{moeda(totais.aguardando)}</p>
+        </Card>
+        <Card className="py-3">
+          <p className="rotulo text-emerald-700">Pagos</p>
+          <p className="text-xl font-bold text-emerald-700">{moeda(totais.pagos)}</p>
+        </Card>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {(
+          [
+            ["abertos", "Abertos"],
+            ["aguardando", "Aguardando"],
+            ["pagos", "Pagos"],
+            ["todos", "Todos"],
+          ] as const
+        ).map(([id, rotulo]) => (
+          <button key={id} type="button" className={filtro === id ? "btn-primario" : "btn-secundario"} onClick={() => setFiltro(id)}>
+            {rotulo}
+          </button>
+        ))}
+        <Link href="/rh" className="btn-secundario ml-auto">
+          Ver pessoas
+        </Link>
+      </div>
+
+      {lista.length === 0 ? (
+        <Vazio mensagem="Nenhum pagamento neste filtro." />
+      ) : (
+        <div className="space-y-3">
+          {lista.map((pagamento) => (
+            <Card key={pagamento.id} className="space-y-2">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-bold text-slate-900">{nomePessoa(pagamento.pessoa_id)}</p>
+                  <p className="text-sm text-slate-600">
+                    {rotuloTipoPagamentoPessoa(pagamento.tipo)}
+                    {pagamento.descricao ? ` · ${pagamento.descricao}` : ""}
+                  </p>
+                  <p className="text-xl font-bold">{moeda(pagamento.pagamento_valor ?? pagamento.valor)}</p>
+                  <p className="text-sm text-slate-500">Vencimento {dataBR(pagamento.vencimento)}</p>
+                  {pagamento.status === "aguardando_conciliacao" && pagamento.pagamento_banco_conta && (
+                    <p className="text-sm text-blue-800">
+                      Informado em {pagamento.pagamento_data ? dataBR(pagamento.pagamento_data) : "—"} ·{" "}
+                      {pagamento.pagamento_banco_conta}
+                    </p>
+                  )}
+                  {pagamento.conciliacao_divergente && pagamento.conciliacao_divergencia_motivo && (
+                    <p className="text-sm font-medium text-destaque">Divergência: {pagamento.conciliacao_divergencia_motivo}</p>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <BadgeStatusPagamento pagamento={pagamento} />
+                  {pagamento.conciliacao_divergente && pagamento.status === "aguardando_conciliacao" && (
+                    <Badge cor="laranja">Divergente</Badge>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {pagamento.status === "previsto" && (
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={() => {
+                      const proximo = structuredClone(db);
+                      const r = liberarPagamentoPessoa(proximo, pagamento.id);
+                      if (r.sucesso) {
+                        mutate((atual) => Object.assign(atual, proximo));
+                        setMensagem("Pagamento liberado.");
+                      }
+                    }}
+                  >
+                    Liberar
+                  </button>
+                )}
+                {(pagamento.status === "previsto" || pagamento.status === "liberado") && (
+                  <button type="button" className="btn-primario" onClick={() => abrirInformar(pagamento)}>
+                    Informar pagamento
+                  </button>
+                )}
+                {pagamento.status === "aguardando_conciliacao" && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-primario"
+                      onClick={() => {
+                        setConciliarId(pagamento.id);
+                        setDataLiquidacao(pagamento.pagamento_data || hojeISO());
+                        setErroConciliar(null);
+                      }}
+                    >
+                      <CircleCheckBig size={16} /> Conciliar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      onClick={() => {
+                        setDivergenciaId(pagamento.id);
+                        setMotivoDivergencia("");
+                        setErroDivergencia(null);
+                      }}
+                    >
+                      <TriangleAlert size={16} /> Divergente
+                    </button>
+                  </>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Modal aberto={formNovo !== null} titulo="Novo pagamento" onFechar={() => setFormNovo(null)} fecharAoClicarFundo={false}>
+        {formNovo && (
+          <form onSubmit={salvarNovo} className="space-y-3">
+            <Campo rotulo="Pessoa *">
+              <select
+                className="campo"
+                required
+                value={formNovo.pessoa_id}
+                onChange={(e) => setFormNovo({ ...formNovo, pessoa_id: e.target.value })}
+              >
+                <option value="">Selecione</option>
+                {pessoasAtivas.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nome}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Campo rotulo="Tipo *">
+                <select
+                  className="campo"
+                  value={formNovo.tipo}
+                  onChange={(e) => setFormNovo({ ...formNovo, tipo: e.target.value as TipoPagamentoPessoa })}
+                >
+                  {TIPOS_PAGAMENTO_PESSOA.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.rotulo}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo rotulo="Competência">
+                <input
+                  type="month"
+                  className="campo"
+                  value={formNovo.competencia}
+                  onChange={(e) => setFormNovo({ ...formNovo, competencia: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Vencimento *">
+                <input
+                  type="date"
+                  className="campo"
+                  required
+                  value={formNovo.vencimento}
+                  onChange={(e) => setFormNovo({ ...formNovo, vencimento: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Valor *">
+                <input
+                  className="campo"
+                  required
+                  inputMode="decimal"
+                  value={formNovo.valor}
+                  onChange={(e) => setFormNovo({ ...formNovo, valor: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Horas (se houver)">
+                <input
+                  className="campo"
+                  inputMode="decimal"
+                  value={formNovo.horas}
+                  onChange={(e) => setFormNovo({ ...formNovo, horas: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Valor-hora (se houver)">
+                <input
+                  className="campo"
+                  inputMode="decimal"
+                  value={formNovo.valor_hora}
+                  onChange={(e) => setFormNovo({ ...formNovo, valor_hora: e.target.value })}
+                />
+              </Campo>
+            </div>
+            <Campo rotulo="Descrição">
+              <input
+                className="campo"
+                value={formNovo.descricao}
+                onChange={(e) => setFormNovo({ ...formNovo, descricao: e.target.value })}
+              />
+            </Campo>
+            {erroNovo && <p className="text-sm font-medium text-erro">{erroNovo}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secundario" onClick={() => setFormNovo(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                Salvar
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(pagamentoInformar)}
+        titulo="Informar pagamento"
+        onFechar={() => setInformarId(null)}
+        fecharAoClicarFundo={false}
+      >
+        {pagamentoInformar && (
+          <form onSubmit={confirmarInformar} className="space-y-3">
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              Informar pagamento não dá baixa final. O título fica em aguardando conciliação.
+            </div>
+            <p className="text-sm text-slate-700">
+              {nomePessoa(pagamentoInformar.pessoa_id)} · {moeda(pagamentoInformar.valor)}
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Campo rotulo="Data *">
+                <input
+                  type="date"
+                  className="campo"
+                  required
+                  value={formInformar.dataPagamento}
+                  onChange={(e) => setFormInformar({ ...formInformar, dataPagamento: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Valor pago *">
+                <input
+                  className="campo"
+                  required
+                  value={formInformar.valorPago}
+                  onChange={(e) => setFormInformar({ ...formInformar, valorPago: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Banco/conta ou PIX *">
+                <input
+                  className="campo"
+                  required
+                  value={formInformar.bancoConta}
+                  onChange={(e) => setFormInformar({ ...formInformar, bancoConta: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Responsável">
+                <input
+                  className="campo"
+                  value={formInformar.responsavel}
+                  onChange={(e) => setFormInformar({ ...formInformar, responsavel: e.target.value })}
+                />
+              </Campo>
+            </div>
+            {erroInformar && <p className="text-sm font-medium text-erro">{erroInformar}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secundario" onClick={() => setInformarId(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                Informar pagamento
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal aberto={Boolean(pagamentoConciliar)} titulo="Conciliar pagamento" onFechar={() => setConciliarId(null)}>
+        {pagamentoConciliar && (
+          <form onSubmit={confirmarConciliar} className="space-y-3">
+            <p className="text-sm text-slate-700">
+              {nomePessoa(pagamentoConciliar.pessoa_id)} ·{" "}
+              {moeda(pagamentoConciliar.pagamento_valor ?? pagamentoConciliar.valor)}
+            </p>
+            <Campo rotulo="Data da liquidação *">
+              <input
+                type="date"
+                className="campo"
+                required
+                value={dataLiquidacao}
+                onChange={(e) => setDataLiquidacao(e.target.value)}
+              />
+            </Campo>
+            {erroConciliar && <p className="text-sm font-medium text-erro">{erroConciliar}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secundario" onClick={() => setConciliarId(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                Conciliar
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal aberto={Boolean(pagamentoDivergencia)} titulo="Registrar divergência" onFechar={() => setDivergenciaId(null)}>
+        {pagamentoDivergencia && (
+          <form onSubmit={confirmarDivergencia} className="space-y-3">
+            <Campo rotulo="Motivo *">
+              <textarea
+                className="campo min-h-24"
+                required
+                value={motivoDivergencia}
+                onChange={(e) => setMotivoDivergencia(e.target.value)}
+              />
+            </Campo>
+            {erroDivergencia && <p className="text-sm font-medium text-erro">{erroDivergencia}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secundario" onClick={() => setDivergenciaId(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                Registrar
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+    </div>
+  );
+}

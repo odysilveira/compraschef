@@ -67,6 +67,44 @@ export interface PessoaRH {
   atualizado_em: string;
 }
 
+export type TipoPagamentoPessoa =
+  | "salario"
+  | "adiantamento"
+  | "vale"
+  | "intermitente_periodo"
+  | "freela_hora"
+  | "freela_servico"
+  | "outro";
+
+export type StatusPagamentoPessoa = "previsto" | "liberado" | "aguardando_conciliacao" | "pago";
+
+export interface PagamentoPessoa {
+  id: string;
+  pessoa_id: string;
+  tipo: TipoPagamentoPessoa;
+  descricao?: string;
+  /** Competência no formato YYYY-MM. */
+  competencia?: string;
+  vencimento: string;
+  valor: number;
+  horas?: number;
+  valor_hora?: number;
+  status: StatusPagamentoPessoa;
+  pagamento_data?: string;
+  pagamento_valor?: number;
+  pagamento_banco_conta?: string;
+  pagamento_responsavel?: string;
+  pagamento_observacao?: string;
+  pagamento_informado_em?: string;
+  conciliado_em?: string;
+  conciliado_por?: string;
+  conciliacao_divergente?: boolean;
+  conciliacao_divergencia_motivo?: string;
+  conciliacao_divergencia_em?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
 export interface Unidade {
   id: string;
   /** Código da unidade no EASE EAT. O id interno continua sendo próprio do ComprasChef. */
@@ -525,6 +563,7 @@ export interface IntegracaoEvento {
 export interface DB {
   perfis: Perfil[];
   pessoas: PessoaRH[];
+  pagamentos_pessoas: PagamentoPessoa[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];

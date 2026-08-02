@@ -404,31 +404,39 @@ export default function RhPerfilPage() {
                 />
               </Campo>
             </div>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={Boolean(editando.contrato_assinado)}
-                  onChange={(e) => atualizar("contrato_assinado", e.target.checked)}
-                />
-                Contrato assinado
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={Boolean(editando.esocial_ok)}
-                  onChange={(e) => atualizar("esocial_ok", e.target.checked)}
-                />
-                eSocial OK
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={editando.ativo}
-                  onChange={(e) => atualizar("ativo", e.target.checked)}
-                />
-                Ativo
-              </label>
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editando.contrato_assinado)}
+                    onChange={(e) => atualizar("contrato_assinado", e.target.checked)}
+                  />
+                  Contrato assinado
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editando.esocial_ok)}
+                    onChange={(e) => atualizar("esocial_ok", e.target.checked)}
+                  />
+                  eSocial OK
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editando.ativo}
+                    onChange={(e) => atualizar("ativo", e.target.checked)}
+                  />
+                  Ativo
+                </label>
+              </div>
+              {(editando.tipo === "intermitente" || editando.tipo === "entregador") && (
+                <p className="text-xs text-slate-600">
+                  Para convocar na escala, contrato assinado e eSocial OK são obrigatórios. O WhatsApp só avisa o
+                  período — não substitui o contrato escrito.
+                </p>
+              )}
             </div>
             <Campo rotulo="Observação">
               <textarea

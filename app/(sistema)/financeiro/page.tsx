@@ -71,6 +71,12 @@ import {
   type SegmentoCodigoBarrasItf,
   type SnapshotPagamentoBoleto,
 } from "@/lib/domain/pagar-boleto";
+import { parseOfx } from "@/lib/domain/extrato-ofx";
+import {
+  aplicarMatchesExtratoBoletos,
+  sugerirMatchesExtratoBoletos,
+  type SugestaoMatchExtrato,
+} from "@/lib/domain/conciliar-extrato";
 import {
   CLASSE_CAIXA_CODIGO_SEM_ROLAGEM,
   CLASSE_GRID_CODIGO_PAGAMENTO,
@@ -487,6 +493,11 @@ export default function FinanceiroPage() {
   const [boletoDivergenciaId, setBoletoDivergenciaId] = useState<string | null>(null);
   const [formDivergenciaBoleto, setFormDivergenciaBoleto] = useState<FormDivergenciaBoletoState>(novaDivergenciaBoletoInicial());
   const [erroDivergenciaBoleto, setErroDivergenciaBoleto] = useState<string | null>(null);
+  const [modalExtratoOfxAberto, setModalExtratoOfxAberto] = useState(false);
+  const [sugestoesExtrato, setSugestoesExtrato] = useState<SugestaoMatchExtrato[]>([]);
+  const [selecionadosExtrato, setSelecionadosExtrato] = useState<Record<string, boolean>>({});
+  const [erroExtratoOfx, setErroExtratoOfx] = useState<string | null>(null);
+  const [processandoExtratoOfx, setProcessandoExtratoOfx] = useState(false);
   const [processandoDivergenciaBoleto, setProcessandoDivergenciaBoleto] = useState(false);
   const inputLinhaRef = useRef<HTMLInputElement | null>(null);
   const execucaoIdentificacaoRef = useRef(0);
@@ -588,6 +599,95 @@ export default function FinanceiroPage() {
     setBoletoDivergenciaId(null);
     setFormDivergenciaBoleto(novaDivergenciaBoletoInicial());
     setErroDivergenciaBoleto(null);
+  }
+
+  function abrirImportarExtratoOfx() {
+    setModalExtratoOfxAberto(true);
+    setSugestoesExtrato([]);
+    setSelecionadosExtrato({});
+    setErroExtratoOfx(null);
+  }
+
+  function fecharImportarExtratoOfx() {
+    if (processandoExtratoOfx) return;
+    setModalExtratoOfxAberto(false);
+    setSugestoesExtrato([]);
+    setSelecionadosExtrato({});
+    setErroExtratoOfx(null);
+  }
+
+  async function aoEscolherArquivoOfx(event: ChangeEvent<HTMLInputElement>) {
+    const arquivo = event.target.files?.[0];
+    event.target.value = "";
+    if (!arquivo) return;
+    setErroExtratoOfx(null);
+    try {
+      const texto = await arquivo.text();
+      const parseado = parseOfx(texto);
+      if (!parseado.ok) {
+        setErroExtratoOfx(parseado.erro);
+        setSugestoesExtrato([]);
+        return;
+      }
+      const sugestoes = sugerirMatchesExtratoBoletos(db, parseado.linhas);
+      setSugestoesExtrato(sugestoes);
+      const sel: Record<string, boolean> = {};
+      for (const s of sugestoes) {
+        if (s.boleto_id && (s.confianca === "exata" || s.confianca === "proxima")) {
+          sel[`${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.boleto_id}`] = s.confianca === "exata";
+        }
+      }
+      setSelecionadosExtrato(sel);
+      if (!sugestoes.some((s) => s.boleto_id)) {
+        setErroExtratoOfx("Extrato lido, mas nenhum débito casou com boleto aguardando conciliação.");
+      }
+    } catch {
+      setErroExtratoOfx("Não foi possível ler o arquivo.");
+    }
+  }
+
+  function confirmarExtratoOfx() {
+    if (processandoExtratoOfx) return;
+    const matches = sugestoesExtrato
+      .filter((s) => {
+        if (!s.boleto_id) return false;
+        const chave = `${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.boleto_id}`;
+        return selecionadosExtrato[chave];
+      })
+      .map((s) => ({
+        boleto_id: s.boleto_id!,
+        dataLiquidacao: s.linha.data,
+        observacao: `OFX: ${s.linha.descricao}`.slice(0, 200),
+      }));
+    if (matches.length === 0) {
+      setErroExtratoOfx("Selecione ao menos um match para conciliar.");
+      return;
+    }
+    setProcessandoExtratoOfx(true);
+    setErroExtratoOfx(null);
+    try {
+      const proximo = structuredClone(db) as DB;
+      const resultado = aplicarMatchesExtratoBoletos(proximo, matches, {
+        responsavel: "usuário local",
+        idFactory: () => uid("bph"),
+      });
+      if (resultado.conciliados === 0) {
+        setErroExtratoOfx(resultado.erros.join(" ") || "Nenhum boleto foi conciliado.");
+        return;
+      }
+      mutate((atual) => {
+        Object.assign(atual, proximo);
+      });
+      setModalExtratoOfxAberto(false);
+      setSugestoesExtrato([]);
+      setSelecionadosExtrato({});
+      setMensagemReceberBoleto(
+        `${resultado.conciliados} boleto(s) conciliado(s) pelo extrato OFX.` +
+          (resultado.erros.length ? ` Alguns falharam: ${resultado.erros[0]}` : "")
+      );
+    } finally {
+      setProcessandoExtratoOfx(false);
+    }
   }
 
   function confirmarConciliarBoleto(event: FormEvent<HTMLFormElement>) {
@@ -1701,9 +1801,14 @@ export default function FinanceiroPage() {
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2>Boletos a vencer</h2>
-            <button type="button" className="btn-primario" onClick={() => abrirImportarBoleto()}>
-              <Upload size={18} /> Importar boleto
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-secundario" onClick={abrirImportarExtratoOfx}>
+                <Upload size={18} /> Importar extrato OFX
+              </button>
+              <button type="button" className="btn-primario" onClick={() => abrirImportarBoleto()}>
+                <Upload size={18} /> Importar boleto
+              </button>
+            </div>
           </div>
 
           {mensagemReceberBoleto && (
@@ -2163,6 +2268,83 @@ export default function FinanceiroPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        aberto={modalExtratoOfxAberto}
+        titulo="Importar extrato OFX"
+        onFechar={fecharImportarExtratoOfx}
+        fecharAoClicarFundo={false}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Exporte o extrato em OFX no internet banking e envie aqui. O ComprasChef sugere casar débitos com boletos em
+            <span className="font-semibold"> aguardando conciliação</span> (valor e data).
+          </p>
+          <label className="block">
+            <span className="rotulo mb-1 block">Arquivo OFX</span>
+            <input
+              type="file"
+              accept=".ofx,.OFX,application/x-ofx,application/ofx,text/xml"
+              className="input w-full py-2"
+              disabled={processandoExtratoOfx}
+              onChange={(e) => void aoEscolherArquivoOfx(e)}
+            />
+          </label>
+          {erroExtratoOfx && <p className="text-sm font-medium text-erro">{erroExtratoOfx}</p>}
+          {sugestoesExtrato.length > 0 && (
+            <div className="max-h-80 space-y-2 overflow-y-auto">
+              {sugestoesExtrato.map((s) => {
+                const chave = `${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.boleto_id ?? "x"}`;
+                const boleto = s.boleto_id ? db.boletos.find((b) => b.id === s.boleto_id) : null;
+                return (
+                  <label
+                    key={chave}
+                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
+                      s.boleto_id ? "border-stone-200 bg-white" : "border-dashed border-stone-200 bg-stone-50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      disabled={!s.boleto_id || processandoExtratoOfx}
+                      checked={Boolean(s.boleto_id && selecionadosExtrato[chave])}
+                      onChange={(e) =>
+                        setSelecionadosExtrato((atual) => ({ ...atual, [chave]: e.target.checked }))
+                      }
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-slate-900">
+                        {dataBR(s.linha.data)} · {moeda(Math.abs(s.linha.valor))} · {s.linha.descricao}
+                      </span>
+                      {boleto ? (
+                        <span className="block text-xs text-slate-600">
+                          → {fornecedorDoBoleto(db, boleto)} · boleto {moeda(boleto.pagamento_valor ?? boleto.valor)} (
+                          {s.confianca === "exata" ? "match exato" : "match próximo"})
+                        </span>
+                      ) : (
+                        <span className="block text-xs text-slate-500">Sem boleto correspondente</span>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" className="btn-secundario" onClick={fecharImportarExtratoOfx} disabled={processandoExtratoOfx}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn-primario"
+              disabled={processandoExtratoOfx || !sugestoesExtrato.some((s) => s.boleto_id)}
+              onClick={confirmarExtratoOfx}
+            >
+              {processandoExtratoOfx ? "Conciliando…" : "Conciliar selecionados"}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <Modal

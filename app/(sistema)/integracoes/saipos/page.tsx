@@ -1,12 +1,15 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { AlertCircle, Download, FileSpreadsheet, Filter, RotateCcw, Search, Upload } from "lucide-react";
+import { AlertCircle, Download, FileSpreadsheet, RotateCcw, Search, Upload } from "lucide-react";
 import { Badge, Card, Campo, StatCard, TituloPagina, Vazio } from "@/components/ui";
 import {
   analisarPlanilhaSaipos,
   COLUNAS_SAIPOS_OBRIGATORIAS,
   criarAnaliseSaiposVazia,
+  SAIPOS_MAX_BYTES_ARQUIVO,
+  SAIPOS_MAX_REGISTROS,
+  validarArquivoSaiposLocal,
   type AnaliseSaiposResultado,
   type RegistroSaiposPrevisto,
 } from "@/lib/domain/integracoes-saipos";
@@ -74,6 +77,16 @@ export default function IntegracaoSaiposPage() {
 
   function selecionarArquivoSelecionado(selecionado?: File | null) {
     if (!selecionado) return;
+    const erroValidacao = validarArquivoSaiposLocal({ name: selecionado.name, size: selecionado.size });
+    if (erroValidacao) {
+      setErro(erroValidacao);
+      setArquivo(null);
+      setResultado(criarAnaliseSaiposVazia());
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+      return;
+    }
     setArquivo(selecionado);
     setErro(null);
     setResultado(criarAnaliseSaiposVazia());
@@ -90,10 +103,10 @@ export default function IntegracaoSaiposPage() {
       setResultado(analise);
       resetarPagina();
       if (!analise.sucesso) {
-        setErro(`Arquivo inválido: faltam as colunas ${analise.faltando_colunas.join(", ")}.`);
+        setErro(analise.erro);
       }
     } catch (error) {
-      setErro(error instanceof Error ? error.message : "Não foi possível ler o arquivo.");
+      setErro(error instanceof Error ? error.message : "Não foi possível analisar o arquivo. Verifique se o Excel não está corrompido.");
       setResultado(criarAnaliseSaiposVazia());
     } finally {
       setAnalisando(false);
@@ -194,7 +207,9 @@ export default function IntegracaoSaiposPage() {
           </div>
         </div>
 
-        <p className="text-sm text-stone-600">Colunas obrigatórias: {COLUNAS_SAIPOS_OBRIGATORIAS.join(", ")}.</p>
+        <p className="text-sm text-stone-600">
+          Colunas obrigatórias: {COLUNAS_SAIPOS_OBRIGATORIAS.join(", ")}. Limites: somente .xlsx, até {Math.round(SAIPOS_MAX_BYTES_ARQUIVO / (1024 * 1024))} MB e {SAIPOS_MAX_REGISTROS} registros.
+        </p>
       </Card>
 
       {erro && (
@@ -211,16 +226,19 @@ export default function IntegracaoSaiposPage() {
             <StatCard rotulo="Pratos" valor={resumo.pratos} cor="verde" />
             <StatCard rotulo="Complementos" valor={resumo.complementos} cor="amarelo" />
             <StatCard rotulo="Ativos / Inativos" valor={`${resumo.ativos} / ${resumo.inativos}`} cor="amarelo" />
-            <StatCard rotulo="Conflitos" valor={resumo.registros_com_conflitos} cor="vermelho" />
+            <StatCard rotulo="Conflitos" valor={resumo.registros_com_conflito} cor="vermelho" />
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <StatCard rotulo="Códigos vazios" valor={resumo.codigos_vazios} cor="vermelho" />
-            <StatCard rotulo="Códigos duplicados" valor={resumo.codigos_duplicados} cor="laranja" />
+            <StatCard rotulo="Códigos duplicados (distintos)" valor={resumo.codigos_duplicados_distintos} cor="laranja" />
+            <StatCard rotulo="Registros com código duplicado" valor={resumo.codigos_duplicados_registros_afetados} cor="laranja" />
             <StatCard rotulo="Formato inválido" valor={resumo.codigos_formato_invalido} cor="vermelho" />
-            <StatCard rotulo="Nomes repetidos" valor={resumo.nomes_iguais_codigos_diferentes} cor="amarelo" />
-            <StatCard rotulo="Sem prato-pai" valor={resumo.complementos_sem_pai_correspondente} cor="vermelho" />
-            <StatCard rotulo="Válidos / Avisos" valor={`${resumo.registros_validos} / ${resumo.registros_com_avisos}`} cor="verde" />
+            <StatCard rotulo="Grupos de nomes repetidos" valor={resumo.nomes_repetidos_grupos} cor="amarelo" />
+            <StatCard rotulo="Registros com nome repetido" valor={resumo.nomes_repetidos_registros_afetados} cor="amarelo" />
+            <StatCard rotulo="Complementos sem pai" valor={resumo.complementos_sem_pai} cor="vermelho" />
+            <StatCard rotulo="Válidos / Avisos" valor={`${resumo.registros_validos} / ${resumo.registros_com_aviso}`} cor="verde" />
+            <StatCard rotulo="Registros com conflito" valor={resumo.registros_com_conflito} cor="vermelho" />
           </div>
 
           <Card className="space-y-4">
@@ -266,8 +284,8 @@ export default function IntegracaoSaiposPage() {
                 <h2 className="text-base font-semibold text-stone-900">Prévia dos registros</h2>
                 <p className="text-sm text-stone-600">Registros válidos, avisos e conflitos são exibidos sem importar nada.</p>
               </div>
-              <Badge cor={resumo.registros_com_conflitos > 0 ? "vermelho" : resumo.registros_com_avisos > 0 ? "laranja" : "verde"}>
-                {resumo.registros_com_conflitos > 0 ? "Conflitos" : resumo.registros_com_avisos > 0 ? "Avisos" : "Tudo válido"}
+              <Badge cor={resumo.registros_com_conflito > 0 ? "vermelho" : resumo.registros_com_aviso > 0 ? "laranja" : "verde"}>
+                {resumo.registros_com_conflito > 0 ? "Conflitos" : resumo.registros_com_aviso > 0 ? "Avisos" : "Tudo válido"}
               </Badge>
             </div>
 

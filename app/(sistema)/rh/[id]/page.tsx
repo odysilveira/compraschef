@@ -3,10 +3,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Save, Users } from "lucide-react";
+import { ArrowLeft, FileUp, Save, Trash2, Users } from "lucide-react";
 import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, useDB } from "@/lib/data";
 import { validarAdiantamento, TETO_ADIANTAMENTO_PCT } from "@/lib/domain/consumos-pessoas";
+import {
+  TAMANHO_MAX_CONTRATO_BYTES,
+  formatarTamanhoArquivo,
+  montarContratoArquivo,
+} from "@/lib/domain/contrato-pessoa";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -34,6 +39,7 @@ export default function RhPerfilPage() {
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [form, setForm] = useState<PessoaRH | null>(null);
+  const [enviandoContrato, setEnviandoContrato] = useState(false);
 
   const pessoa = useMemo(
     () => (db.pessoas ?? []).find((p) => p.id === params.id) ?? null,
@@ -82,6 +88,46 @@ export default function RhPerfilPage() {
     );
     setMensagem(null);
     setErro(null);
+  }
+
+  async function aoEscolherContrato(arquivo: File | null) {
+    if (!arquivo) return;
+    setErro(null);
+    setMensagem(null);
+    setEnviandoContrato(true);
+    try {
+      const resultado = await montarContratoArquivo(arquivo);
+      if (!resultado.ok) {
+        setErro(resultado.erro);
+        return;
+      }
+      setForm((atual) =>
+        atual
+          ? {
+              ...atual,
+              contrato_arquivo: resultado.contrato,
+              contrato_assinado: true,
+              atualizado_em: new Date().toISOString(),
+            }
+          : atual
+      );
+      setMensagem("Contrato anexado. Marque eSocial OK se já registrou, e salve os dados.");
+    } finally {
+      setEnviandoContrato(false);
+    }
+  }
+
+  function removerContrato() {
+    setForm((atual) =>
+      atual
+        ? {
+            ...atual,
+            contrato_arquivo: undefined,
+            atualizado_em: new Date().toISOString(),
+          }
+        : atual
+    );
+    setMensagem("Arquivo removido. Salve os dados para confirmar.");
   }
 
   function salvarDados(e: FormEvent) {
@@ -437,6 +483,48 @@ export default function RhPerfilPage() {
                   período — não substitui o contrato escrito.
                 </p>
               )}
+              <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 space-y-2">
+                <p className="text-sm font-semibold">Cópia do contrato</p>
+                <p className="text-xs text-slate-600">
+                  PDF ou foto do contrato assinado (máx. {formatarTamanhoArquivo(TAMANHO_MAX_CONTRATO_BYTES)}).
+                  Ao anexar, marcamos “Contrato assinado” automaticamente.
+                </p>
+                {editando.contrato_arquivo ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <a
+                      href={editando.contrato_arquivo.data_url}
+                      download={editando.contrato_arquivo.nome_arquivo}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primaria-escura underline"
+                    >
+                      {editando.contrato_arquivo.nome_arquivo}
+                    </a>
+                    <span className="text-slate-500">
+                      ({formatarTamanhoArquivo(editando.contrato_arquivo.tamanho_bytes)})
+                    </span>
+                    <button type="button" className="btn-secundario text-xs" onClick={removerContrato}>
+                      <Trash2 size={14} /> Remover
+                    </button>
+                  </div>
+                ) : (
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-primaria-escura">
+                    <FileUp size={16} />
+                    {enviandoContrato ? "Lendo arquivo…" : "Anexar PDF ou foto"}
+                    <input
+                      type="file"
+                      className="sr-only"
+                      accept=".pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                      disabled={enviandoContrato}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        void aoEscolherContrato(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
             </div>
             <Campo rotulo="Observação">
               <textarea

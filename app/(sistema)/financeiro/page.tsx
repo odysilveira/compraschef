@@ -4,6 +4,7 @@
 // Protegida: líder/caixa não veem nada daqui (podeVerValores).
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import Link from "next/link";
 import {
   Ban,
   Barcode,
@@ -24,6 +25,7 @@ import {
   RefreshCcw,
   TriangleAlert,
   Upload,
+  Users,
 } from "lucide-react";
 import { Badge, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
 import { calcularValorFinal, criarContaManual, mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
@@ -71,6 +73,11 @@ import {
   type SegmentoCodigoBarrasItf,
   type SnapshotPagamentoBoleto,
 } from "@/lib/domain/pagar-boleto";
+import {
+  conciliarPagamentoPessoa,
+  registrarDivergenciaPagamentoPessoa,
+  rotuloTipoPagamentoPessoa,
+} from "@/lib/domain/pagamentos-pessoas";
 import { parseOfx } from "@/lib/domain/extrato-ofx";
 import {
   aplicarMatchesExtrato,
@@ -88,7 +95,15 @@ import {
 } from "@/lib/domain/codigo-pagamento-ui";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { cnpjBR, dataBR, diasAte, moeda } from "@/lib/format";
-import type { Boleto, ContaPagar, DB, OrigemContaPagar, StatusBoleto, StatusContaPagar } from "@/lib/types";
+import type {
+  Boleto,
+  ContaPagar,
+  DB,
+  OrigemContaPagar,
+  PagamentoPessoa,
+  StatusBoleto,
+  StatusContaPagar,
+} from "@/lib/types";
 
 const MARCA_GOLPE = "GOLPE CONFIRMADO";
 
@@ -500,6 +515,14 @@ export default function FinanceiroPage() {
   const [erroExtratoOfx, setErroExtratoOfx] = useState<string | null>(null);
   const [processandoExtratoOfx, setProcessandoExtratoOfx] = useState(false);
   const [processandoDivergenciaBoleto, setProcessandoDivergenciaBoleto] = useState(false);
+  const [rhConciliarId, setRhConciliarId] = useState<string | null>(null);
+  const [formConciliarRh, setFormConciliarRh] = useState<FormConciliarBoletoState>(novaConciliacaoBoletoInicial());
+  const [erroConciliarRh, setErroConciliarRh] = useState<string | null>(null);
+  const [processandoConciliarRh, setProcessandoConciliarRh] = useState(false);
+  const [rhDivergenciaId, setRhDivergenciaId] = useState<string | null>(null);
+  const [formDivergenciaRh, setFormDivergenciaRh] = useState<FormDivergenciaBoletoState>(novaDivergenciaBoletoInicial());
+  const [erroDivergenciaRh, setErroDivergenciaRh] = useState<string | null>(null);
+  const [processandoDivergenciaRh, setProcessandoDivergenciaRh] = useState(false);
   const inputLinhaRef = useRef<HTMLInputElement | null>(null);
   const execucaoIdentificacaoRef = useRef(0);
   const contaSelecionadaBoletoIdRef = useRef<string | null>(null);
@@ -507,6 +530,8 @@ export default function FinanceiroPage() {
   const processandoPagamentoBoletoRef = useRef(false);
   const processandoConciliarBoletoRef = useRef(false);
   const processandoDivergenciaBoletoRef = useRef(false);
+  const processandoConciliarRhRef = useRef(false);
+  const processandoDivergenciaRhRef = useRef(false);
 
   useEffect(() => {
     if (!codigoAmpliado) return;
@@ -773,6 +798,105 @@ export default function FinanceiroPage() {
     }
   }
 
+  function abrirConciliarRh(pagamento: PagamentoPessoa) {
+    if (pagamento.status !== "aguardando_conciliacao") return;
+    setRhConciliarId(pagamento.id);
+    setFormConciliarRh({
+      dataLiquidacao: (pagamento.pagamento_data || hojeISO()).slice(0, 10),
+      responsavel: pagamento.pagamento_responsavel || "usuário local",
+      observacao: "",
+    });
+    setErroConciliarRh(null);
+  }
+
+  function fecharConciliarRh() {
+    if (processandoConciliarRh) return;
+    setRhConciliarId(null);
+    setFormConciliarRh(novaConciliacaoBoletoInicial());
+    setErroConciliarRh(null);
+  }
+
+  function confirmarConciliarRh(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (processandoConciliarRhRef.current || !rhConciliarId) return;
+    processandoConciliarRhRef.current = true;
+    setProcessandoConciliarRh(true);
+    setErroConciliarRh(null);
+    try {
+      const proximo = structuredClone(db) as DB;
+      const resultado = conciliarPagamentoPessoa(
+        proximo,
+        rhConciliarId,
+        {
+          dataLiquidacao: formConciliarRh.dataLiquidacao,
+          responsavel: formConciliarRh.responsavel,
+          observacao: formConciliarRh.observacao,
+        },
+        { responsavelPadrao: "usuário local" }
+      );
+      if (!resultado.sucesso) {
+        setErroConciliarRh(resultado.erros.join(" "));
+        return;
+      }
+      mutate((atual) => Object.assign(atual, proximo));
+      setRhConciliarId(null);
+      setFormConciliarRh(novaConciliacaoBoletoInicial());
+      setMensagemReceberBoleto("Pagamento de RH conciliado e marcado como pago.");
+    } finally {
+      processandoConciliarRhRef.current = false;
+      setProcessandoConciliarRh(false);
+    }
+  }
+
+  function abrirDivergenciaRh(pagamento: PagamentoPessoa) {
+    if (pagamento.status !== "aguardando_conciliacao") return;
+    setRhDivergenciaId(pagamento.id);
+    setFormDivergenciaRh(novaDivergenciaBoletoInicial());
+    setErroDivergenciaRh(null);
+  }
+
+  function fecharDivergenciaRh() {
+    if (processandoDivergenciaRh) return;
+    setRhDivergenciaId(null);
+    setFormDivergenciaRh(novaDivergenciaBoletoInicial());
+    setErroDivergenciaRh(null);
+  }
+
+  function confirmarDivergenciaRh(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (processandoDivergenciaRhRef.current || !rhDivergenciaId) return;
+    processandoDivergenciaRhRef.current = true;
+    setProcessandoDivergenciaRh(true);
+    setErroDivergenciaRh(null);
+    try {
+      const proximo = structuredClone(db) as DB;
+      const resultado = registrarDivergenciaPagamentoPessoa(
+        proximo,
+        rhDivergenciaId,
+        {
+          motivo: formDivergenciaRh.motivo,
+          responsavel: formDivergenciaRh.responsavel,
+        },
+        { responsavelPadrao: "usuário local" }
+      );
+      if (!resultado.sucesso) {
+        setErroDivergenciaRh(resultado.erros.join(" "));
+        return;
+      }
+      mutate((atual) => Object.assign(atual, proximo));
+      setRhDivergenciaId(null);
+      setFormDivergenciaRh(novaDivergenciaBoletoInicial());
+      setMensagemReceberBoleto("Divergência de RH registrada. Segue aguardando conciliação.");
+    } finally {
+      processandoDivergenciaRhRef.current = false;
+      setProcessandoDivergenciaRh(false);
+    }
+  }
+
+  function nomePessoaRh(pessoaId: string): string {
+    return db.pessoas.find((p) => p.id === pessoaId)?.nome ?? "Pessoa";
+  }
+
   async function copiarLinhaAgenda(linha?: string) {
     if (!linha) {
       setMensagemReceberBoleto("Não há linha digitável disponível para cópia neste boleto.");
@@ -940,12 +1064,14 @@ export default function FinanceiroPage() {
   const boletosPendentesAgenda = boletosAtivos.filter(
     (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
   );
+  const rhAguardandoConciliacao = (db.pagamentos_pessoas ?? []).filter((p) => p.status === "aguardando_conciliacao");
+  const rhPagos = (db.pagamentos_pessoas ?? []).filter((p) => p.status === "pago");
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
   const boletosAVencer = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) > 0);
 
-  // Totais por status
+  // Totais por status (boletos + RH na fila de conciliação / pagos)
   const totais: Record<StatusBoleto, number> = {
     travado: 0,
     liberado: 0,
@@ -956,7 +1082,12 @@ export default function FinanceiroPage() {
   boletosAtivos.forEach((b) => {
     totais[b.status] += b.valor;
   });
-
+  for (const pag of rhAguardandoConciliacao) {
+    totais.aguardando_conciliacao += pag.pagamento_valor ?? pag.valor;
+  }
+  for (const pag of rhPagos) {
+    totais.pago += pag.pagamento_valor ?? pag.valor;
+  }
   function rotuloDia(iso: string): string {
     const dias = diasAte(iso);
     if (dias === undefined) return dataBR(iso);
@@ -1743,11 +1874,77 @@ export default function FinanceiroPage() {
     );
   }
 
+  function CartaoPagamentoRh({ pagamento }: { pagamento: PagamentoPessoa }) {
+    const valor = pagamento.pagamento_valor ?? pagamento.valor;
+    return (
+      <Card className="space-y-2 border-blue-100">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-blue-800">
+              <Users size={12} /> RH
+            </p>
+            <p className="font-bold">{nomePessoaRh(pagamento.pessoa_id)}</p>
+            <p className="text-sm text-slate-600">
+              {rotuloTipoPagamentoPessoa(pagamento.tipo)}
+              {pagamento.descricao ? ` · ${pagamento.descricao}` : ""}
+            </p>
+            <p className="text-xl font-bold">{moeda(valor)}</p>
+            <p className="text-sm text-slate-600">Vencimento: {dataBR(pagamento.vencimento)}</p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <Badge cor={pagamento.status === "pago" ? "verde" : "azul"}>
+              {pagamento.status === "pago" ? "Pago" : "Aguardando conciliação"}
+            </Badge>
+            {pagamento.conciliacao_divergente && pagamento.status === "aguardando_conciliacao" && (
+              <Badge cor="laranja">
+                <TriangleAlert size={14} /> Divergente
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {pagamento.status === "aguardando_conciliacao" && (
+          <div className="rounded-card border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+            <p>
+              Pagamento informado em {pagamento.pagamento_data ? dataBR(pagamento.pagamento_data) : "—"}
+              {pagamento.pagamento_valor != null ? ` · ${moeda(pagamento.pagamento_valor)}` : ""}
+              {pagamento.pagamento_banco_conta ? ` · saiu de ${pagamento.pagamento_banco_conta}` : ""}
+            </p>
+            {pagamento.conciliacao_divergente && pagamento.conciliacao_divergencia_motivo && (
+              <p className="mt-1 font-medium text-destaque">Divergência: {pagamento.conciliacao_divergencia_motivo}</p>
+            )}
+          </div>
+        )}
+
+        {pagamento.status === "pago" && pagamento.pagamento_banco_conta && (
+          <p className="text-sm text-slate-600">Saiu de {pagamento.pagamento_banco_conta}</p>
+        )}
+
+        {pagamento.status === "aguardando_conciliacao" && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-primario" onClick={() => abrirConciliarRh(pagamento)}>
+              <CircleCheckBig size={16} /> Conciliar
+            </button>
+            <button type="button" className="btn-secundario" onClick={() => abrirDivergenciaRh(pagamento)}>
+              <TriangleAlert size={16} /> Divergente
+            </button>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
   const boletoLiberando = db.boletos.find((b) => b.id === confirmandoLiberacao);
   const boletoResumo = boletoResumoId ? db.boletos.find((boleto) => boleto.id === boletoResumoId) ?? null : null;
   const boletoPagamento = boletoPagamentoId ? db.boletos.find((boleto) => boleto.id === boletoPagamentoId) ?? null : null;
   const boletoConciliar = boletoConciliarId ? db.boletos.find((boleto) => boleto.id === boletoConciliarId) ?? null : null;
   const boletoDivergencia = boletoDivergenciaId ? db.boletos.find((boleto) => boleto.id === boletoDivergenciaId) ?? null : null;
+  const rhConciliar = rhConciliarId
+    ? (db.pagamentos_pessoas ?? []).find((p) => p.id === rhConciliarId) ?? null
+    : null;
+  const rhDivergencia = rhDivergenciaId
+    ? (db.pagamentos_pessoas ?? []).find((p) => p.id === rhDivergenciaId) ?? null
+    : null;
   const notaPagamento = boletoPagamento ? notaDoBoleto(db, boletoPagamento) : null;
   const documentoResumo = boletoResumo?.documento_boleto_id
     ? db.documentos_boleto.find((documento) => documento.id === boletoResumo.documento_boleto_id) ?? null
@@ -1919,24 +2116,39 @@ export default function FinanceiroPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="rotulo text-blue-700">Aguardando conciliação</p>
-              {boletosAguardandoConciliacao.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto aguardando conciliação." />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="rotulo text-blue-700">Aguardando conciliação</p>
+                <Link href="/rh/pagamentos" className="text-xs font-medium text-blue-800 underline-offset-2 hover:underline">
+                  Ver pagamentos de RH
+                </Link>
+              </div>
+              {boletosAguardandoConciliacao.length === 0 && rhAguardandoConciliacao.length === 0 ? (
+                <Vazio mensagem="Nenhum boleto ou pagamento de RH aguardando conciliação." />
               ) : (
-                [...boletosAguardandoConciliacao]
-                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
-                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+                <>
+                  {[...boletosAguardandoConciliacao]
+                    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                    .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)}
+                  {[...rhAguardandoConciliacao]
+                    .sort((a, b) => (a.pagamento_data || a.vencimento).localeCompare(b.pagamento_data || b.vencimento))
+                    .map((pagamento) => <CartaoPagamentoRh key={pagamento.id} pagamento={pagamento} />)}
+                </>
               )}
             </div>
 
             <div className="space-y-2">
               <p className="rotulo text-primaria-escura">Pagos</p>
-              {boletosPagos.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto marcado como pago." />
+              {boletosPagos.length === 0 && rhPagos.length === 0 ? (
+                <Vazio mensagem="Nenhum boleto ou pagamento de RH marcado como pago." />
               ) : (
-                [...boletosPagos]
-                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
-                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+                <>
+                  {[...boletosPagos]
+                    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                    .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)}
+                  {[...rhPagos]
+                    .sort((a, b) => (a.pagamento_data || a.vencimento).localeCompare(b.pagamento_data || b.vencimento))
+                    .map((pagamento) => <CartaoPagamentoRh key={pagamento.id} pagamento={pagamento} />)}
+                </>
               )}
             </div>
           </section>
@@ -2832,6 +3044,158 @@ export default function FinanceiroPage() {
               </button>
               <button type="submit" className="btn-primario" disabled={processandoDivergenciaBoleto}>
                 <TriangleAlert size={16} /> {processandoDivergenciaBoleto ? "Registrando..." : "Registrar divergência"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(rhConciliar)}
+        titulo="Conciliar pagamento de RH"
+        onFechar={fecharConciliarRh}
+        fecharAoClicarFundo={false}
+      >
+        {rhConciliar && (
+          <form onSubmit={confirmarConciliarRh} className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="font-bold text-slate-900">{nomePessoaRh(rhConciliar.pessoa_id)}</p>
+              <p className="text-sm text-slate-700">
+                {rotuloTipoPagamentoPessoa(rhConciliar.tipo)}
+                {rhConciliar.descricao ? ` · ${rhConciliar.descricao}` : ""}
+              </p>
+              <p className="text-sm text-slate-700">
+                Pagamento informado: {rhConciliar.pagamento_data ? dataBR(rhConciliar.pagamento_data) : "—"}
+                {rhConciliar.pagamento_valor != null ? ` · ${moeda(rhConciliar.pagamento_valor)}` : ""}
+              </p>
+              {rhConciliar.pagamento_banco_conta && (
+                <p className="text-sm text-slate-700">Saiu de: {rhConciliar.pagamento_banco_conta}</p>
+              )}
+              {rhConciliar.conciliacao_divergente && rhConciliar.conciliacao_divergencia_motivo && (
+                <p className="text-sm font-medium text-destaque">
+                  Divergência anterior: {rhConciliar.conciliacao_divergencia_motivo}
+                </p>
+              )}
+            </Card>
+
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              Confirme apenas se o valor apareceu no extrato/banco. Isso marca o pagamento como pago definitivo.
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="rotulo mb-1 block">Data da liquidação *</span>
+                <input
+                  type="date"
+                  className="input w-full"
+                  value={formConciliarRh.dataLiquidacao}
+                  onChange={(event) =>
+                    setFormConciliarRh((atual) => ({ ...atual, dataLiquidacao: event.target.value }))
+                  }
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="rotulo mb-1 block">Responsável</span>
+                <input
+                  className="input w-full"
+                  value={formConciliarRh.responsavel}
+                  onChange={(event) =>
+                    setFormConciliarRh((atual) => ({ ...atual, responsavel: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="rotulo mb-1 block">Observação (opcional)</span>
+                <textarea
+                  className="input min-h-20 w-full py-2"
+                  value={formConciliarRh.observacao}
+                  onChange={(event) =>
+                    setFormConciliarRh((atual) => ({ ...atual, observacao: event.target.value }))
+                  }
+                />
+              </label>
+            </div>
+
+            {erroConciliarRh && (
+              <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">
+                {erroConciliarRh}
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn-secundario" onClick={fecharConciliarRh} disabled={processandoConciliarRh}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario" disabled={processandoConciliarRh}>
+                <CircleCheckBig size={16} /> {processandoConciliarRh ? "Conciliando..." : "Conciliar"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(rhDivergencia)}
+        titulo="Registrar divergência (RH)"
+        onFechar={fecharDivergenciaRh}
+        fecharAoClicarFundo={false}
+      >
+        {rhDivergencia && (
+          <form onSubmit={confirmarDivergenciaRh} className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="font-bold text-slate-900">{nomePessoaRh(rhDivergencia.pessoa_id)}</p>
+              <p className="text-sm text-slate-700">
+                Valor informado:{" "}
+                {rhDivergencia.pagamento_valor != null ? moeda(rhDivergencia.pagamento_valor) : moeda(rhDivergencia.valor)}
+              </p>
+            </Card>
+
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              O pagamento permanece em aguardando conciliação. Você poderá conciliar depois de resolver a divergência.
+            </div>
+
+            <label className="block">
+              <span className="rotulo mb-1 block">Motivo da divergência *</span>
+              <textarea
+                className="input min-h-24 w-full py-2"
+                value={formDivergenciaRh.motivo}
+                onChange={(event) =>
+                  setFormDivergenciaRh((atual) => ({ ...atual, motivo: event.target.value }))
+                }
+                placeholder="Ex.: valor no extrato diferente, data não encontrada..."
+                required
+              />
+            </label>
+
+            <label className="block">
+              <span className="rotulo mb-1 block">Responsável</span>
+              <input
+                className="input w-full"
+                value={formDivergenciaRh.responsavel}
+                onChange={(event) =>
+                  setFormDivergenciaRh((atual) => ({ ...atual, responsavel: event.target.value }))
+                }
+              />
+            </label>
+
+            {erroDivergenciaRh && (
+              <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">
+                {erroDivergenciaRh}
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={fecharDivergenciaRh}
+                disabled={processandoDivergenciaRh}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario" disabled={processandoDivergenciaRh}>
+                <TriangleAlert size={16} /> {processandoDivergenciaRh ? "Registrando..." : "Registrar divergência"}
               </button>
             </div>
           </form>

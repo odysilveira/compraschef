@@ -23,19 +23,22 @@ import {
   criarBindingManualSaipos,
   criarEstadoBindingsSaiposVazio,
   executarMatchingSaipos,
-  exportarBackupBindingsSaipos,
+  gerarPreviewAcaoColetivaSaipos,
+  inferirTipoEntidadeExterna,
   registrosCompativeisParaAcaoColetiva,
   SAIPOS_IMPORT_CONTEXT_DEFAULT,
   type EntidadeInternaSaipos,
   type RegistroSaiposVinculado,
   type SaiposBindingsState,
-  type SaiposMatchingState,
+  type SaiposMatchingOutcome,
+  type SaiposWorkflowState,
 } from "@/lib/domain/integracoes-saipos-vinculos";
 
 const TAMANHO_PAGINA = 20;
 const ACTOR_LOCAL = "usuario-local";
 
-type FiltroFila = "pendencias" | "AUTO_SEGURO" | "PROVAVEL_REVISAO" | "CONFLITO" | "NOVO" | "CONFIRMADO_MANUALMENTE" | "IGNORADO";
+type FiltroWorkflow = "todos" | SaiposWorkflowState;
+type FiltroOutcome = "todos" | SaiposMatchingOutcome;
 
 interface RascunhoLinha {
   classificacao_futura: ClassificacaoFuturaSaipos;
@@ -61,17 +64,14 @@ function statusRegistro(registro: RegistroSaiposPrevisto): "verde" | "laranja" |
   return "verde";
 }
 
-function corMatching(state: SaiposMatchingState): "cinza" | "verde" | "laranja" | "vermelho" {
-  if (state === "AUTO_SEGURO") return "verde";
-  if (state === "CONFIRMADO_MANUALMENTE") return "verde";
-  if (state === "IGNORADO") return "cinza";
-  if (state === "NOVO") return "laranja";
-  if (state === "CONFLITO") return "vermelho";
+function corOutcome(outcome: SaiposMatchingOutcome): "verde" | "laranja" | "vermelho" {
+  if (outcome === "AUTO_SEGURO") return "verde";
+  if (outcome === "CONFLITO") return "vermelho";
   return "laranja";
 }
 
-function rotuloMatching(state: SaiposMatchingState): string {
-  switch (state) {
+function rotuloOutcome(outcome: SaiposMatchingOutcome): string {
+  switch (outcome) {
     case "AUTO_SEGURO":
       return "Automático seguro";
     case "PROVAVEL_REVISAO":
@@ -80,8 +80,38 @@ function rotuloMatching(state: SaiposMatchingState): string {
       return "Conflito";
     case "NOVO":
       return "Novo";
-    case "CONFIRMADO_MANUALMENTE":
-      return "Confirmado manualmente";
+  }
+}
+
+function corWorkflow(state: SaiposWorkflowState): "cinza" | "verde" | "laranja" | "vermelho" {
+  switch (state) {
+    case "IMPORTADO_SEM_NECESSIDADE_DE_VINCULO":
+      return "cinza";
+    case "VINCULO_NECESSARIO":
+      return "laranja";
+    case "PROVAVEL_REVISAO":
+      return "laranja";
+    case "CONFLITO":
+      return "vermelho";
+    case "CONFIRMADO":
+      return "verde";
+    case "IGNORADO":
+      return "cinza";
+  }
+}
+
+function rotuloWorkflow(state: SaiposWorkflowState): string {
+  switch (state) {
+    case "IMPORTADO_SEM_NECESSIDADE_DE_VINCULO":
+      return "Importado sem necessidade atual de vínculo";
+    case "VINCULO_NECESSARIO":
+      return "Vínculo necessário";
+    case "PROVAVEL_REVISAO":
+      return "Provável para revisão";
+    case "CONFLITO":
+      return "Conflito";
+    case "CONFIRMADO":
+      return "Confirmado";
     case "IGNORADO":
       return "Ignorado";
   }
@@ -99,10 +129,13 @@ function baixarTexto(nomeArquivo: string, conteudo: string) {
   URL.revokeObjectURL(url);
 }
 
-function compatibilidadeBulkSelecionados(registros: RegistroSaiposVinculado[]): string {
-  if (registros.length === 0) return "Selecione ao menos um item elegível para ação coletiva.";
-  if (!registrosCompativeisParaAcaoColetiva(registros)) {
-    return "A ação coletiva exige itens explicitamente selecionados, do mesmo tipo externo e ainda não confirmados.";
+function mensagemBulk(params: { registros: RegistroSaiposVinculado[]; motivo: string }): string {
+  if (params.registros.length === 0) return "Selecione explicitamente os itens que devem entrar na fila de vínculo.";
+  if (!registrosCompativeisParaAcaoColetiva(params.registros)) {
+    return "A ação coletiva só aceita itens selecionados, compatíveis e com necessidade explícita de vínculo.";
+  }
+  if (params.registros.length > 1 && !params.motivo.trim()) {
+    return "Informe um motivo explícito para o vínculo coletivo muitos-para-um.";
   }
   return "";
 }
@@ -121,13 +154,16 @@ export default function IntegracaoSaiposPage() {
   const [filtroTipo, setFiltroTipo] = useState<"todos" | "PRATO" | "COMPLEMENTO">("todos");
   const [filtroCategoria, setFiltroCategoria] = useState("todas");
   const [filtroStatus, setFiltroStatus] = useState<"todos" | "ativo" | "inativo">("todos");
-  const [filtroFila, setFiltroFila] = useState<FiltroFila>("pendencias");
+  const [filtroWorkflow, setFiltroWorkflow] = useState<FiltroWorkflow>("todos");
+  const [filtroOutcome, setFiltroOutcome] = useState<FiltroOutcome>("todos");
   const [pagina, setPagina] = useState(1);
+
   const [estadoBindings, setEstadoBindings] = useState<SaiposBindingsState>(criarEstadoBindingsSaiposVazio());
   const [rascunhos, setRascunhos] = useState<Record<string, RascunhoLinha>>({});
   const [selecionados, setSelecionados] = useState<Record<string, boolean>>({});
   const [classificacaoLote, setClassificacaoLote] = useState<ClassificacaoFuturaSaipos>("NÃO CLASSIFICADO");
   const [entidadeLoteId, setEntidadeLoteId] = useState("");
+  const [motivoLote, setMotivoLote] = useState("");
 
   useEffect(() => {
     setEstadoBindings(repo.carregar());
@@ -143,7 +179,7 @@ export default function IntegracaoSaiposPage() {
 
     const produtos = db.produtos.map<EntidadeInternaSaipos>((produto) => ({
       internal_uuid: produto.id,
-      internal_type: produto.tipo === "produzido" ? "PRATO" : "INSUMO",
+      internal_type: produto.tipo === "comprado" ? "INSUMO" : "OUTRO",
       nome: produto.nome,
       status: produto.ativo ? "ATIVO" : "INATIVO",
     }));
@@ -164,6 +200,8 @@ export default function IntegracaoSaiposPage() {
     );
   }, [entidadesInternas, repo, resultado]);
 
+  const selectedKeys = useMemo(() => Object.keys(selecionados).filter((key) => selecionados[key]), [selecionados]);
+
   const registros = useMemo<RegistroSaiposVinculado[]>(() => {
     const base = resultado.sucesso ? resultado.registros : [];
     return executarMatchingSaipos({
@@ -171,14 +209,12 @@ export default function IntegracaoSaiposPage() {
       state: estadoBindings,
       entidades: entidadesInternas,
       contexto_importacao: SAIPOS_IMPORT_CONTEXT_DEFAULT,
+      selected_external_keys: selectedKeys,
     });
-  }, [resultado, estadoBindings, entidadesInternas]);
+  }, [resultado, estadoBindings, entidadesInternas, selectedKeys]);
 
   const painel = useMemo(() => calcularPainelMatchingSaipos(registros), [registros]);
-
-  const categorias = useMemo(() => {
-    return Array.from(new Set(registros.map((registro) => registro.categoria).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR"));
-  }, [registros]);
+  const categorias = useMemo(() => Array.from(new Set(registros.map((registro) => registro.categoria).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")), [registros]);
 
   function resetarPagina() {
     setPagina(1);
@@ -227,12 +263,12 @@ export default function IntegracaoSaiposPage() {
       if (inputRef.current) inputRef.current.value = "";
       return;
     }
-
     setArquivo(selecionado);
     setErro(null);
     setResultado(criarAnaliseSaiposVazia());
     setRascunhos({});
     setSelecionados({});
+    setMotivoLote("");
     resetarPagina();
   }
 
@@ -246,10 +282,9 @@ export default function IntegracaoSaiposPage() {
       setResultado(analise);
       setRascunhos({});
       setSelecionados({});
+      setMotivoLote("");
       resetarPagina();
-      if (!analise.sucesso) {
-        setErro(analise.erro);
-      }
+      if (!analise.sucesso) setErro(analise.erro);
     } catch (error) {
       setErro(error instanceof Error ? error.message : "Não foi possível analisar o arquivo. Verifique se o Excel não está corrompido.");
       setResultado(criarAnaliseSaiposVazia());
@@ -268,11 +303,13 @@ export default function IntegracaoSaiposPage() {
     setFiltroTipo("todos");
     setFiltroCategoria("todas");
     setFiltroStatus("todos");
-    setFiltroFila("pendencias");
+    setFiltroWorkflow("todos");
+    setFiltroOutcome("todos");
     setPagina(1);
     setArrastando(false);
     setRascunhos({});
     setSelecionados({});
+    setMotivoLote("");
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -283,28 +320,33 @@ export default function IntegracaoSaiposPage() {
       if (filtroCategoria !== "todas" && registro.categoria !== filtroCategoria) return false;
       if (filtroStatus === "ativo" && !registro.ativo) return false;
       if (filtroStatus === "inativo" && registro.ativo) return false;
-
-      const fila = registro.matching_result.state;
-      if (filtroFila === "pendencias" && !["PROVAVEL_REVISAO", "CONFLITO", "NOVO"].includes(fila)) return false;
-      if (filtroFila !== "pendencias" && fila !== filtroFila) return false;
+      if (filtroWorkflow !== "todos" && registro.workflow_state !== filtroWorkflow) return false;
+      if (filtroOutcome !== "todos" && registro.matching_result.outcome !== filtroOutcome) return false;
 
       if (!buscaNormalizada) return true;
       const entidadeNome = entidadeEfetivaId(registro) ? entidadesPorId.get(entidadeEfetivaId(registro))?.nome ?? "" : "";
       const alvo = `${registro.codigo_completo} ${registro.descricao} ${registro.nome_canonico} ${registro.matching_result.reason} ${entidadeNome}`.toLowerCase();
       return alvo.includes(buscaNormalizada);
     });
-  }, [busca, entidadesPorId, filtroCategoria, filtroFila, filtroStatus, filtroTipo, registros]);
+  }, [busca, entidadesPorId, filtroCategoria, filtroOutcome, filtroStatus, filtroTipo, filtroWorkflow, registros]);
 
-  const selecionadosCompativeis = useMemo(() => {
-    return registros.filter((registro) => selecionados[registro.external_key]);
-  }, [registros, selecionados]);
+  const registrosSelecionados = useMemo(() => registros.filter((registro) => selectedKeys.includes(registro.external_key)), [registros, selectedKeys]);
+  const entidadeLote = entidadeLoteId ? entidadesPorId.get(entidadeLoteId) ?? null : null;
+  const previewColetivo = useMemo(
+    () => gerarPreviewAcaoColetivaSaipos({ registros, selected_keys: selectedKeys, entidade: entidadeLote }),
+    [entidadeLote, registros, selectedKeys]
+  );
+  const mensagemColetiva = mensagemBulk({ registros: registrosSelecionados, motivo: motivoLote });
 
-  const mensagemBulk = compatibilidadeBulkSelecionados(selecionadosCompativeis);
   const totalPaginas = Math.max(1, Math.ceil(filtrados.length / TAMANHO_PAGINA));
   const paginaAtual = Math.min(pagina, totalPaginas);
   const registrosPagina = filtrados.slice((paginaAtual - 1) * TAMANHO_PAGINA, paginaAtual * TAMANHO_PAGINA);
 
   function confirmarRegistro(registro: RegistroSaiposVinculado) {
+    if (!registro.link_requirement_policy.selected_for_binding) {
+      setErro("Selecione explicitamente o item antes de confirmá-lo para vínculo interno.");
+      return;
+    }
     const entidade = entidadesPorId.get(entidadeEfetivaId(registro)) ?? null;
     if (!entidade) {
       setErro("Selecione uma entidade interna real antes de confirmar manualmente o vínculo.");
@@ -317,6 +359,11 @@ export default function IntegracaoSaiposPage() {
       classificacao_futura: classificacaoEfetiva(registro),
       entidade,
       actor: ACTOR_LOCAL,
+      reason: "Confirmação manual após seleção explícita para fila de vínculo.",
+      link_requirement_policy: {
+        ...registro.link_requirement_policy,
+        selected_for_binding: true,
+      },
     });
     setEstadoBindings(
       repo.salvar(binding, {
@@ -326,16 +373,22 @@ export default function IntegracaoSaiposPage() {
       })
     );
     limparRascunho(registro.external_key);
+    toggleSelecionado(registro.external_key, false);
   }
 
   function ignorarRegistro(registro: RegistroSaiposVinculado) {
-    if (!window.confirm(`Ignorar item ${registro.codigo_completo} nesta fila de exceções?`)) return;
+    if (!window.confirm(`Ignorar ${registro.codigo_completo} na fila de vínculos?`)) return;
     const binding = criarBindingManualSaipos({
       registro,
       classificacao_futura: classificacaoEfetiva(registro),
       entidade: null,
       actor: ACTOR_LOCAL,
-      state: "IGNORADO",
+      workflow_state: "IGNORADO",
+      reason: "Ignorado manualmente pelo operador.",
+      link_requirement_policy: {
+        ...registro.link_requirement_policy,
+        selected_for_binding: false,
+      },
     });
     setEstadoBindings(
       repo.salvar(binding, {
@@ -345,6 +398,7 @@ export default function IntegracaoSaiposPage() {
       })
     );
     limparRascunho(registro.external_key);
+    toggleSelecionado(registro.external_key, false);
   }
 
   function limparDecisao(registro: RegistroSaiposVinculado) {
@@ -360,28 +414,29 @@ export default function IntegracaoSaiposPage() {
   }
 
   function confirmarSelecionados() {
-    const entidade = entidadesPorId.get(entidadeLoteId) ?? null;
-    if (!entidade) {
-      setErro("Selecione uma entidade interna real para aplicar a ação coletiva nos itens selecionados.");
+    if (mensagemColetiva) {
+      setErro(mensagemColetiva);
       return;
     }
-    if (mensagemBulk) {
-      setErro(mensagemBulk);
+    if (!entidadeLote) {
+      setErro("Selecione uma entidade interna real para a ação coletiva.");
       return;
     }
-    if (!window.confirm(`Confirmar vínculo manual coletivo em ${selecionadosCompativeis.length} itens selecionados?`)) return;
+    if (!window.confirm(`Confirmar ação coletiva em ${registrosSelecionados.length} item(ns) explicitamente selecionado(s)?`)) return;
 
     const resultadoBulk = aplicarAcaoColetivaSaipos({
-      registros: registros,
-      selected_keys: selecionadosCompativeis.map((registro) => registro.external_key),
+      registros,
+      selected_keys: selectedKeys,
       state: estadoBindings,
       classificacao_futura: classificacaoLote,
-      entidade,
+      entidade: entidadeLote,
       actor: ACTOR_LOCAL,
+      reason: motivoLote,
     });
     setEstadoBindings(resultadoBulk.state);
     setSelecionados({});
     setRascunhos({});
+    setMotivoLote("");
   }
 
   function exportarBackup() {
@@ -396,13 +451,11 @@ export default function IntegracaoSaiposPage() {
     );
   }
 
-  const resumo = resultado.resumo;
-
   return (
     <div className="space-y-5">
       <TituloPagina
         titulo="Integração Saipos"
-        subtitulo="ETAPA 2 API-ready: auto-correspondência segura quando houver regra determinística e revisão humana apenas para exceções (prováveis, conflitos e novos)."
+        subtitulo="Catálogo externo bootstrapado por Excel, com correspondência conservadora e fila de vínculo apenas quando houver necessidade explícita ou exceção operacional."
         acao={
           <div className="flex flex-wrap gap-2">
             <button className="btn-secundario" onClick={descartarAnalise}>
@@ -441,7 +494,7 @@ export default function IntegracaoSaiposPage() {
         >
           <FileSpreadsheet className="mx-auto h-10 w-10 text-primaria-escura" />
           <p className="mt-3 text-base font-semibold text-stone-900">Arraste e solte o Excel do Saipos</p>
-          <p className="mt-1 text-sm text-stone-600">O Excel é usado apenas para bootstrap local. Somente vínculos/decisões confirmados ficam persistidos no adapter temporário.</p>
+          <p className="mt-1 text-sm text-stone-600">O Excel apenas povoa o catálogo externo. Vínculos internos são exigidos somente por política explícita e conservadora.</p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             <label className="btn-secundario cursor-pointer">
               <Upload className="h-4 w-4" /> Selecionar arquivo
@@ -461,7 +514,7 @@ export default function IntegracaoSaiposPage() {
           </div>
           <div>
             <p className="rotulo">Contexto externo</p>
-            <p className="font-semibold text-stone-900">{SAIPOS_IMPORT_CONTEXT_DEFAULT.environment} / {SAIPOS_IMPORT_CONTEXT_DEFAULT.unidade_id}</p>
+            <p className="font-semibold text-stone-900">{SAIPOS_IMPORT_CONTEXT_DEFAULT.environment} / {SAIPOS_IMPORT_CONTEXT_DEFAULT.ingestion_source} / {SAIPOS_IMPORT_CONTEXT_DEFAULT.unidade_id}</p>
           </div>
           <div>
             <p className="rotulo">Persistência atual</p>
@@ -476,64 +529,74 @@ export default function IntegracaoSaiposPage() {
 
       {erro && (
         <div className="rounded-card border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <AlertCircle className="mr-2 inline h-4 w-4" />
-          {erro}
+          <AlertCircle className="mr-2 inline h-4 w-4" /> {erro}
         </div>
       )}
 
-      {estadoBindings.migration.from_version === 1 && (
+      {estadoBindings.migration.from_version !== null && (
         <div className="rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Migração local detectada: {estadoBindings.migration.migrated_bindings} vínculo(s) legado(s) migrado(s) com segurança. Pendências preservadas: {estadoBindings.migration.pending_legacy.length}.
+          Migração local detectada: {estadoBindings.migration.migrated_bindings} vínculo(s) migrado(s). Pendências preservadas: {estadoBindings.migration.pending_legacy.length}.
         </div>
       )}
 
       {resultado.sucesso ? (
         <div className="space-y-5">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <StatCard rotulo="Total analisado" valor={painel.total_analisado} cor="cinza" />
-            <StatCard rotulo="Automáticos seguros" valor={painel.automaticos_seguros} cor="verde" />
-            <StatCard rotulo="Pendências humanas" valor={painel.pendencias_humanas} cor="laranja" />
-            <StatCard rotulo="Confirmados manuais" valor={painel.confirmados} cor="verde" />
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <StatCard rotulo="Total importado" valor={painel.total_importado} cor="cinza" />
+            <StatCard rotulo="Catálogo externo disponível" valor={painel.catalogo_externo_disponivel} cor="cinza" />
+            <StatCard rotulo="Sem necessidade atual de vínculo" valor={painel.itens_sem_necessidade_atual_de_vinculo} cor="verde" />
+            <StatCard rotulo="Vínculos necessários" valor={painel.vinculos_necessarios} cor="laranja" />
+            <StatCard rotulo="Pendências humanas reais" valor={painel.pendencias_humanas_reais} cor="vermelho" />
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <StatCard rotulo="Automáticos seguros" valor={painel.automaticos_seguros} cor="verde" />
             <StatCard rotulo="Prováveis" valor={painel.provaveis} cor="laranja" />
             <StatCard rotulo="Conflitos" valor={painel.conflitos} cor="vermelho" />
             <StatCard rotulo="Novos" valor={painel.novos} cor="amarelo" />
+            <StatCard rotulo="Confirmados" valor={painel.confirmados} cor="verde" />
             <StatCard rotulo="Ignorados" valor={painel.ignorados} cor="cinza" />
-            <StatCard rotulo="Nomes repetidos (grupos)" valor={resumo.nomes_repetidos_grupos} cor="amarelo" />
-            <StatCard rotulo="Registros afetados" valor={resumo.nomes_repetidos_registros_afetados} cor="amarelo" />
           </div>
 
           <Card className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h2 className="text-base font-semibold text-stone-900">Fila de exceções</h2>
-                <p className="text-sm text-stone-600">O foco é revisar apenas prováveis, conflitos e novos. Itens automáticos seguros não exigem confirmação humana nesta etapa.</p>
+                <h2 className="text-base font-semibold text-stone-900">Catálogo externo e fila de vínculos</h2>
+                <p className="text-sm text-stone-600">Os 1.000 itens podem existir no catálogo externo sem vínculo imediato. Só entram na fila humana quando houver necessidade explícita de operação interna.</p>
               </div>
-              <Badge cor={painel.pendencias_humanas > 0 ? "laranja" : "verde"}>
-                {painel.pendencias_humanas > 0 ? `${painel.pendencias_humanas} pendências humanas` : "Sem pendências humanas"}
+              <Badge cor={painel.pendencias_humanas_reais > 0 ? "laranja" : "verde"}>
+                {painel.pendencias_humanas_reais > 0 ? `${painel.pendencias_humanas_reais} pendências humanas reais` : "Sem pendências humanas reais"}
               </Badge>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_220px_220px_220px_220px]">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_240px_240px_220px_220px_220px]">
               <label className="block">
-                <span className="rotulo mb-1 block">Busca por código, nome, motivo ou vínculo</span>
+                <span className="rotulo mb-1 block">Busca por código, nome, regra ou vínculo</span>
                 <div className="relative">
                   <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
-                  <input className="campo pl-9" value={busca} onChange={(event) => { setBusca(event.target.value); resetarPagina(); }} placeholder="Ex.: 11215965, lasanha, conflito" />
+                  <input className="campo pl-9" value={busca} onChange={(event) => { setBusca(event.target.value); resetarPagina(); }} placeholder="Ex.: 11215965, risoto, conflito" />
                 </div>
               </label>
 
-              <Campo rotulo="Fila">
-                <select className="campo" value={filtroFila} onChange={(event) => { setFiltroFila(event.target.value as FiltroFila); resetarPagina(); }}>
-                  <option value="pendencias">Pendências humanas</option>
-                  <option value="AUTO_SEGURO">Automáticos seguros</option>
-                  <option value="PROVAVEL_REVISAO">Prováveis</option>
-                  <option value="CONFLITO">Conflitos</option>
-                  <option value="NOVO">Novos</option>
-                  <option value="CONFIRMADO_MANUALMENTE">Confirmados manualmente</option>
-                  <option value="IGNORADO">Ignorados</option>
+              <Campo rotulo="Workflow">
+                <select className="campo" value={filtroWorkflow} onChange={(event) => { setFiltroWorkflow(event.target.value as FiltroWorkflow); resetarPagina(); }}>
+                  <option value="todos">Todos</option>
+                  <option value="IMPORTADO_SEM_NECESSIDADE_DE_VINCULO">Sem necessidade atual</option>
+                  <option value="VINCULO_NECESSARIO">Vínculo necessário</option>
+                  <option value="PROVAVEL_REVISAO">Provável para revisão</option>
+                  <option value="CONFLITO">Conflito</option>
+                  <option value="CONFIRMADO">Confirmado</option>
+                  <option value="IGNORADO">Ignorado</option>
+                </select>
+              </Campo>
+
+              <Campo rotulo="Resultado de matching">
+                <select className="campo" value={filtroOutcome} onChange={(event) => { setFiltroOutcome(event.target.value as FiltroOutcome); resetarPagina(); }}>
+                  <option value="todos">Todos</option>
+                  <option value="AUTO_SEGURO">Automático seguro</option>
+                  <option value="PROVAVEL_REVISAO">Provável</option>
+                  <option value="CONFLITO">Conflito</option>
+                  <option value="NOVO">Novo</option>
                 </select>
               </Campo>
 
@@ -565,44 +628,68 @@ export default function IntegracaoSaiposPage() {
           </Card>
 
           <Card className="space-y-4">
-            <div className="flex flex-wrap items-end gap-3">
-              <Campo rotulo="Classificação coletiva (somente selecionados compatíveis)">
-                <select className="campo min-w-[260px]" value={classificacaoLote} onChange={(event) => setClassificacaoLote(event.target.value as ClassificacaoFuturaSaipos)}>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px_320px]">
+              <Campo rotulo="Motivo do vínculo coletivo">
+                <textarea className="campo min-h-[92px]" value={motivoLote} onChange={(event) => setMotivoLote(event.target.value)} placeholder="Explique por que estes itens devem apontar para a mesma entidade interna e qual a consequência operacional desse vínculo." />
+              </Campo>
+
+              <Campo rotulo="Classificação coletiva">
+                <select className="campo" value={classificacaoLote} onChange={(event) => setClassificacaoLote(event.target.value as ClassificacaoFuturaSaipos)}>
                   {CLASSIFICACOES_FUTURAS_SAIPOS.map((item) => (
                     <option key={item} value={item}>{item}</option>
                   ))}
                 </select>
               </Campo>
 
-              <Campo rotulo="Entidade interna coletiva">
-                <select className="campo min-w-[320px]" value={entidadeLoteId} onChange={(event) => setEntidadeLoteId(event.target.value)}>
+              <Campo rotulo="Entidade interna escolhida">
+                <select className="campo" value={entidadeLoteId} onChange={(event) => setEntidadeLoteId(event.target.value)}>
                   <option value="">Selecione uma entidade real</option>
                   {entidadesInternas.map((entidade) => (
-                    <option key={entidade.internal_uuid} value={entidade.internal_uuid}>{entidade.nome} • {entidade.internal_type}</option>
+                    <option key={entidade.internal_uuid} value={entidade.internal_uuid}>{entidade.nome} • {entidade.internal_type} • {entidade.status}</option>
                   ))}
                 </select>
               </Campo>
+            </div>
 
-              <button className="btn-primario" onClick={confirmarSelecionados} disabled={Boolean(mensagemBulk)}>
+            <div>
+              <p className="rotulo mb-2 block">Prévia da ação coletiva</p>
+              {previewColetivo.length === 0 ? (
+                <Vazio mensagem="Nenhum item selecionado para a ação coletiva." />
+              ) : (
+                <div className="space-y-2 rounded-card border border-stone-200 p-3">
+                  {previewColetivo.map((item) => (
+                    <div key={item.external_key} className="text-sm text-stone-700">
+                      <strong>{item.codigo_completo}</strong> • {item.nome_externo} • {item.entidade_interna_nome ?? "sem entidade"}
+                      <div className="text-xs text-stone-500">{item.consequence}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-stone-600">{mensagemColetiva || `${registrosSelecionados.length} item(ns) explicitamente selecionado(s) para eventual vínculo.`}</p>
+              <button className="btn-primario" onClick={confirmarSelecionados} disabled={Boolean(mensagemColetiva)}>
                 Confirmar selecionados
               </button>
             </div>
-            <p className="text-sm text-stone-600">{mensagemBulk || `${selecionadosCompativeis.length} item(ns) selecionado(s) para ação coletiva.`}</p>
           </Card>
 
           <Card className="space-y-3">
             <div className="overflow-x-auto">
-              <table className="min-w-[1960px] w-full text-sm">
+              <table className="min-w-[2180px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-left">
-                    <th className="rotulo px-2 py-2">Seleção</th>
-                    <th className="rotulo px-2 py-2">Fila</th>
+                    <th className="rotulo px-2 py-2">Marcar vínculo</th>
+                    <th className="rotulo px-2 py-2">Workflow</th>
+                    <th className="rotulo px-2 py-2">Matching</th>
                     <th className="rotulo px-2 py-2">Status registro</th>
                     <th className="rotulo px-2 py-2">Código completo</th>
                     <th className="rotulo px-2 py-2">Tipo externo</th>
                     <th className="rotulo px-2 py-2">Nome</th>
                     <th className="rotulo px-2 py-2">Regra</th>
                     <th className="rotulo px-2 py-2">Confiança</th>
+                    <th className="rotulo px-2 py-2">Preço</th>
                     <th className="rotulo px-2 py-2">Classificação</th>
                     <th className="rotulo px-2 py-2">Entidade interna</th>
                     <th className="rotulo px-2 py-2">Ações</th>
@@ -612,28 +699,26 @@ export default function IntegracaoSaiposPage() {
                   {registrosPagina.map((registro) => {
                     const entidadeAtualId = entidadeEfetivaId(registro);
                     const entidadeAtual = entidadeAtualId ? entidadesPorId.get(entidadeAtualId) ?? null : null;
-                    const podeConfirmar = registro.matching_result.state !== "AUTO_SEGURO" && !!entidadeAtual;
-                    const podeSelecionar = registro.matching_result.state === "PROVAVEL_REVISAO" || registro.matching_result.state === "NOVO";
+                    const canConfirm = registro.workflow_state !== "IMPORTADO_SEM_NECESSIDADE_DE_VINCULO" && registro.workflow_state !== "IGNORADO" && !!entidadeAtual;
+                    const canSelect = registro.workflow_state !== "CONFIRMADO" && registro.workflow_state !== "IGNORADO";
 
                     return (
                       <tr key={registro.external_key}>
                         <td className="px-2 py-2">
-                          <input type="checkbox" checked={Boolean(selecionados[registro.external_key])} disabled={!podeSelecionar} onChange={(event) => toggleSelecionado(registro.external_key, event.target.checked)} />
+                          <input type="checkbox" checked={Boolean(selecionados[registro.external_key])} disabled={!canSelect} onChange={(event) => toggleSelecionado(registro.external_key, event.target.checked)} />
                         </td>
-                        <td className="px-2 py-2">
-                          <Badge cor={corMatching(registro.matching_result.state)}>{rotuloMatching(registro.matching_result.state)}</Badge>
-                        </td>
-                        <td className="px-2 py-2">
-                          <Badge cor={statusRegistro(registro)}>{registro.indicador === "CONFLITO" ? "Conflito" : registro.indicador === "AVISO" ? "Aviso" : "Válido"}</Badge>
-                        </td>
+                        <td className="px-2 py-2"><Badge cor={corWorkflow(registro.workflow_state)}>{rotuloWorkflow(registro.workflow_state)}</Badge></td>
+                        <td className="px-2 py-2"><Badge cor={corOutcome(registro.matching_result.outcome)}>{rotuloOutcome(registro.matching_result.outcome)}</Badge></td>
+                        <td className="px-2 py-2"><Badge cor={statusRegistro(registro)}>{registro.indicador === "CONFLITO" ? "Conflito" : registro.indicador === "AVISO" ? "Aviso" : "Válido"}</Badge></td>
                         <td className="px-2 py-2 font-mono text-xs break-all">{registro.codigo_completo || "—"}</td>
-                        <td className="px-2 py-2">{registro.external_identity.external_entity_type}</td>
+                        <td className="px-2 py-2">{inferirTipoEntidadeExterna(registro)}</td>
                         <td className="px-2 py-2">
                           <p className="font-medium text-stone-900">{registro.nome_canonico || registro.descricao || "—"}</p>
                           <p className="text-xs text-stone-600">{registro.matching_result.reason}</p>
                         </td>
                         <td className="px-2 py-2 text-xs text-stone-700">{registro.matching_result.rule_id}</td>
                         <td className="px-2 py-2">{registro.matching_result.confidence_score}</td>
+                        <td className="px-2 py-2">{moedaCentavos(registro.preco_centavos)}</td>
                         <td className="px-2 py-2">
                           <select className="campo min-w-[220px]" value={classificacaoEfetiva(registro)} onChange={(event) => atualizarRascunho(registro, { classificacao_futura: event.target.value as ClassificacaoFuturaSaipos })}>
                             {CLASSIFICACOES_FUTURAS_SAIPOS.map((item) => (
@@ -654,8 +739,8 @@ export default function IntegracaoSaiposPage() {
                         </td>
                         <td className="px-2 py-2">
                           <div className="flex flex-wrap gap-2">
-                            <button className="btn-primario" onClick={() => confirmarRegistro(registro)} disabled={!podeConfirmar}>Confirmar</button>
-                            <button className="btn-secundario" onClick={() => ignorarRegistro(registro)} disabled={registro.matching_result.state === "AUTO_SEGURO"}>Ignorar</button>
+                            <button className="btn-primario" onClick={() => confirmarRegistro(registro)} disabled={!canConfirm}>Confirmar</button>
+                            <button className="btn-secundario" onClick={() => ignorarRegistro(registro)} disabled={registro.workflow_state === "CONFIRMADO"}>Ignorar</button>
                             <button className="btn-secundario" onClick={() => limparDecisao(registro)} disabled={!registro.binding}>Limpar</button>
                           </div>
                         </td>
@@ -684,7 +769,6 @@ export default function IntegracaoSaiposPage() {
               <h2 className="text-base font-semibold text-stone-900">Histórico estruturado</h2>
               <Badge cor="cinza">{estadoBindings.history.length} eventos</Badge>
             </div>
-
             {estadoBindings.history.length === 0 ? (
               <Vazio mensagem="Nenhuma decisão persistida ainda." />
             ) : (
@@ -701,7 +785,7 @@ export default function IntegracaoSaiposPage() {
           </Card>
         </div>
       ) : (
-        <Vazio mensagem="Selecione um arquivo .xlsx para carregar o bootstrap local do Saipos e revisar somente exceções." />
+        <Vazio mensagem="Selecione um arquivo .xlsx para carregar o catálogo externo do Saipos e revisar vínculos apenas quando necessário." />
       )}
     </div>
   );

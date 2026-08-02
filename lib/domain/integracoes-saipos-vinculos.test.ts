@@ -12,9 +12,11 @@ import {
   executarMatchingSaipos,
   exportarBackupBindingsSaipos,
   gerarChaveExternaSaipos,
+  gerarPreviewAcaoColetivaSaipos,
   inferirTipoEntidadeExterna,
   parseEstadoBindingsSaipos,
   registrosCompativeisParaAcaoColetiva,
+  reidentificarBindingSaipos,
   salvarBindingSaipos,
   type EntidadeInternaSaipos,
   type RegistroSaiposVinculado,
@@ -24,7 +26,7 @@ import {
 
 const entidades: EntidadeInternaSaipos[] = [
   { internal_uuid: "rec-1", internal_type: "PRATO", nome: "Lasanha G", status: "ATIVO" },
-  { internal_uuid: "rec-2", internal_type: "PRATO", nome: "Lasanha P", status: "ATIVO" },
+  { internal_uuid: "rec-2", internal_type: "OUTRO", nome: "Molho bolonhesa", status: "ATIVO" },
   { internal_uuid: "ins-1", internal_type: "INSUMO", nome: "Batata Frita", status: "ATIVO" },
   { internal_uuid: "ins-2", internal_type: "INSUMO", nome: "Batata Especial", status: "ATIVO" },
 ];
@@ -59,13 +61,16 @@ function registroBase(patch?: Partial<RegistroSaiposPrevisto>): RegistroSaiposPr
 
 function classificar(
   registros: RegistroSaiposPrevisto[],
-  estado: SaiposBindingsState = criarEstadoBindingsSaiposVazio()
+  estado: SaiposBindingsState = criarEstadoBindingsSaiposVazio(),
+  selectedKeys: string[] = [],
+  contexto = SAIPOS_IMPORT_CONTEXT_DEFAULT
 ): RegistroSaiposVinculado[] {
   return executarMatchingSaipos({
     registros,
     state: estado,
     entidades,
-    contexto_importacao: SAIPOS_IMPORT_CONTEXT_DEFAULT,
+    contexto_importacao: contexto,
+    selected_external_keys: selectedKeys,
     nowIso: "2026-08-02T12:00:00.000Z",
   });
 }
@@ -82,13 +87,13 @@ function storageFake(initial?: Record<string, string>): StorageLike {
   };
 }
 
-describe("integracoes-saipos-vinculos api-ready", () => {
+describe("integracoes-saipos-vinculos blocking fixes", () => {
   it("gera chave composta sem colisão entre unidade, ambiente e tipo", () => {
     const registro = registroBase();
     const base = criarIdentidadeExternaSaipos(registro, SAIPOS_IMPORT_CONTEXT_DEFAULT);
     const keyBase = gerarChaveExternaSaipos(base);
     const keyOutraUnidade = gerarChaveExternaSaipos({ ...base, unidade_id: "loja-2" });
-    const keyOutroAmbiente = gerarChaveExternaSaipos({ ...base, environment: "api_publica" });
+    const keyOutroAmbiente = gerarChaveExternaSaipos({ ...base, environment: "producao" });
     const keyOutroTipo = gerarChaveExternaSaipos({ ...base, external_entity_type: "COMPLEMENTO" });
 
     expect(keyBase).not.toBe(keyOutraUnidade);
@@ -96,36 +101,47 @@ describe("integracoes-saipos-vinculos api-ready", () => {
     expect(keyBase).not.toBe(keyOutroTipo);
   });
 
-  it("AUTO_SEGURO só aparece por regra determinística inequívoca", () => {
-    const classificados = classificar([registroBase()]);
-    expect(classificados[0].matching_result.state).toBe("AUTO_SEGURO");
-    expect(classificados[0].matching_result.rule_id).toBe("exact_unique_name_and_type");
+  it("mesmo item vindo por excel e api recupera a mesma chave externa", () => {
+    const registro = registroBase();
+    const keyExcel = gerarChaveExternaSaipos(
+      criarIdentidadeExternaSaipos(registro, {
+        ...SAIPOS_IMPORT_CONTEXT_DEFAULT,
+        ingestion_source: "excel",
+      })
+    );
+    const keyApi = gerarChaveExternaSaipos(
+      criarIdentidadeExternaSaipos(registro, {
+        ...SAIPOS_IMPORT_CONTEXT_DEFAULT,
+        ingestion_source: "api",
+      })
+    );
+    expect(keyExcel).toBe(keyApi);
+  });
 
-    const binding = {
-      external_key: classificados[0].external_key,
-      external_identity: classificados[0].external_identity,
-      matched_internal_uuid: "rec-1",
-      matched_internal_type: "PRATO" as const,
-      matched_internal_nome: "Lasanha G",
-      matching_state: "AUTO_SEGURO" as const,
-      classificacao_futura: "NÃO CLASSIFICADO" as ClassificacaoFuturaSaipos,
-      confidence_score: 100,
-      rule_id: "existing_binding_exact",
-      reason: "Vínculo externo previamente conhecido para esta chave composta.",
-      candidates_considered: 1,
-      matched_at: "2026-08-02T12:00:00.000Z",
-      decision_source: "automatic" as const,
-      actor: "sync-engine",
-    };
+  it("nome exato único e tipo compatível não produz AUTO_SEGURO sem identificador determinístico", () => {
+    const classificados = classificar([registroBase()]);
+    expect(classificados[0].matching_result.outcome).toBe("PROVAVEL_REVISAO");
+    expect(classificados[0].matching_result.rule_id).toBe("name_similarity_review");
+  });
+
+  it("binding anterior confirmado para a mesma identidade externa produz AUTO_SEGURO", () => {
+    const registro = classificar([registroBase()], criarEstadoBindingsSaiposVazio(), ["seed"]).map((item) => item)[0];
+    const binding = criarBindingManualSaipos({
+      registro,
+      classificacao_futura: "VARIAÇÃO DO PRATO",
+      entidade: entidades[0],
+      actor: "tester",
+      reason: "Binding oficial prévio",
+    });
     const estado = salvarBindingSaipos(criarEstadoBindingsSaiposVazio(), binding);
-    const rematch = classificar([registroBase()], estado);
-    expect(rematch[0].matching_result.state).toBe("AUTO_SEGURO");
-    expect(rematch[0].matching_result.rule_id).toBe("existing_binding_exact");
+    const reclassificado = classificar([registroBase()], estado);
+    expect(reclassificado[0].matching_result.outcome).toBe("AUTO_SEGURO");
+    expect(reclassificado[0].matching_result.rule_id).toBe("existing_confirmed_binding");
   });
 
   it("nome semelhante isoladamente não produz AUTO_SEGURO", () => {
     const resultado = classificar([registroBase({ descricao: "Batata", nome_canonico: "Batata" })]);
-    expect(resultado[0].matching_result.state).not.toBe("AUTO_SEGURO");
+    expect(resultado[0].matching_result.outcome).not.toBe("AUTO_SEGURO");
   });
 
   it("nomes repetidos geram revisão ou conflito", () => {
@@ -136,47 +152,42 @@ describe("integracoes-saipos-vinculos api-ready", () => {
       alertas: ["Mesmo nome canônico com código diferente."],
     });
     const resultado = classificar([repetido]);
-    expect(["PROVAVEL_REVISAO", "CONFLITO"]).toContain(resultado[0].matching_result.state);
-    expect(resultado[0].matching_result.state).not.toBe("AUTO_SEGURO");
+    expect(["PROVAVEL_REVISAO", "CONFLITO"]).toContain(resultado[0].matching_result.outcome);
   });
 
-  it("sem candidato resulta em NOVO", () => {
+  it("nenhum candidato resulta em NOVO e sem necessidade humana por padrão", () => {
     const resultado = classificar([registroBase({ descricao: "Item sem par", nome_canonico: "Item sem par" })]);
-    expect(resultado[0].matching_result.state).toBe("NOVO");
+    expect(resultado[0].matching_result.outcome).toBe("NOVO");
+    expect(resultado[0].workflow_state).toBe("IMPORTADO_SEM_NECESSIDADE_DE_VINCULO");
   });
 
   it("múltiplos candidatos próximos resultam em CONFLITO", () => {
     const resultado = classificar([
-      registroBase({
-        tipo: "COMPLEMENTO",
-        descricao: "Batata",
-        nome_canonico: "Batata",
-      }),
+      registroBase({ tipo: "COMPLEMENTO", descricao: "Batata", nome_canonico: "Batata" }),
     ]);
-    expect(resultado[0].matching_result.state).toBe("CONFLITO");
+    expect(resultado[0].matching_result.outcome).toBe("CONFLITO");
   });
 
-  it("persiste através da interface de repositório", () => {
+  it("seleção explícita move item novo para vínculo necessário", () => {
+    const primeiro = classificar([registroBase({ codigo_completo: "N-1", descricao: "Sem match", nome_canonico: "Sem match" })])[0];
+    const reclassificado = classificar([registroBase({ codigo_completo: "N-1", descricao: "Sem match", nome_canonico: "Sem match" })], criarEstadoBindingsSaiposVazio(), [primeiro.external_key]);
+    expect(reclassificado[0].workflow_state).toBe("VINCULO_NECESSARIO");
+  });
+
+  it("persistência ocorre através da interface de repositório", () => {
     const repo = criarSaiposBindingsRepositoryLocal(storageFake());
-    const registro = classificar([registroBase()])[0];
+    const registro = classificar([registroBase()], criarEstadoBindingsSaiposVazio(), [classificar([registroBase()])[0].external_key])[0];
     const binding = criarBindingManualSaipos({
       registro,
       classificacao_futura: "VARIAÇÃO DO PRATO",
       entidade: entidades[0],
       actor: "tester",
-      timestamp: "2026-08-02T12:00:00.000Z",
     });
-
     repo.salvar(binding, { registros: [registro], entidades, contexto_importacao: SAIPOS_IMPORT_CONTEXT_DEFAULT });
-    const recarregado = repo.buscarPorChaveExterna(binding.external_key, {
-      registros: [registro],
-      entidades,
-      contexto_importacao: SAIPOS_IMPORT_CONTEXT_DEFAULT,
-    });
-    expect(recarregado?.matched_internal_uuid).toBe("rec-1");
+    expect(repo.buscarPorChaveExterna(binding.external_key)?.matched_internal_uuid).toBe("rec-1");
   });
 
-  it("migra o estado anterior quando seguro e preserva backup quando não seguro", () => {
+  it("migra estado v1 preservando backup e pendências inseguras", () => {
     const legado = {
       versao: 1,
       decisoes: {
@@ -201,65 +212,131 @@ describe("integracoes-saipos-vinculos api-ready", () => {
       },
       historico: [],
     };
-
     const migrado = parseEstadoBindingsSaipos(legado, {
       registros: [registroBase()],
       entidades,
       contexto_importacao: SAIPOS_IMPORT_CONTEXT_DEFAULT,
     });
-
-    expect(migrado.version).toBe(2);
+    expect(migrado.version).toBe(3);
     expect(migrado.migration.migrated_bindings).toBe(1);
     expect(migrado.migration.pending_legacy).toHaveLength(1);
     expect(migrado.migration.legacy_backup).not.toBeNull();
   });
 
-  it("mantém histórico estruturado com before e after", () => {
-    const registro = classificar([registroBase()])[0];
+  it("migra estado v2 para environment desconhecido sem perder binding", () => {
+    const legacyV2 = {
+      version: 2,
+      bindings: {
+        foo: {
+          external_key: "foo",
+          external_identity: {
+            source_system: "saipos",
+            environment: "api_publica",
+            unidade_id: "nao_informada",
+            codigo_completo: "SAI-1",
+            external_entity_type: "PRATO",
+            canal: null,
+          },
+          matched_internal_uuid: "rec-1",
+          matched_internal_type: "PRATO",
+          matched_internal_nome: "Lasanha G",
+          matching_state: "CONFIRMADO_MANUALMENTE",
+          classificacao_futura: "VARIAÇÃO DO PRATO",
+          confidence_score: 100,
+          rule_id: "legacy",
+          reason: "legacy",
+          candidates_considered: 1,
+          matched_at: "2026-08-02T10:00:00.000Z",
+          decision_source: "human",
+          actor: "tester",
+        },
+      },
+      history: [],
+      migration: { from_version: null, migrated_bindings: 0, pending_legacy: [], legacy_backup: null },
+    };
+    const migrado = parseEstadoBindingsSaipos(legacyV2);
+    const binding = Object.values(migrado.bindings)[0];
+    expect(migrado.version).toBe(3);
+    expect(binding.external_identity.environment).toBe("desconhecido");
+  });
+
+  it("reidentifica binding para ambiente ou unidade real sem duplicar decisões", () => {
+    const registro = classificar([registroBase()], criarEstadoBindingsSaiposVazio(), [classificar([registroBase()])[0].external_key])[0];
     const binding = criarBindingManualSaipos({
       registro,
       classificacao_futura: "VARIAÇÃO DO PRATO",
       entidade: entidades[0],
       actor: "tester",
-      timestamp: "2026-08-02T12:00:00.000Z",
     });
     const estado = salvarBindingSaipos(criarEstadoBindingsSaiposVazio(), binding);
+    const rekeyed = reidentificarBindingSaipos({
+      state: estado,
+      externalKey: binding.external_key,
+      next_identity: { ...binding.external_identity, environment: "producao", unidade_id: "loja-1" },
+      actor: "tester",
+    });
+    expect(Object.keys(rekeyed.bindings)).toHaveLength(1);
+    expect(Object.values(rekeyed.bindings)[0].external_identity.environment).toBe("producao");
+  });
 
+  it("mantém histórico estruturado com before e after", () => {
+    const registroSeed = classificar([registroBase()])[0];
+    const registro = classificar([registroBase()], criarEstadoBindingsSaiposVazio(), [registroSeed.external_key])[0];
+    const binding = criarBindingManualSaipos({
+      registro,
+      classificacao_futura: "VARIAÇÃO DO PRATO",
+      entidade: entidades[0],
+      actor: "tester",
+    });
+    const estado = salvarBindingSaipos(criarEstadoBindingsSaiposVazio(), binding);
     expect(estado.history[0].action).toBe("CREATE");
     expect(estado.history[0].before).toBeNull();
     expect(estado.history[0].after?.external_key).toBe(binding.external_key);
-    expect(estado.history[0].rule_id).toBe("human_confirmation");
   });
 
-  it("ação coletiva opera somente nos selecionados e compatíveis", () => {
-    const registros = classificar([
+  it("ação coletiva só opera sobre selecionados, com prévia e motivo", () => {
+    const base = [
       registroBase({ codigo_completo: "A-1", descricao: "Sem match 1", nome_canonico: "Sem match 1" }),
       registroBase({ codigo_completo: "A-2", descricao: "Sem match 2", nome_canonico: "Sem match 2" }),
       registroBase({ codigo_completo: "A-3", descricao: "Sem match 3", nome_canonico: "Sem match 3" }),
-    ]);
-    expect(registrosCompativeisParaAcaoColetiva(registros.slice(0, 2))).toBe(true);
+    ];
+    const preliminares = classificar(base);
+    const selecionados = [preliminares[0].external_key, preliminares[1].external_key];
+    const registros = classificar(base, criarEstadoBindingsSaiposVazio(), selecionados);
 
-    const resultado = aplicarAcaoColetivaSaipos({
+    expect(registrosCompativeisParaAcaoColetiva(registros.slice(0, 2))).toBe(true);
+    expect(gerarPreviewAcaoColetivaSaipos({ registros, selected_keys: selecionados, entidade: entidades[0] })).toHaveLength(2);
+
+    const semMotivo = aplicarAcaoColetivaSaipos({
       registros,
-      selected_keys: [registros[0].external_key, registros[1].external_key],
+      selected_keys: selecionados,
       state: criarEstadoBindingsSaiposVazio(),
       classificacao_futura: "VARIAÇÃO DO PRATO",
       entidade: entidades[0],
       actor: "tester",
-      timestamp: "2026-08-02T12:00:00.000Z",
+      reason: "",
     });
+    expect(semMotivo.applied_keys).toHaveLength(0);
 
-    expect(Object.keys(resultado.state.bindings)).toHaveLength(2);
-    expect(resultado.applied_keys).toHaveLength(2);
-    expect(resultado.skipped_keys).toHaveLength(0);
+    const comMotivo = aplicarAcaoColetivaSaipos({
+      registros,
+      selected_keys: selecionados,
+      state: criarEstadoBindingsSaiposVazio(),
+      classificacao_futura: "VARIAÇÃO DO PRATO",
+      entidade: entidades[0],
+      actor: "tester",
+      reason: "Consolidar temporariamente itens selecionados para análise manual de CMV.",
+    });
+    expect(comMotivo.applied_keys).toHaveLength(2);
+    expect(comMotivo.skipped_keys).toHaveLength(0);
   });
 
   it("não realiza chamadas externas durante matching e persistência local", () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-
     const repo = criarSaiposBindingsRepositoryLocal(storageFake());
-    const registro = classificar([registroBase()])[0];
+    const preliminar = classificar([registroBase()])[0];
+    const registro = classificar([registroBase()], criarEstadoBindingsSaiposVazio(), [preliminar.external_key])[0];
     const binding = criarBindingManualSaipos({
       registro,
       classificacao_futura: "VARIAÇÃO DO PRATO",
@@ -268,7 +345,6 @@ describe("integracoes-saipos-vinculos api-ready", () => {
     });
     repo.salvar(binding, { registros: [registro], entidades, contexto_importacao: SAIPOS_IMPORT_CONTEXT_DEFAULT });
     classificar([registroBase()]);
-
     expect(fetchSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -276,47 +352,30 @@ describe("integracoes-saipos-vinculos api-ready", () => {
   it("mantém o Excel real fora do Git quando o arquivo local existe", () => {
     const caminho = "Códigos de integração (1).xlsx";
     if (!existsSync(caminho)) return;
-
     const status = execSync('git status --porcelain -- "Códigos de integração (1).xlsx"', {
       cwd: process.cwd(),
       encoding: "utf8",
     }).trim();
-
     expect(status.startsWith("??")).toBe(true);
   });
 
-  it("gera painel organizado por automáticos e exceções", () => {
-    const classificados = classificar([
+  it("gera painel separando catálogo importado e pendência humana real", () => {
+    const base = [
       registroBase({ codigo_completo: "NEW-1", descricao: "Sem match", nome_canonico: "Sem match" }),
       registroBase({ codigo_completo: "CFL-1", tipo: "COMPLEMENTO", descricao: "Batata", nome_canonico: "Batata" }),
       registroBase(),
-    ]);
-    const registroManual = classificados[2];
-    const binding = criarBindingManualSaipos({
-      registro: registroManual,
-      classificacao_futura: "VARIAÇÃO DO PRATO",
-      entidade: entidades[0],
-      actor: "tester",
-      timestamp: "2026-08-02T12:00:00.000Z",
-    });
-
-    const reclassificados = executarMatchingSaipos({
-      registros: classificados.map(({ external_identity, external_key, matching_result, binding: _, ...registro }) => registro),
-      state: salvarBindingSaipos(criarEstadoBindingsSaiposVazio(), binding),
-      entidades,
-      contexto_importacao: SAIPOS_IMPORT_CONTEXT_DEFAULT,
-      nowIso: "2026-08-02T12:00:00.000Z",
-    });
-
-    const painel = calcularPainelMatchingSaipos(reclassificados);
-    expect(painel.total_analisado).toBe(3);
-    expect(painel.confirmados).toBe(1);
-    expect(painel.pendencias_humanas).toBe(2);
+    ];
+    const registros = classificar(base);
+    const painel = calcularPainelMatchingSaipos(registros);
+    expect(painel.total_importado).toBe(3);
+    expect(painel.catalogo_externo_disponivel).toBe(3);
+    expect(painel.itens_sem_necessidade_atual_de_vinculo).toBe(3);
+    expect(painel.pendencias_humanas_reais).toBe(0);
   });
 
   it("exporta backup versionado do novo estado", () => {
     const backup = exportarBackupBindingsSaipos(criarEstadoBindingsSaiposVazio());
-    expect(backup).toContain('"version": 2');
+    expect(backup).toContain('"version": 3');
   });
 
   it("infere o tipo externo atual do Excel sem inventar categorias", () => {

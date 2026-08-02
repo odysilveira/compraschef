@@ -8,7 +8,8 @@ import {
   type SaiposBindingsState,
 } from "./integracoes-saipos-vinculos";
 
-const STORAGE_CURRENT = "integracao-saipos:bindings:v2";
+const STORAGE_CURRENT = "integracao-saipos:bindings:v3";
+const STORAGE_PREVIOUS = "integracao-saipos:bindings:v2";
 const STORAGE_LEGACY = "integracao-saipos:decisoes:v1";
 
 export interface StorageLike {
@@ -31,6 +32,15 @@ function lerRaw(storage: StorageLike | null): unknown {
   if (atual) {
     try {
       return JSON.parse(atual) as unknown;
+    } catch {
+      return null;
+    }
+  }
+
+  const anterior = storage.getItem(STORAGE_PREVIOUS);
+  if (anterior) {
+    try {
+      return JSON.parse(anterior) as unknown;
     } catch {
       return null;
     }

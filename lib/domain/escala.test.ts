@@ -7,12 +7,18 @@ import {
   datasTrabalhoPadraoClt,
   gerarEscalaPadraoClt,
   janela28Dias,
+  janelaCalendarioEscala,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
   montarTextoConvocacaoWhatsApp,
+  moverSlotParaData,
   registrarRespostaConvocacao,
+  resumoSetoresDoDia,
+  rotuloPeriodoJanela,
   rotulosCabecalhoSemana,
+  setorDoPlantao,
   slotsDaPessoaNaJanela,
+  textoResumoSetores,
   validarPreRequisitosConvocacao,
 } from "./escala";
 
@@ -262,11 +268,89 @@ describe("escala domain", () => {
     expect(semanas.every((s) => s.length === 7)).toBe(true);
   });
 
+  it("janela do calendário vai até o fim do mês seguinte", () => {
+    // 2/ago → 31/ago + 1–30/set
+    const dias = janelaCalendarioEscala("2026-08-02");
+    expect(dias[0]).toBe("2026-08-02");
+    expect(dias[dias.length - 1]).toBe("2026-09-30");
+    expect(dias).toContain("2026-08-31");
+    expect(dias).toContain("2026-09-01");
+    expect(rotuloPeriodoJanela(dias)).toContain("02/08/2026");
+    expect(rotuloPeriodoJanela(dias)).toContain("30/09/2026");
+  });
+
   it("preenche células vazias antes da primeira data", () => {
     // 2026-08-05 é quarta → Seg e Ter vazios
     const semanas = montarGradeCalendario(["2026-08-05", "2026-08-06"], 1);
     expect(semanas[0]?.slice(0, 2)).toEqual([null, null]);
     expect(semanas[0]?.[2]).toBe("2026-08-05");
+  });
+
+  it("move plantão para outro dia e atualiza convocação", () => {
+    const db = dbBase();
+    const criado = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-20",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-move", agora: "2026-08-10T12:00:00.000Z", convocacaoId: "conv-move" }
+    );
+    expect(criado.sucesso).toBe(true);
+    const r = moverSlotParaData(db, "esc-move", "2026-08-22", { agora: "2026-08-10T12:00:00.000Z" });
+    expect(r.sucesso).toBe(true);
+    expect(db.escala_slots.find((s) => s.id === "esc-move")?.data).toBe("2026-08-22");
+    expect(db.convocacoes.find((c) => c.id === "conv-move")?.texto_mensagem).toContain("22/08/2026");
+  });
+
+  it("não move se já existir plantão da pessoa no dia destino", () => {
+    const db = dbBase();
+    criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-20",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-a", agora: "2026-08-10T12:00:00.000Z" }
+    );
+    criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-21",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-b", agora: "2026-08-10T12:00:00.000Z" }
+    );
+    const r = moverSlotParaData(db, "esc-a", "2026-08-21");
+    expect(r.sucesso).toBe(false);
+    expect(r.erros[0]).toMatch(/Já existe/);
+  });
+
+  it("classifica setores e resume o dia", () => {
+    const slots = [
+      { id: "1", pessoa_id: "i1", data: "2026-08-10", hora_inicio: "18:00", hora_fim: "23:00", intervalo_min: 30, funcao: "Cozinha", criado_em: "", atualizado_em: "" },
+      { id: "2", pessoa_id: "i2", data: "2026-08-10", hora_inicio: "18:00", hora_fim: "23:00", intervalo_min: 30, funcao: "Balcão / Caixa", criado_em: "", atualizado_em: "" },
+      { id: "3", pessoa_id: "e1", data: "2026-08-10", hora_inicio: "18:00", hora_fim: "23:00", intervalo_min: 30, funcao: "Entregador", criado_em: "", atualizado_em: "" },
+    ];
+    const pessoas = [
+      { id: "i1", tipo: "intermitente" as const },
+      { id: "i2", tipo: "intermitente" as const },
+      { id: "e1", tipo: "entregador" as const },
+    ];
+    expect(setorDoPlantao(slots[0]!, pessoas[0])).toBe("cozinha");
+    expect(setorDoPlantao(slots[1]!, pessoas[1])).toBe("balcao");
+    expect(setorDoPlantao(slots[2]!, pessoas[2])).toBe("motoboy");
+    expect(resumoSetoresDoDia(slots, pessoas)).toEqual({ motoboys: 1, cozinha: 1, balcao: 1 });
+    expect(textoResumoSetores({ motoboys: 1, cozinha: 2, balcao: 0 })).toBe("1 moto · 2 coz");
   });
 
   it("filtra plantões da pessoa na janela", () => {

@@ -1,37 +1,50 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, Copy, Plus, RefreshCw } from "lucide-react";
+import { CalendarDays, Check, Copy, GripVertical, Plus, RefreshCw } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
   LOCAL_PADRAO_ESCALA,
   PADROES_ESCALA_CLT,
+  abrevSetorConvocacao,
   convocacaoDoSlot,
   criarSlot,
   formatDataBrLonga,
   gerarEscalaPadraoClt,
-  janela28Dias,
+  janelaCalendarioEscala,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
+  moverSlotParaData,
   nomeDiaSemana,
+  nomeMesAno,
   pessoaPrecisaConvocacao,
   registrarRespostaConvocacao,
+  resumoSetoresDoDia,
+  rotuloPeriodoJanela,
+  rotuloSetorConvocacao,
   rotuloStatusConvocacao,
   rotulosCabecalhoSemana,
+  setorDoPlantao,
   slotsNaJanela,
+  textoResumoSetores,
   validarPreRequisitosConvocacao,
   type PadraoEscalaClt,
+  type SetorConvocacaoEscala,
 } from "@/lib/domain/escala";
 import { rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { moeda } from "@/lib/format";
-import type { ConvocacaoIntermitente, EscalaSlot, StatusConvocacao } from "@/lib/types";
+import type { ConvocacaoIntermitente, EscalaSlot, PessoaRH, StatusConvocacao } from "@/lib/types";
 
 function hojeISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+type Arrasto =
+  | { tipo: "slot"; id: string }
+  | { tipo: "pessoa"; id: string; setor: SetorConvocacaoEscala };
 
 type FormPlantao = {
   pessoa_id: string;
@@ -91,6 +104,67 @@ function BadgeConvocacao({ status }: { status: StatusConvocacao }) {
   return <Badge cor={cor}>{rotuloStatusConvocacao(status)}</Badge>;
 }
 
+function BancoPessoas({
+  titulo,
+  pessoas,
+  setor,
+  arrasto,
+  onDragStart,
+  onDragEnd,
+}: {
+  titulo: string;
+  pessoas: PessoaRH[];
+  setor: SetorConvocacaoEscala;
+  arrasto: Arrasto | null;
+  onDragStart: (pessoaId: string, setor: SetorConvocacaoEscala) => void;
+  onDragEnd: () => void;
+}) {
+  if (pessoas.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{titulo}</p>
+      <ul className="space-y-1">
+        {pessoas.map((p) => {
+          const gate = validarPreRequisitosConvocacao(p);
+          const ativo = arrasto?.tipo === "pessoa" && arrasto.id === p.id && arrasto.setor === setor;
+          return (
+            <li key={`${setor}-${p.id}`}>
+              <button
+                type="button"
+                draggable
+                className={`flex w-full cursor-grab items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-sm active:cursor-grabbing ${
+                  ativo
+                    ? "border-primaria bg-primaria/10 opacity-60"
+                    : gate.ok
+                      ? "border-stone-200 bg-white hover:border-primaria/40"
+                      : "border-amber-200 bg-amber-50/80"
+                }`}
+                title={
+                  gate.ok
+                    ? `Arraste ${p.nome} como ${rotuloSetorConvocacao(setor)}`
+                    : `Falta contrato/eSocial — ${gate.erros[0] ?? ""}`
+                }
+                onDragStart={(e) => {
+                  onDragStart(p.id, setor);
+                  e.dataTransfer.setData("text/escala-drag-tipo", "pessoa");
+                  e.dataTransfer.setData("text/escala-pessoa-id", p.id);
+                  e.dataTransfer.setData("text/escala-setor", setor);
+                  e.dataTransfer.effectAllowed = "copy";
+                }}
+                onDragEnd={onDragEnd}
+              >
+                <GripVertical size={14} className="shrink-0 text-slate-400" />
+                <span className="min-w-0 flex-1 truncate font-medium text-slate-800">{p.nome}</span>
+                {!gate.ok && <Badge cor="laranja">pendente</Badge>}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export default function RhEscalaPage() {
   const db = useDB();
   const { papel } = usePapel();
@@ -102,14 +176,26 @@ export default function RhEscalaPage() {
   const [copiado, setCopiado] = useState(false);
   const [formPadrao, setFormPadrao] = useState<FormPadrao | null>(null);
   const [erroPadrao, setErroPadrao] = useState<string | null>(null);
+  const [arrasto, setArrasto] = useState<Arrasto | null>(null);
+  const [diaDestinoHover, setDiaDestinoHover] = useState<string | null>(null);
+  const arrastouRef = useRef(false);
 
-  const dias = useMemo(() => janela28Dias(hojeISO()), []);
+  const dias = useMemo(() => janelaCalendarioEscala(hojeISO()), []);
+  const periodoRotulo = useMemo(() => rotuloPeriodoJanela(dias), [dias]);
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
     [db.pessoas]
   );
   const colaboradores = useMemo(
     () => pessoasAtivas.filter((p) => p.tipo === "colaborador"),
+    [pessoasAtivas]
+  );
+  const intermitentes = useMemo(
+    () => pessoasAtivas.filter((p) => p.tipo === "intermitente"),
+    [pessoasAtivas]
+  );
+  const entregadores = useMemo(
+    () => pessoasAtivas.filter((p) => p.tipo === "entregador"),
     [pessoasAtivas]
   );
   const slots = useMemo(() => slotsNaJanela(db, dias), [db, dias]);
@@ -257,7 +343,7 @@ export default function RhEscalaPage() {
     mutate((atual) => Object.assign(atual, proximo));
     setFormPadrao(null);
     setMensagem(
-      `Padrão gerado: ${resultado.criados} plantão(ões) nos próximos 28 dias` +
+      `Padrão gerado: ${resultado.criados} plantão(ões) no período do calendário` +
         (resultado.pulados ? ` (${resultado.pulados} dia(s) já existiam)` : "") +
         "."
     );
@@ -281,6 +367,91 @@ export default function RhEscalaPage() {
     }
   }
 
+  function soltarPlantaoNoDia(slotId: string, novaData: string) {
+    const proximo = structuredClone(db);
+    const r = moverSlotParaData(proximo, slotId, novaData);
+    setArrasto(null);
+    setDiaDestinoHover(null);
+    if (!r.sucesso) {
+      setErro(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(null);
+    setMensagem(`Plantão movido para ${formatDataBrLonga(novaData)}.`);
+    if (r.avisos.length) setAviso(r.avisos.join(" "));
+  }
+
+  function soltarPessoaNoDia(pessoaId: string, data: string, setor: SetorConvocacaoEscala) {
+    const pessoa = db.pessoas.find((p) => p.id === pessoaId);
+    setArrasto(null);
+    setDiaDestinoHover(null);
+    if (!pessoa) {
+      setErro("Pessoa não encontrada.");
+      return;
+    }
+    if (setor === "motoboy" && pessoa.tipo !== "entregador") {
+      setErro("Só entregadores entram como motoboy.");
+      return;
+    }
+    if (setor !== "motoboy" && pessoa.tipo === "entregador") {
+      setErro("Entregador só pode ser lançado como motoboy.");
+      return;
+    }
+    const gate = validarPreRequisitosConvocacao(pessoa);
+    if (!gate.ok) {
+      setErro(gate.erros.join(" "));
+      setAviso("Marque contrato e eSocial no perfil antes de convocar.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const resultado = criarSlot(
+      proximo,
+      {
+        pessoa_id: pessoaId,
+        data,
+        hora_inicio: "18:00",
+        hora_fim: "23:30",
+        intervalo_min: 30,
+        funcao: rotuloSetorConvocacao(setor),
+        local: LOCAL_PADRAO_ESCALA,
+      },
+      { id: uid("esc"), convocacaoId: uid("conv") }
+    );
+    if (!resultado.sucesso) {
+      setErro(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(null);
+    const nomeCurto = pessoa.nome.split(/\s+/)[0];
+    setMensagem(
+      resultado.convocacao
+        ? `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)} (convocação em rascunho).`
+        : `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)}.`
+    );
+    if (resultado.avisos.length) setAviso(resultado.avisos.join(" "));
+    if (resultado.slot) setDetalheSlotId(resultado.slot.id);
+  }
+
+  function aoSoltarNoDia(dia: string, dataTransfer: DataTransfer) {
+    const tipo = dataTransfer.getData("text/escala-drag-tipo") || arrasto?.tipo;
+    if (tipo === "pessoa") {
+      const pessoaId = dataTransfer.getData("text/escala-pessoa-id") || (arrasto?.tipo === "pessoa" ? arrasto.id : "");
+      const setorBruto =
+        dataTransfer.getData("text/escala-setor") || (arrasto?.tipo === "pessoa" ? arrasto.setor : "");
+      const setor = (["cozinha", "balcao", "motoboy"] as SetorConvocacaoEscala[]).includes(
+        setorBruto as SetorConvocacaoEscala
+      )
+        ? (setorBruto as SetorConvocacaoEscala)
+        : null;
+      if (pessoaId && setor) soltarPessoaNoDia(pessoaId, dia, setor);
+      return;
+    }
+    const slotId = dataTransfer.getData("text/escala-slot-id") || (arrasto?.tipo === "slot" ? arrasto.id : "");
+    if (slotId) soltarPlantaoNoDia(slotId, dia);
+  }
+
   const detalheSlot = detalheSlotId ? db.escala_slots.find((s) => s.id === detalheSlotId) : null;
   const detalheConv: ConvocacaoIntermitente | undefined = detalheSlot
     ? convocacaoDoSlot(db, detalheSlot.id)
@@ -289,8 +460,8 @@ export default function RhEscalaPage() {
   return (
     <div>
       <TituloPagina
-        titulo="Escala — 28 dias"
-        subtitulo="Plantões dos colaboradores e convocações de intermitentes. Contrato escrito + eSocial vêm antes; WhatsApp só convoca o período."
+        titulo="Escala"
+        subtitulo={`Resto do mês atual + mês seguinte (${periodoRotulo}). Arraste intermitentes/motoboys da lista para o dia, ou remarque plantões arrastando no calendário.`}
         acao={
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-secundario" onClick={abrirPadrao}>
@@ -329,104 +500,237 @@ export default function RhEscalaPage() {
       </div>
 
       {slots.length === 0 ? (
-        <Vazio mensagem="Nenhum plantão nos próximos 28 dias. Clique num dia do calendário para lançar." />
+        <Vazio mensagem="Nenhum plantão no período. Arraste alguém da lista ao lado ou clique num dia." />
       ) : null}
 
-      <Card className="overflow-x-auto p-3 sm:p-4">
-        <p className="mb-3 text-sm text-slate-600">
-          Calendário dos próximos 28 dias — todos os dias aparecem; clique no dia para adicionar ou no nome
-          para ver o plantão.
-        </p>
-        <div className="min-w-[640px]">
-          <div className="mb-1 grid grid-cols-7 gap-1">
-            {cabecalhoSemana.map((rotulo) => (
-              <div key={rotulo} className="px-1 py-1 text-center text-xs font-semibold uppercase text-slate-500">
-                {rotulo}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <aside className="w-full shrink-0 space-y-3 lg:sticky lg:top-20 lg:w-60">
+          <Card className="space-y-3 p-3">
+            <div>
+              <p className="text-sm font-bold text-slate-900">Banco para convocar</p>
+              <p className="text-xs text-slate-600">
+                Arraste da lista certa: cozinha, balcão/caixa ou motoboy. O dia mostra quantos já tem em cada setor.
+              </p>
+            </div>
+            <BancoPessoas
+              titulo="Intermitentes — Cozinha"
+              pessoas={intermitentes}
+              setor="cozinha"
+              arrasto={arrasto}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
+              onDragEnd={() => {
+                setArrasto(null);
+                setDiaDestinoHover(null);
+              }}
+            />
+            <BancoPessoas
+              titulo="Intermitentes — Balcão / Caixa"
+              pessoas={intermitentes}
+              setor="balcao"
+              arrasto={arrasto}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
+              onDragEnd={() => {
+                setArrasto(null);
+                setDiaDestinoHover(null);
+              }}
+            />
+            <BancoPessoas
+              titulo="Motoboys / entregadores"
+              pessoas={entregadores}
+              setor="motoboy"
+              arrasto={arrasto}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
+              onDragEnd={() => {
+                setArrasto(null);
+                setDiaDestinoHover(null);
+              }}
+            />
+            {intermitentes.length === 0 && entregadores.length === 0 && (
+              <p className="text-xs text-slate-500">
+                Cadastre intermitentes ou entregadores em{" "}
+                <Link href="/rh" className="underline">
+                  Pessoas
+                </Link>
+                .
+              </p>
+            )}
+          </Card>
+        </aside>
+
+        <div className="min-w-0 flex-1">
+          <Card className="overflow-x-auto p-3 sm:p-4">
+            <p className="mb-3 text-sm text-slate-600">
+              Calendário {periodoRotulo} — solte um nome da lista num dia para lançar; arraste no calendário para
+              remarcar; clique no nome para o detalhe.
+            </p>
+            <div className="min-w-[640px]">
+              <div className="mb-1 grid grid-cols-7 gap-1">
+                {cabecalhoSemana.map((rotulo) => (
+                  <div key={rotulo} className="px-1 py-1 text-center text-xs font-semibold uppercase text-slate-500">
+                    {rotulo}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="space-y-1">
-            {semanas.map((semana, idx) => (
-              <div key={idx} className="grid grid-cols-7 gap-1">
-                {semana.map((dia, col) => {
-                  if (!dia) {
-                    return <div key={`vazio-${idx}-${col}`} className="min-h-[7.5rem] rounded-lg bg-stone-50/80" />;
-                  }
-                  const lista = porDia.get(dia) ?? [];
-                  const ehHoje = dia === hoje;
+              <div className="space-y-1">
+                {semanas.map((semana, idx) => {
+                  const primeiroDiaMes = semana.find((d) => d && d.slice(8, 10) === "01") ?? null;
+                  const inicioMesNaSemana =
+                    idx === 0 || semana.some((d) => d && d.slice(8, 10) === "01")
+                      ? primeiroDiaMes ?? (idx === 0 ? semana.find(Boolean) : null)
+                      : null;
                   return (
-                    <div
-                      key={dia}
-                      className={`flex min-h-[7.5rem] flex-col rounded-lg border p-1.5 ${
-                        ehHoje
-                          ? "border-primaria bg-primaria/5"
-                          : lista.length > 0
-                            ? "border-stone-200 bg-white"
-                            : "border-dashed border-stone-200 bg-stone-50"
-                      }`}
-                    >
-                      <div className="mb-1 flex items-center justify-between gap-1">
-                        <button
-                          type="button"
-                          className="rounded px-0.5 text-left hover:bg-stone-100"
-                          onClick={() => abrirNovo(dia)}
-                          title="Adicionar plantão neste dia"
-                        >
-                          <span className={`text-sm font-bold ${ehHoje ? "text-primaria-escura" : "text-slate-900"}`}>
-                            {dia.slice(8, 10)}
-                          </span>
-                          <span className="ml-1 text-[10px] text-slate-500 sm:hidden">
-                            {nomeDiaSemana(dia).slice(0, 3)}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded p-0.5 text-slate-400 hover:bg-stone-100 hover:text-primaria-escura"
-                          onClick={() => abrirNovo(dia)}
-                          aria-label={`Adicionar plantão em ${formatDataBrLonga(dia)}`}
-                        >
-                          <Plus size={14} />
-                        </button>
-                      </div>
-                      <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
-                        {lista.length === 0 ? (
-                          <p className="px-0.5 text-[10px] text-slate-400">Livre</p>
-                        ) : (
-                          lista.map((slot) => {
-                            const conv = convocacaoDoSlot(db, slot.id);
-                            return (
-                              <button
-                                key={slot.id}
-                                type="button"
-                                className="truncate rounded bg-stone-100 px-1 py-0.5 text-left text-[11px] font-medium text-slate-800 hover:bg-primaria/15"
-                                title={`${nomePessoa(slot.pessoa_id)} · ${slot.hora_inicio}–${slot.hora_fim}${
-                                  conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
-                                }`}
-                                onClick={() => {
-                                  setDetalheSlotId(slot.id);
-                                  setErro(null);
-                                  setCopiado(false);
-                                }}
-                              >
-                                {primeiroNome(slot.pessoa_id)}
-                                <span className="font-normal text-slate-500"> {slot.hora_inicio}</span>
-                              </button>
-                            );
-                          })
-                        )}
+                    <div key={idx}>
+                      {inicioMesNaSemana && (
+                        <p className="px-1 pb-1 pt-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                          {nomeMesAno(inicioMesNaSemana)}
+                        </p>
+                      )}
+                      <div className="grid grid-cols-7 gap-1">
+                        {semana.map((dia, col) => {
+                          if (!dia) {
+                            return <div key={`vazio-${idx}-${col}`} className="min-h-[7.5rem] rounded-lg bg-stone-50/80" />;
+                          }
+                          const lista = porDia.get(dia) ?? [];
+                          const ehHoje = dia === hoje;
+                          const ehDestino = Boolean(diaDestinoHover === dia && arrasto);
+                          const resumo = resumoSetoresDoDia(lista, db.pessoas ?? []);
+                          const resumoPreview =
+                            ehDestino && arrasto?.tipo === "pessoa"
+                              ? {
+                                  motoboys: resumo.motoboys + (arrasto.setor === "motoboy" ? 1 : 0),
+                                  cozinha: resumo.cozinha + (arrasto.setor === "cozinha" ? 1 : 0),
+                                  balcao: resumo.balcao + (arrasto.setor === "balcao" ? 1 : 0),
+                                }
+                              : resumo;
+                          const textoResumo = textoResumoSetores(resumoPreview);
+                          return (
+                            <div
+                              key={dia}
+                              className={`flex min-h-[7.5rem] flex-col rounded-lg border p-1.5 transition-colors ${
+                                ehDestino
+                                  ? "border-primaria bg-primaria/10 ring-2 ring-primaria/30"
+                                  : ehHoje
+                                    ? "border-primaria bg-primaria/5"
+                                    : lista.length > 0
+                                      ? "border-stone-200 bg-white"
+                                      : "border-dashed border-stone-200 bg-stone-50"
+                              }`}
+                              onDragOver={(e) => {
+                                if (!arrasto) return;
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = arrasto.tipo === "pessoa" ? "copy" : "move";
+                                setDiaDestinoHover(dia);
+                              }}
+                              onDragLeave={() => {
+                                setDiaDestinoHover((atual) => (atual === dia ? null : atual));
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                aoSoltarNoDia(dia, e.dataTransfer);
+                              }}
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-1">
+                                <button
+                                  type="button"
+                                  className="rounded px-0.5 text-left hover:bg-stone-100"
+                                  onClick={() => abrirNovo(dia)}
+                                  title="Adicionar plantão neste dia"
+                                >
+                                  <span className={`text-sm font-bold ${ehHoje ? "text-primaria-escura" : "text-slate-900"}`}>
+                                    {dia.slice(8, 10)}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded p-0.5 text-slate-400 hover:bg-stone-100 hover:text-primaria-escura"
+                                  onClick={() => abrirNovo(dia)}
+                                  aria-label={`Adicionar plantão em ${formatDataBrLonga(dia)}`}
+                                >
+                                  <Plus size={14} />
+                                </button>
+                              </div>
+                              <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
+                                {lista.length === 0 ? (
+                                  <p className="px-0.5 text-[10px] text-slate-400">Livre</p>
+                                ) : (
+                                  lista.map((slot) => {
+                                    const conv = convocacaoDoSlot(db, slot.id);
+                                    const pessoaSlot = db.pessoas.find((p) => p.id === slot.pessoa_id);
+                                    const setor = setorDoPlantao(slot, pessoaSlot);
+                                    return (
+                                      <button
+                                        key={slot.id}
+                                        type="button"
+                                        draggable
+                                        className={`cursor-grab truncate rounded bg-stone-100 px-1 py-0.5 text-left text-[11px] font-medium text-slate-800 hover:bg-primaria/15 active:cursor-grabbing ${
+                                          arrasto?.tipo === "slot" && arrasto.id === slot.id ? "opacity-50" : ""
+                                        }`}
+                                        title={`${nomePessoa(slot.pessoa_id)} · ${setor ? rotuloSetorConvocacao(setor) : slot.funcao ?? "—"} · ${slot.hora_inicio}–${slot.hora_fim}${
+                                          conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
+                                        } — arraste para outro dia`}
+                                        onDragStart={(e) => {
+                                          arrastouRef.current = false;
+                                          setArrasto({ tipo: "slot", id: slot.id });
+                                          e.dataTransfer.setData("text/escala-drag-tipo", "slot");
+                                          e.dataTransfer.setData("text/escala-slot-id", slot.id);
+                                          e.dataTransfer.effectAllowed = "move";
+                                        }}
+                                        onDragEnd={() => {
+                                          setArrasto(null);
+                                          setDiaDestinoHover(null);
+                                          setTimeout(() => {
+                                            arrastouRef.current = false;
+                                          }, 0);
+                                        }}
+                                        onDrag={() => {
+                                          arrastouRef.current = true;
+                                        }}
+                                        onClick={() => {
+                                          if (arrastouRef.current) {
+                                            arrastouRef.current = false;
+                                            return;
+                                          }
+                                          setDetalheSlotId(slot.id);
+                                          setErro(null);
+                                          setCopiado(false);
+                                        }}
+                                      >
+                                        {primeiroNome(slot.pessoa_id)}
+                                        {setor && (
+                                          <span className="font-normal text-slate-500"> · {abrevSetorConvocacao(setor)}</span>
+                                        )}
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                              {(textoResumo || ehDestino) && (
+                                <p
+                                  className={`mt-1 border-t border-stone-200/80 pt-1 text-[10px] leading-tight ${
+                                    ehDestino ? "font-semibold text-primaria-escura" : "text-slate-500"
+                                  }`}
+                                  title="Motoboys · intermitentes na cozinha · intermitentes no balcão/caixa"
+                                >
+                                  {textoResumo || "—"}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
                 })}
               </div>
-            ))}
-          </div>
-        </div>
-      </Card>
+            </div>
+          </Card>
 
-      <p className="mt-3 text-center text-xs text-slate-500">
-        Dias sem plantão aparecem como “Livre”. Use + ou clique na data para preencher.
-      </p>
+          <p className="mt-3 text-center text-xs text-slate-500">
+            No rodapé de cada dia: motoboys · intermitentes na cozinha · intermitentes no balcão/caixa. Horário padrão ao
+            soltar da lista: 18:00–23:30.
+          </p>
+        </div>
+      </div>
 
       <Modal aberto={form !== null} titulo="Novo plantão" onFechar={() => setForm(null)} fecharAoClicarFundo={false}>
         {form && (

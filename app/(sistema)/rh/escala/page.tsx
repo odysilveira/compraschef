@@ -14,10 +14,12 @@ import {
   gerarEscalaPadraoClt,
   janela28Dias,
   marcarConvocacaoEnviada,
+  montarGradeCalendario,
   nomeDiaSemana,
   pessoaPrecisaConvocacao,
   registrarRespostaConvocacao,
   rotuloStatusConvocacao,
+  rotulosCabecalhoSemana,
   slotsNaJanela,
   validarPreRequisitosConvocacao,
   type PadraoEscalaClt,
@@ -122,7 +124,15 @@ export default function RhEscalaPage() {
     return map;
   }, [dias, slots]);
 
+  const semanas = useMemo(() => montarGradeCalendario(dias, 1), [dias]);
+  const cabecalhoSemana = useMemo(() => rotulosCabecalhoSemana(1), []);
+  const hoje = hojeISO();
+
   const nomePessoa = (id: string) => db.pessoas.find((p) => p.id === id)?.nome ?? "—";
+  const primeiroNome = (id: string) => {
+    const nome = nomePessoa(id);
+    return nome.split(/\s+/)[0] ?? nome;
+  };
 
   if (!podeVerValores(papel)) {
     return (
@@ -319,64 +329,104 @@ export default function RhEscalaPage() {
       </div>
 
       {slots.length === 0 ? (
-        <Vazio mensagem="Nenhum plantão nos próximos 28 dias. Lance o primeiro." />
+        <Vazio mensagem="Nenhum plantão nos próximos 28 dias. Clique num dia do calendário para lançar." />
       ) : null}
 
-      <div className="space-y-3">
-        {dias.map((dia) => {
-          const lista = porDia.get(dia) ?? [];
-          if (lista.length === 0) return null;
-          return (
-            <Card key={dia} className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="font-bold text-slate-900">
-                    {formatDataBrLonga(dia)}{" "}
-                    <span className="font-normal text-slate-500">· {nomeDiaSemana(dia)}</span>
-                  </p>
-                </div>
-                <button type="button" className="btn-secundario" onClick={() => abrirNovo(dia)}>
-                  <Plus size={14} /> Neste dia
-                </button>
+      <Card className="overflow-x-auto p-3 sm:p-4">
+        <p className="mb-3 text-sm text-slate-600">
+          Calendário dos próximos 28 dias — todos os dias aparecem; clique no dia para adicionar ou no nome
+          para ver o plantão.
+        </p>
+        <div className="min-w-[640px]">
+          <div className="mb-1 grid grid-cols-7 gap-1">
+            {cabecalhoSemana.map((rotulo) => (
+              <div key={rotulo} className="px-1 py-1 text-center text-xs font-semibold uppercase text-slate-500">
+                {rotulo}
               </div>
-              <div className="space-y-2">
-                {lista.map((slot) => {
-                  const pessoa = db.pessoas.find((p) => p.id === slot.pessoa_id);
-                  const conv = convocacaoDoSlot(db, slot.id);
+            ))}
+          </div>
+          <div className="space-y-1">
+            {semanas.map((semana, idx) => (
+              <div key={idx} className="grid grid-cols-7 gap-1">
+                {semana.map((dia, col) => {
+                  if (!dia) {
+                    return <div key={`vazio-${idx}-${col}`} className="min-h-[7.5rem] rounded-lg bg-stone-50/80" />;
+                  }
+                  const lista = porDia.get(dia) ?? [];
+                  const ehHoje = dia === hoje;
                   return (
-                    <button
-                      key={slot.id}
-                      type="button"
-                      className="flex w-full flex-wrap items-start justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-left hover:border-primaria/40"
-                      onClick={() => {
-                        setDetalheSlotId(slot.id);
-                        setErro(null);
-                        setCopiado(false);
-                      }}
+                    <div
+                      key={dia}
+                      className={`flex min-h-[7.5rem] flex-col rounded-lg border p-1.5 ${
+                        ehHoje
+                          ? "border-primaria bg-primaria/5"
+                          : lista.length > 0
+                            ? "border-stone-200 bg-white"
+                            : "border-dashed border-stone-200 bg-stone-50"
+                      }`}
                     >
-                      <div>
-                        <p className="font-semibold text-slate-900">{nomePessoa(slot.pessoa_id)}</p>
-                        <p className="text-sm text-slate-600">
-                          {slot.hora_inicio}–{slot.hora_fim}
-                          {slot.funcao ? ` · ${slot.funcao}` : ""}
-                          {pessoa ? ` · ${rotuloTipoPessoa(pessoa.tipo)}` : ""}
-                        </p>
+                      <div className="mb-1 flex items-center justify-between gap-1">
+                        <button
+                          type="button"
+                          className="rounded px-0.5 text-left hover:bg-stone-100"
+                          onClick={() => abrirNovo(dia)}
+                          title="Adicionar plantão neste dia"
+                        >
+                          <span className={`text-sm font-bold ${ehHoje ? "text-primaria-escura" : "text-slate-900"}`}>
+                            {dia.slice(8, 10)}
+                          </span>
+                          <span className="ml-1 text-[10px] text-slate-500 sm:hidden">
+                            {nomeDiaSemana(dia).slice(0, 3)}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded p-0.5 text-slate-400 hover:bg-stone-100 hover:text-primaria-escura"
+                          onClick={() => abrirNovo(dia)}
+                          aria-label={`Adicionar plantão em ${formatDataBrLonga(dia)}`}
+                        >
+                          <Plus size={14} />
+                        </button>
                       </div>
-                      {conv && <BadgeConvocacao status={conv.status} />}
-                    </button>
+                      <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
+                        {lista.length === 0 ? (
+                          <p className="px-0.5 text-[10px] text-slate-400">Livre</p>
+                        ) : (
+                          lista.map((slot) => {
+                            const conv = convocacaoDoSlot(db, slot.id);
+                            return (
+                              <button
+                                key={slot.id}
+                                type="button"
+                                className="truncate rounded bg-stone-100 px-1 py-0.5 text-left text-[11px] font-medium text-slate-800 hover:bg-primaria/15"
+                                title={`${nomePessoa(slot.pessoa_id)} · ${slot.hora_inicio}–${slot.hora_fim}${
+                                  conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
+                                }`}
+                                onClick={() => {
+                                  setDetalheSlotId(slot.id);
+                                  setErro(null);
+                                  setCopiado(false);
+                                }}
+                              >
+                                {primeiroNome(slot.pessoa_id)}
+                                <span className="font-normal text-slate-500"> {slot.hora_inicio}</span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
-            </Card>
-          );
-        })}
-      </div>
+            ))}
+          </div>
+        </div>
+      </Card>
 
-      {slots.length > 0 && (
-        <p className="mt-4 text-center text-xs text-slate-500">
-          Dias sem plantão ficam ocultos. Use “Novo plantão” para preencher a janela.
-        </p>
-      )}
+      <p className="mt-3 text-center text-xs text-slate-500">
+        Dias sem plantão aparecem como “Livre”. Use + ou clique na data para preencher.
+      </p>
 
       <Modal aberto={form !== null} titulo="Novo plantão" onFechar={() => setForm(null)} fecharAoClicarFundo={false}>
         {form && (

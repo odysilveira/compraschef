@@ -8,8 +8,11 @@ import {
   gerarEscalaPadraoClt,
   janela28Dias,
   marcarConvocacaoEnviada,
+  montarGradeCalendario,
   montarTextoConvocacaoWhatsApp,
   registrarRespostaConvocacao,
+  rotulosCabecalhoSemana,
+  slotsDaPessoaNaJanela,
   validarPreRequisitosConvocacao,
 } from "./escala";
 
@@ -246,6 +249,53 @@ describe("escala domain", () => {
     expect(deNovo.sucesso).toBe(true);
     expect(deNovo.criados).toBe(0);
     expect(deNovo.pulados).toBe(antes);
+  });
+
+  it("monta grade de calendário começando na segunda", () => {
+    // 2026-08-03 é segunda → sem padding
+    const semanas = montarGradeCalendario(janela28Dias("2026-08-03"), 1);
+    expect(rotulosCabecalhoSemana(1)[0]).toBe("Seg");
+    expect(semanas[0]?.[0]).toBe("2026-08-03");
+    expect(semanas[0]?.[6]).toBe("2026-08-09");
+    // 28 dias → 4 semanas cheias
+    expect(semanas).toHaveLength(4);
+    expect(semanas.every((s) => s.length === 7)).toBe(true);
+  });
+
+  it("preenche células vazias antes da primeira data", () => {
+    // 2026-08-05 é quarta → Seg e Ter vazios
+    const semanas = montarGradeCalendario(["2026-08-05", "2026-08-06"], 1);
+    expect(semanas[0]?.slice(0, 2)).toEqual([null, null]);
+    expect(semanas[0]?.[2]).toBe("2026-08-05");
+  });
+
+  it("filtra plantões da pessoa na janela", () => {
+    const db = dbBase();
+    const dias = janela28Dias("2026-08-03");
+    criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-05",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-p1", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    criarSlot(
+      db,
+      {
+        pessoa_id: "pes-clt",
+        data: "2026-08-05",
+        hora_inicio: "09:00",
+        hora_fim: "17:00",
+        intervalo_min: 60,
+      },
+      { id: "esc-p2", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    const daPessoa = slotsDaPessoaNaJanela(db, "pes-inter-1", dias);
+    expect(daPessoa.map((s) => s.id)).toEqual(["esc-p1"]);
   });
 
   it("bloqueia convocação sem contrato ou eSocial", () => {

@@ -21,6 +21,73 @@ export function pessoaPrecisaConvocacao(tipo: TipoPessoaRH): boolean {
   return tipo === "intermitente" || tipo === "entregador";
 }
 
+/** Setor operacional na escala de convocação (intermitente / motoboy). */
+export type SetorConvocacaoEscala = "cozinha" | "balcao" | "motoboy";
+
+export function rotuloSetorConvocacao(setor: SetorConvocacaoEscala): string {
+  switch (setor) {
+    case "cozinha":
+      return "Cozinha";
+    case "balcao":
+      return "Balcão / Caixa";
+    case "motoboy":
+      return "Motoboy";
+  }
+}
+
+export function abrevSetorConvocacao(setor: SetorConvocacaoEscala): string {
+  switch (setor) {
+    case "cozinha":
+      return "Coz";
+    case "balcao":
+      return "Bal";
+    case "motoboy":
+      return "Moto";
+  }
+}
+
+function normalizarTextoSetor(valor: string): string {
+  return valor
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Classifica o plantão pelo tipo da pessoa + texto da função do slot. */
+export function setorDoPlantao(
+  slot: Pick<EscalaSlot, "funcao">,
+  pessoa?: Pick<PessoaRH, "tipo"> | null
+): SetorConvocacaoEscala | null {
+  if (pessoa?.tipo === "entregador") return "motoboy";
+  const texto = normalizarTextoSetor(slot.funcao ?? "");
+  if (texto.includes("cozinha")) return "cozinha";
+  if (texto.includes("balc") || texto.includes("caixa")) return "balcao";
+  return null;
+}
+
+export function resumoSetoresDoDia(
+  slots: EscalaSlot[],
+  pessoas: Array<Pick<PessoaRH, "id" | "tipo">>
+): { motoboys: number; cozinha: number; balcao: number } {
+  const porId = new Map(pessoas.map((p) => [p.id, p]));
+  const resumo = { motoboys: 0, cozinha: 0, balcao: 0 };
+  for (const slot of slots) {
+    const setor = setorDoPlantao(slot, porId.get(slot.pessoa_id));
+    if (setor === "motoboy") resumo.motoboys += 1;
+    else if (setor === "cozinha") resumo.cozinha += 1;
+    else if (setor === "balcao") resumo.balcao += 1;
+  }
+  return resumo;
+}
+
+export function textoResumoSetores(resumo: { motoboys: number; cozinha: number; balcao: number }): string {
+  const partes: string[] = [];
+  if (resumo.motoboys > 0) partes.push(`${resumo.motoboys} moto`);
+  if (resumo.cozinha > 0) partes.push(`${resumo.cozinha} coz`);
+  if (resumo.balcao > 0) partes.push(`${resumo.balcao} bal`);
+  return partes.join(" · ");
+}
+
 /**
  * Contrato escrito + eSocial antes da 1ª convocação (WhatsApp não substitui o contrato).
  * Retorna erros bloqueantes para quem precisa de convocação.

@@ -8,6 +8,7 @@ import { mutate, uid, useDB } from "@/lib/data";
 import {
   LOCAL_PADRAO_ESCALA,
   PADROES_ESCALA_CLT,
+  abrevSetorConvocacao,
   convocacaoDoSlot,
   criarSlot,
   formatDataBrLonga,
@@ -20,12 +21,17 @@ import {
   nomeMesAno,
   pessoaPrecisaConvocacao,
   registrarRespostaConvocacao,
+  resumoSetoresDoDia,
   rotuloPeriodoJanela,
+  rotuloSetorConvocacao,
   rotuloStatusConvocacao,
   rotulosCabecalhoSemana,
+  setorDoPlantao,
   slotsNaJanela,
+  textoResumoSetores,
   validarPreRequisitosConvocacao,
   type PadraoEscalaClt,
+  type SetorConvocacaoEscala,
 } from "@/lib/domain/escala";
 import { rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
 import { podeVerValores, usePapel } from "@/lib/roles";
@@ -38,7 +44,7 @@ function hojeISO(): string {
 
 type Arrasto =
   | { tipo: "slot"; id: string }
-  | { tipo: "pessoa"; id: string };
+  | { tipo: "pessoa"; id: string; setor: SetorConvocacaoEscala };
 
 type FormPlantao = {
   pessoa_id: string;
@@ -101,14 +107,16 @@ function BadgeConvocacao({ status }: { status: StatusConvocacao }) {
 function BancoPessoas({
   titulo,
   pessoas,
+  setor,
   arrasto,
   onDragStart,
   onDragEnd,
 }: {
   titulo: string;
   pessoas: PessoaRH[];
+  setor: SetorConvocacaoEscala;
   arrasto: Arrasto | null;
-  onDragStart: (pessoaId: string) => void;
+  onDragStart: (pessoaId: string, setor: SetorConvocacaoEscala) => void;
   onDragEnd: () => void;
 }) {
   if (pessoas.length === 0) return null;
@@ -118,9 +126,9 @@ function BancoPessoas({
       <ul className="space-y-1">
         {pessoas.map((p) => {
           const gate = validarPreRequisitosConvocacao(p);
-          const ativo = arrasto?.tipo === "pessoa" && arrasto.id === p.id;
+          const ativo = arrasto?.tipo === "pessoa" && arrasto.id === p.id && arrasto.setor === setor;
           return (
-            <li key={p.id}>
+            <li key={`${setor}-${p.id}`}>
               <button
                 type="button"
                 draggable
@@ -133,13 +141,14 @@ function BancoPessoas({
                 }`}
                 title={
                   gate.ok
-                    ? `Arraste ${p.nome} para um dia`
+                    ? `Arraste ${p.nome} como ${rotuloSetorConvocacao(setor)}`
                     : `Falta contrato/eSocial — ${gate.erros[0] ?? ""}`
                 }
                 onDragStart={(e) => {
-                  onDragStart(p.id);
+                  onDragStart(p.id, setor);
                   e.dataTransfer.setData("text/escala-drag-tipo", "pessoa");
                   e.dataTransfer.setData("text/escala-pessoa-id", p.id);
+                  e.dataTransfer.setData("text/escala-setor", setor);
                   e.dataTransfer.effectAllowed = "copy";
                 }}
                 onDragEnd={onDragEnd}
@@ -373,12 +382,20 @@ export default function RhEscalaPage() {
     if (r.avisos.length) setAviso(r.avisos.join(" "));
   }
 
-  function soltarPessoaNoDia(pessoaId: string, data: string) {
+  function soltarPessoaNoDia(pessoaId: string, data: string, setor: SetorConvocacaoEscala) {
     const pessoa = db.pessoas.find((p) => p.id === pessoaId);
     setArrasto(null);
     setDiaDestinoHover(null);
     if (!pessoa) {
       setErro("Pessoa não encontrada.");
+      return;
+    }
+    if (setor === "motoboy" && pessoa.tipo !== "entregador") {
+      setErro("Só entregadores entram como motoboy.");
+      return;
+    }
+    if (setor !== "motoboy" && pessoa.tipo === "entregador") {
+      setErro("Entregador só pode ser lançado como motoboy.");
       return;
     }
     const gate = validarPreRequisitosConvocacao(pessoa);
@@ -396,7 +413,7 @@ export default function RhEscalaPage() {
         hora_inicio: "18:00",
         hora_fim: "23:30",
         intervalo_min: 30,
-        funcao: rotuloFuncao(pessoa),
+        funcao: rotuloSetorConvocacao(setor),
         local: LOCAL_PADRAO_ESCALA,
       },
       { id: uid("esc"), convocacaoId: uid("conv") }
@@ -407,10 +424,11 @@ export default function RhEscalaPage() {
     }
     mutate((atual) => Object.assign(atual, proximo));
     setErro(null);
+    const nomeCurto = pessoa.nome.split(/\s+/)[0];
     setMensagem(
       resultado.convocacao
-        ? `${pessoa.nome.split(/\s+/)[0]} lançado em ${formatDataBrLonga(data)} com convocação em rascunho.`
-        : `${pessoa.nome.split(/\s+/)[0]} lançado em ${formatDataBrLonga(data)}.`
+        ? `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)} (convocação em rascunho).`
+        : `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)}.`
     );
     if (resultado.avisos.length) setAviso(resultado.avisos.join(" "));
     if (resultado.slot) setDetalheSlotId(resultado.slot.id);
@@ -420,7 +438,14 @@ export default function RhEscalaPage() {
     const tipo = dataTransfer.getData("text/escala-drag-tipo") || arrasto?.tipo;
     if (tipo === "pessoa") {
       const pessoaId = dataTransfer.getData("text/escala-pessoa-id") || (arrasto?.tipo === "pessoa" ? arrasto.id : "");
-      if (pessoaId) soltarPessoaNoDia(pessoaId, dia);
+      const setorBruto =
+        dataTransfer.getData("text/escala-setor") || (arrasto?.tipo === "pessoa" ? arrasto.setor : "");
+      const setor = (["cozinha", "balcao", "motoboy"] as SetorConvocacaoEscala[]).includes(
+        setorBruto as SetorConvocacaoEscala
+      )
+        ? (setorBruto as SetorConvocacaoEscala)
+        : null;
+      if (pessoaId && setor) soltarPessoaNoDia(pessoaId, dia, setor);
       return;
     }
     const slotId = dataTransfer.getData("text/escala-slot-id") || (arrasto?.tipo === "slot" ? arrasto.id : "");
@@ -483,13 +508,27 @@ export default function RhEscalaPage() {
           <Card className="space-y-3 p-3">
             <div>
               <p className="text-sm font-bold text-slate-900">Banco para convocar</p>
-              <p className="text-xs text-slate-600">Arraste o nome para um dia do calendário.</p>
+              <p className="text-xs text-slate-600">
+                Arraste da lista certa: cozinha, balcão/caixa ou motoboy. O dia mostra quantos já tem em cada setor.
+              </p>
             </div>
             <BancoPessoas
-              titulo="Intermitentes"
+              titulo="Intermitentes — Cozinha"
               pessoas={intermitentes}
+              setor="cozinha"
               arrasto={arrasto}
-              onDragStart={(pessoaId) => setArrasto({ tipo: "pessoa", id: pessoaId })}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
+              onDragEnd={() => {
+                setArrasto(null);
+                setDiaDestinoHover(null);
+              }}
+            />
+            <BancoPessoas
+              titulo="Intermitentes — Balcão / Caixa"
+              pessoas={intermitentes}
+              setor="balcao"
+              arrasto={arrasto}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
               onDragEnd={() => {
                 setArrasto(null);
                 setDiaDestinoHover(null);
@@ -498,8 +537,9 @@ export default function RhEscalaPage() {
             <BancoPessoas
               titulo="Motoboys / entregadores"
               pessoas={entregadores}
+              setor="motoboy"
               arrasto={arrasto}
-              onDragStart={(pessoaId) => setArrasto({ tipo: "pessoa", id: pessoaId })}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
               onDragEnd={() => {
                 setArrasto(null);
                 setDiaDestinoHover(null);
@@ -553,6 +593,16 @@ export default function RhEscalaPage() {
                           const lista = porDia.get(dia) ?? [];
                           const ehHoje = dia === hoje;
                           const ehDestino = Boolean(diaDestinoHover === dia && arrasto);
+                          const resumo = resumoSetoresDoDia(lista, db.pessoas ?? []);
+                          const resumoPreview =
+                            ehDestino && arrasto?.tipo === "pessoa"
+                              ? {
+                                  motoboys: resumo.motoboys + (arrasto.setor === "motoboy" ? 1 : 0),
+                                  cozinha: resumo.cozinha + (arrasto.setor === "cozinha" ? 1 : 0),
+                                  balcao: resumo.balcao + (arrasto.setor === "balcao" ? 1 : 0),
+                                }
+                              : resumo;
+                          const textoResumo = textoResumoSetores(resumoPreview);
                           return (
                             <div
                               key={dia}
@@ -605,6 +655,8 @@ export default function RhEscalaPage() {
                                 ) : (
                                   lista.map((slot) => {
                                     const conv = convocacaoDoSlot(db, slot.id);
+                                    const pessoaSlot = db.pessoas.find((p) => p.id === slot.pessoa_id);
+                                    const setor = setorDoPlantao(slot, pessoaSlot);
                                     return (
                                       <button
                                         key={slot.id}
@@ -613,7 +665,7 @@ export default function RhEscalaPage() {
                                         className={`cursor-grab truncate rounded bg-stone-100 px-1 py-0.5 text-left text-[11px] font-medium text-slate-800 hover:bg-primaria/15 active:cursor-grabbing ${
                                           arrasto?.tipo === "slot" && arrasto.id === slot.id ? "opacity-50" : ""
                                         }`}
-                                        title={`${nomePessoa(slot.pessoa_id)} · ${slot.hora_inicio}–${slot.hora_fim}${
+                                        title={`${nomePessoa(slot.pessoa_id)} · ${setor ? rotuloSetorConvocacao(setor) : slot.funcao ?? "—"} · ${slot.hora_inicio}–${slot.hora_fim}${
                                           conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
                                         } — arraste para outro dia`}
                                         onDragStart={(e) => {
@@ -644,12 +696,24 @@ export default function RhEscalaPage() {
                                         }}
                                       >
                                         {primeiroNome(slot.pessoa_id)}
-                                        <span className="font-normal text-slate-500"> {slot.hora_inicio}</span>
+                                        {setor && (
+                                          <span className="font-normal text-slate-500"> · {abrevSetorConvocacao(setor)}</span>
+                                        )}
                                       </button>
                                     );
                                   })
                                 )}
                               </div>
+                              {(textoResumo || ehDestino) && (
+                                <p
+                                  className={`mt-1 border-t border-stone-200/80 pt-1 text-[10px] leading-tight ${
+                                    ehDestino ? "font-semibold text-primaria-escura" : "text-slate-500"
+                                  }`}
+                                  title="Motoboys · intermitentes na cozinha · intermitentes no balcão/caixa"
+                                >
+                                  {textoResumo || "—"}
+                                </p>
+                              )}
                             </div>
                           );
                         })}
@@ -662,8 +726,8 @@ export default function RhEscalaPage() {
           </Card>
 
           <p className="mt-3 text-center text-xs text-slate-500">
-            Horário padrão ao soltar da lista: 18:00–23:30. Ajuste no detalhe se precisar. No celular o arrastar pode
-            falhar — use “Novo plantão”.
+            No rodapé de cada dia: motoboys · intermitentes na cozinha · intermitentes no balcão/caixa. Horário padrão ao
+            soltar da lista: 18:00–23:30.
           </p>
         </div>
       </div>

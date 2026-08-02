@@ -13,9 +13,12 @@ import {
   montarTextoConvocacaoWhatsApp,
   moverSlotParaData,
   registrarRespostaConvocacao,
+  resumoSetoresDoDia,
   rotuloPeriodoJanela,
   rotulosCabecalhoSemana,
+  setorDoPlantao,
   slotsDaPessoaNaJanela,
+  textoResumoSetores,
   validarPreRequisitosConvocacao,
 } from "./escala";
 
@@ -330,6 +333,24 @@ describe("escala domain", () => {
     const r = moverSlotParaData(db, "esc-a", "2026-08-21");
     expect(r.sucesso).toBe(false);
     expect(r.erros[0]).toMatch(/Já existe/);
+  });
+
+  it("classifica setores e resume o dia", () => {
+    const slots = [
+      { id: "1", pessoa_id: "i1", data: "2026-08-10", hora_inicio: "18:00", hora_fim: "23:00", intervalo_min: 30, funcao: "Cozinha", criado_em: "", atualizado_em: "" },
+      { id: "2", pessoa_id: "i2", data: "2026-08-10", hora_inicio: "18:00", hora_fim: "23:00", intervalo_min: 30, funcao: "Balcão / Caixa", criado_em: "", atualizado_em: "" },
+      { id: "3", pessoa_id: "e1", data: "2026-08-10", hora_inicio: "18:00", hora_fim: "23:00", intervalo_min: 30, funcao: "Entregador", criado_em: "", atualizado_em: "" },
+    ];
+    const pessoas = [
+      { id: "i1", tipo: "intermitente" as const },
+      { id: "i2", tipo: "intermitente" as const },
+      { id: "e1", tipo: "entregador" as const },
+    ];
+    expect(setorDoPlantao(slots[0]!, pessoas[0])).toBe("cozinha");
+    expect(setorDoPlantao(slots[1]!, pessoas[1])).toBe("balcao");
+    expect(setorDoPlantao(slots[2]!, pessoas[2])).toBe("motoboy");
+    expect(resumoSetoresDoDia(slots, pessoas)).toEqual({ motoboys: 1, cozinha: 1, balcao: 1 });
+    expect(textoResumoSetores({ motoboys: 1, cozinha: 2, balcao: 0 })).toBe("1 moto · 2 coz");
   });
 
   it("filtra plantões da pessoa na janela", () => {

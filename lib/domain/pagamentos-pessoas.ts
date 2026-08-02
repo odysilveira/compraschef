@@ -98,7 +98,7 @@ export function informarPagamentoPessoa(
   }
   const bancoConta = limparTexto(dados.bancoConta);
   if (!bancoConta) {
-    return { sucesso: false, erros: ["Informe banco/conta ou PIX usada no pagamento."] };
+    return { sucesso: false, erros: ["Informe de qual banco/conta saiu o pagamento (ajuda na conciliação)."] };
   }
 
   const agora = opcoes.agora ?? new Date().toISOString();

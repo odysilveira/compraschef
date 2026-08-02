@@ -73,10 +73,11 @@ import {
 } from "@/lib/domain/pagar-boleto";
 import { parseOfx } from "@/lib/domain/extrato-ofx";
 import {
-  aplicarMatchesExtratoBoletos,
-  sugerirMatchesExtratoBoletos,
+  aplicarMatchesExtrato,
+  sugerirMatchesExtrato,
   type SugestaoMatchExtrato,
 } from "@/lib/domain/conciliar-extrato";
+import { CONTAS_ORIGEM_PAGAMENTO } from "@/lib/domain/contas-pagamento";
 import {
   CLASSE_CAIXA_CODIGO_SEM_ROLAGEM,
   CLASSE_GRID_CODIGO_PAGAMENTO,
@@ -629,17 +630,17 @@ export default function FinanceiroPage() {
         setSugestoesExtrato([]);
         return;
       }
-      const sugestoes = sugerirMatchesExtratoBoletos(db, parseado.linhas);
+      const sugestoes = sugerirMatchesExtrato(db, parseado.linhas);
       setSugestoesExtrato(sugestoes);
       const sel: Record<string, boolean> = {};
       for (const s of sugestoes) {
-        if (s.boleto_id && (s.confianca === "exata" || s.confianca === "proxima")) {
-          sel[`${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.boleto_id}`] = s.confianca === "exata";
+        if (s.alvo_id && (s.confianca === "exata" || s.confianca === "proxima")) {
+          sel[`${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.alvo}-${s.alvo_id}`] = s.confianca === "exata";
         }
       }
       setSelecionadosExtrato(sel);
-      if (!sugestoes.some((s) => s.boleto_id)) {
-        setErroExtratoOfx("Extrato lido, mas nenhum débito casou com boleto aguardando conciliação.");
+      if (!sugestoes.some((s) => s.alvo_id)) {
+        setErroExtratoOfx("Extrato lido, mas nenhum débito casou com boleto ou pagamento RH aguardando conciliação.");
       }
     } catch {
       setErroExtratoOfx("Não foi possível ler o arquivo.");
@@ -650,12 +651,13 @@ export default function FinanceiroPage() {
     if (processandoExtratoOfx) return;
     const matches = sugestoesExtrato
       .filter((s) => {
-        if (!s.boleto_id) return false;
-        const chave = `${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.boleto_id}`;
+        if (!s.alvo || !s.alvo_id) return false;
+        const chave = `${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.alvo}-${s.alvo_id}`;
         return selecionadosExtrato[chave];
       })
       .map((s) => ({
-        boleto_id: s.boleto_id!,
+        alvo: s.alvo!,
+        alvo_id: s.alvo_id!,
         dataLiquidacao: s.linha.data,
         observacao: `OFX: ${s.linha.descricao}`.slice(0, 200),
       }));
@@ -667,12 +669,12 @@ export default function FinanceiroPage() {
     setErroExtratoOfx(null);
     try {
       const proximo = structuredClone(db) as DB;
-      const resultado = aplicarMatchesExtratoBoletos(proximo, matches, {
+      const resultado = aplicarMatchesExtrato(proximo, matches, {
         responsavel: "usuário local",
         idFactory: () => uid("bph"),
       });
       if (resultado.conciliados === 0) {
-        setErroExtratoOfx(resultado.erros.join(" ") || "Nenhum boleto foi conciliado.");
+        setErroExtratoOfx(resultado.erros.join(" ") || "Nenhum título foi conciliado.");
         return;
       }
       mutate((atual) => {
@@ -682,7 +684,7 @@ export default function FinanceiroPage() {
       setSugestoesExtrato([]);
       setSelecionadosExtrato({});
       setMensagemReceberBoleto(
-        `${resultado.conciliados} boleto(s) conciliado(s) pelo extrato OFX.` +
+        `${resultado.conciliados} título(s) conciliado(s) pelo extrato OFX (boletos e/ou RH).` +
           (resultado.erros.length ? ` Alguns falharam: ${resultado.erros[0]}` : "")
       );
     } finally {
@@ -2278,8 +2280,9 @@ export default function FinanceiroPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
-            Exporte o extrato em OFX no internet banking e envie aqui. O ComprasChef sugere casar débitos com boletos em
-            <span className="font-semibold"> aguardando conciliação</span> (valor e data).
+            Exporte o extrato em OFX no internet banking e envie aqui. O ComprasChef sugere casar débitos com boletos e
+            pagamentos de RH em <span className="font-semibold">aguardando conciliação</span> (valor, data e banco
+            informado).
           </p>
           <label className="block">
             <span className="rotulo mb-1 block">Arquivo OFX</span>
@@ -2295,20 +2298,19 @@ export default function FinanceiroPage() {
           {sugestoesExtrato.length > 0 && (
             <div className="max-h-80 space-y-2 overflow-y-auto">
               {sugestoesExtrato.map((s) => {
-                const chave = `${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.boleto_id ?? "x"}`;
-                const boleto = s.boleto_id ? db.boletos.find((b) => b.id === s.boleto_id) : null;
+                const chave = `${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.alvo ?? "x"}-${s.alvo_id ?? "x"}`;
                 return (
                   <label
                     key={chave}
                     className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
-                      s.boleto_id ? "border-stone-200 bg-white" : "border-dashed border-stone-200 bg-stone-50"
+                      s.alvo_id ? "border-stone-200 bg-white" : "border-dashed border-stone-200 bg-stone-50"
                     }`}
                   >
                     <input
                       type="checkbox"
                       className="mt-1"
-                      disabled={!s.boleto_id || processandoExtratoOfx}
-                      checked={Boolean(s.boleto_id && selecionadosExtrato[chave])}
+                      disabled={!s.alvo_id || processandoExtratoOfx}
+                      checked={Boolean(s.alvo_id && selecionadosExtrato[chave])}
                       onChange={(e) =>
                         setSelecionadosExtrato((atual) => ({ ...atual, [chave]: e.target.checked }))
                       }
@@ -2317,13 +2319,13 @@ export default function FinanceiroPage() {
                       <span className="block font-medium text-slate-900">
                         {dataBR(s.linha.data)} · {moeda(Math.abs(s.linha.valor))} · {s.linha.descricao}
                       </span>
-                      {boleto ? (
+                      {s.alvo_id ? (
                         <span className="block text-xs text-slate-600">
-                          → {fornecedorDoBoleto(db, boleto)} · boleto {moeda(boleto.pagamento_valor ?? boleto.valor)} (
-                          {s.confianca === "exata" ? "match exato" : "match próximo"})
+                          → {s.rotulo_alvo} ({s.confianca === "exata" ? "match exato" : "match próximo"}
+                          {s.motivos.length ? ` · ${s.motivos.join(", ")}` : ""})
                         </span>
                       ) : (
-                        <span className="block text-xs text-slate-500">Sem boleto correspondente</span>
+                        <span className="block text-xs text-slate-500">Sem correspondente</span>
                       )}
                     </span>
                   </label>
@@ -2338,7 +2340,7 @@ export default function FinanceiroPage() {
             <button
               type="button"
               className="btn-primario"
-              disabled={processandoExtratoOfx || !sugestoesExtrato.some((s) => s.boleto_id)}
+              disabled={processandoExtratoOfx || !sugestoesExtrato.some((s) => s.alvo_id)}
               onClick={confirmarExtratoOfx}
             >
               {processandoExtratoOfx ? "Conciliando…" : "Conciliar selecionados"}
@@ -2606,14 +2608,37 @@ export default function FinanceiroPage() {
                 />
               </label>
               <label className="block sm:col-span-2">
-                <span className="rotulo mb-1 block">Banco/conta utilizada *</span>
+                <span className="rotulo mb-1 block">De qual banco/conta saiu o pagamento? *</span>
                 <input
                   className="input w-full"
+                  list="contas-origem-boleto"
                   value={formPagamentoBoleto.bancoConta}
                   onChange={(event) => atualizarCampoPagamento("bancoConta", event.target.value)}
-                  placeholder="Ex.: Banco X - Conta Operacional"
+                  placeholder="Ex.: Itaú — conta corrente"
                   required
                 />
+                <datalist id="contas-origem-boleto">
+                  {CONTAS_ORIGEM_PAGAMENTO.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {CONTAS_ORIGEM_PAGAMENTO.map((conta) => (
+                    <button
+                      key={conta}
+                      type="button"
+                      className={`rounded-full border px-2.5 py-1 text-xs ${
+                        formPagamentoBoleto.bancoConta === conta
+                          ? "border-primaria bg-primaria/10 font-semibold text-primaria-escura"
+                          : "border-stone-200 bg-white text-slate-600 hover:border-primaria/40"
+                      }`}
+                      onClick={() => atualizarCampoPagamento("bancoConta", conta)}
+                    >
+                      {conta.split("—")[0]?.trim()}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-slate-500">Ajuda a localizar o débito no extrato OFX.</p>
               </label>
               <label className="block sm:col-span-2">
                 <span className="rotulo mb-1 block">Responsável</span>

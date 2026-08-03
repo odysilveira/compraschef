@@ -3,6 +3,10 @@
 
 export type Papel = "dono" | "gerente" | "lider" | "caixa";
 
+export type TipoBox = "NAO_CLASSIFICADO" | "RESERVA" | "OPERACIONAL" | "QUARENTENA";
+
+export type PosicaoFisicaBox = "FRENTE" | "TRAS" | "ISOLADA" | "OUTRA" | "NAO_INFORMADA";
+
 export interface Perfil {
   id: string;
   nome: string;
@@ -115,6 +119,8 @@ export interface Caixa {
   id: string;
   numero: number;
   qr_code: string; // QR fixo da caixa física
+  tipo_box: TipoBox;
+  posicao_fisica: PosicaoFisicaBox;
   status: StatusCaixa;
   produto_id?: string;
   quantidade?: number; // na unidade de uso

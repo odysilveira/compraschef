@@ -9,6 +9,7 @@ import type { Caixa, ContaPagar, ContaPagarHistorico, DB, Produto, StatusContaPa
 import { seedDB } from "./seed";
 import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_SACO } from "./catalogo";
 import { compararPrioridadeConsumo, saldoDosLotes } from "../domain/estoque";
+import { validarPosicaoFisicaBox, validarTipoBox } from "../domain/estoque-boxes";
 import { extrairCnpjEmitenteDaChaveAcesso } from "../domain/nfe-parcelas";
 import { associarCategoriasProdutos } from "../domain/produtos";
 import { recuperarVinculosLegadosBoletos } from "../domain/recuperacao-boleto-legado";
@@ -313,6 +314,16 @@ export function atualizarComNovidades(db: DB): boolean {
     }
     if (produto.controla_validade === undefined) {
       produto.controla_validade = false;
+      mudou = true;
+    }
+  }
+  for (const caixa of db.caixas) {
+    if (!validarTipoBox(caixa.tipo_box as string)) {
+      caixa.tipo_box = "NAO_CLASSIFICADO";
+      mudou = true;
+    }
+    if (!validarPosicaoFisicaBox(caixa.posicao_fisica as string)) {
+      caixa.posicao_fisica = "NAO_INFORMADA";
       mudou = true;
     }
   }

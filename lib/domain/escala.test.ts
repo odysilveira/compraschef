@@ -5,9 +5,11 @@ import {
   calcularHorasPagas,
   criarSlot,
   datasTrabalhoPadraoClt,
+  excluirSlot,
   gerarEscalaPadraoClt,
   janela28Dias,
   janelaCalendarioEscala,
+  linkWhatsAppConvocacao,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
   montarTextoConvocacaoWhatsApp,
@@ -17,6 +19,7 @@ import {
   rotuloPeriodoJanela,
   rotulosCabecalhoSemana,
   setorDoPlantao,
+  setorPorTextoFuncao,
   slotsDaPessoaNaJanela,
   textoResumoSetores,
   validarPreRequisitosConvocacao,
@@ -353,8 +356,10 @@ describe("escala domain", () => {
       motoboys: 1,
       cozinha: 1,
       balcao: 1,
+      salao: 0,
       clt_cozinha: 0,
       clt_balcao: 0,
+      clt_salao: 0,
       clt_outros: 0,
     });
     expect(
@@ -383,33 +388,122 @@ describe("escala domain", () => {
             criado_em: "",
             atualizado_em: "",
           },
+          {
+            id: "6",
+            pessoa_id: "c3",
+            data: "2026-08-10",
+            hora_inicio: "11:00",
+            hora_fim: "23:00",
+            intervalo_min: 60,
+            funcao: "Salão",
+            criado_em: "",
+            atualizado_em: "",
+          },
+          {
+            id: "7",
+            pessoa_id: "i3",
+            data: "2026-08-10",
+            hora_inicio: "18:00",
+            hora_fim: "23:00",
+            intervalo_min: 30,
+            funcao: "Salão",
+            criado_em: "",
+            atualizado_em: "",
+          },
         ],
         [
           ...pessoas,
           { id: "c1", tipo: "colaborador" as const, funcao: "cozinha" as const },
           { id: "c2", tipo: "colaborador" as const, funcao: "balcao" as const },
+          { id: "c3", tipo: "colaborador" as const, funcao: "salao" as const },
+          { id: "i3", tipo: "intermitente" as const, funcao: "salao" as const },
         ]
       )
     ).toEqual({
       motoboys: 1,
       cozinha: 1,
       balcao: 1,
+      salao: 1,
       clt_cozinha: 1,
       clt_balcao: 1,
+      clt_salao: 1,
       clt_outros: 0,
     });
     expect(setorDoPlantao({ funcao: "Cozinha" }, { tipo: "colaborador", funcao: "cozinha" })).toBe("cozinha");
     expect(setorDoPlantao({ funcao: "" }, { tipo: "colaborador", funcao: "balcao" })).toBe("balcao");
+    expect(setorPorTextoFuncao("Salão")).toBe("salao");
+    expect(setorPorTextoFuncao("Garçom")).toBe("salao");
     expect(
       textoResumoSetores({
         motoboys: 1,
         cozinha: 2,
         balcao: 0,
+        salao: 1,
         clt_cozinha: 2,
         clt_balcao: 1,
+        clt_salao: 1,
         clt_outros: 0,
       })
-    ).toBe("CLT coz 2 · CLT balc 1 · 1 moto · 2 coz");
+    ).toBe("CLT coz 2 · CLT balc 1 · CLT salão 1 · 1 moto · 2 coz · 1 salão");
+  });
+
+  it("exclui plantão com convocação rascunho e pagamento previsto", () => {
+    const db = dbBase();
+    const criado = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-20",
+        hora_inicio: "18:00",
+        hora_fim: "23:30",
+        intervalo_min: 30,
+        funcao: "Salão",
+      },
+      { id: "esc-del", convocacaoId: "conv-del", agora: "2026-08-10T12:00:00.000Z" }
+    );
+    expect(criado.sucesso).toBe(true);
+    marcarConvocacaoEnviada(db, "conv-del", "2026-08-10T13:00:00.000Z");
+    const aceita = registrarRespostaConvocacao(db, "conv-del", "aceita", "2026-08-11T12:00:00.000Z");
+    expect(aceita.sucesso).toBe(true);
+    expect(db.pagamentos_pessoas.some((p) => p.convocacao_id === "conv-del" && p.status === "previsto")).toBe(true);
+
+    const r = excluirSlot(db, "esc-del");
+    expect(r.sucesso).toBe(true);
+    expect(db.escala_slots.find((s) => s.id === "esc-del")).toBeUndefined();
+    expect(db.convocacoes.find((c) => c.id === "conv-del")).toBeUndefined();
+    expect(db.pagamentos_pessoas.find((p) => p.convocacao_id === "conv-del")).toBeUndefined();
+  });
+
+  it("bloqueia excluir plantão com pagamento informado", () => {
+    const db = dbBase();
+    criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-20",
+        hora_inicio: "18:00",
+        hora_fim: "23:30",
+        intervalo_min: 30,
+      },
+      { id: "esc-lock", convocacaoId: "conv-lock", agora: "2026-08-10T12:00:00.000Z" }
+    );
+    marcarConvocacaoEnviada(db, "conv-lock", "2026-08-10T13:00:00.000Z");
+    registrarRespostaConvocacao(db, "conv-lock", "aceita", "2026-08-11T12:00:00.000Z");
+    const pag = db.pagamentos_pessoas.find((p) => p.convocacao_id === "conv-lock")!;
+    pag.status = "aguardando_conciliacao";
+    pag.pagamento_data = "2026-08-12";
+    pag.pagamento_valor = pag.valor;
+
+    const r = excluirSlot(db, "esc-lock");
+    expect(r.sucesso).toBe(false);
+    expect(r.erros[0]).toMatch(/pagamento/i);
+    expect(db.escala_slots.find((s) => s.id === "esc-lock")).toBeDefined();
+  });
+
+  it("monta link wa.me com DDI 55", () => {
+    const url = linkWhatsAppConvocacao("(43) 98888-1000", "Olá");
+    expect(url).toBe("https://wa.me/5543988881000?text=Ol%C3%A1");
+    expect(linkWhatsAppConvocacao("", "x")).toBeNull();
   });
 
   it("filtra plantões da pessoa na janela", () => {

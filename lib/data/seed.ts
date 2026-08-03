@@ -516,6 +516,7 @@ export const seedDB: DB = {
   config_rh: {
     antecedencia_minima_dias: 3,
     aviso_ponto_horas: 24,
+    tolerancia_atraso_minutos: 10,
     atualizado_em: diasAtras(1),
   },
 

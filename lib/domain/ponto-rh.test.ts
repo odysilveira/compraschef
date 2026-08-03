@@ -54,7 +54,12 @@ function dbBase(): DB {
     ],
     batidas_ponto: [],
     pendencias_ponto: [],
-    config_rh: { antecedencia_minima_dias: 3, aviso_ponto_horas: 24, atualizado_em: "2026-08-01T12:00:00.000Z" },
+    config_rh: {
+      antecedencia_minima_dias: 3,
+      aviso_ponto_horas: 24,
+      tolerancia_atraso_minutos: 10,
+      atualizado_em: "2026-08-01T12:00:00.000Z",
+    },
   } as unknown as DB;
 }
 
@@ -149,14 +154,19 @@ describe("ponto-rh", () => {
       ],
       { idFactory: () => `b-${db.batidas_ponto!.length}` }
     );
+    // 5 min dentro da tolerância padrão (10) → OK
     const julho = montarEspelhoPonto(db, { competencia: "2026-07" });
     expect(julho).toHaveLength(1);
     expect(julho[0]!.previsto_entrada).toBe("11:00");
     expect(julho[0]!.previsto_saida).toBe("23:00");
     expect(julho[0]!.entrada).toBe("11:05");
     expect(julho[0]!.saida).toBe("23:01");
-    expect(julho[0]!.status).toBe("atraso");
-    expect(julho[0]!.atraso_entrada_min).toBe(5);
+    expect(julho[0]!.status).toBe("ok");
+
+    // Sem tolerância → atraso
+    const rigoroso = montarEspelhoPonto(db, { competencia: "2026-07", tolerancia_atraso_minutos: 0 });
+    expect(rigoroso[0]!.status).toBe("atraso");
+    expect(rigoroso[0]!.atraso_entrada_min).toBe(5);
 
     const agosto = montarEspelhoPonto(db, { competencia: "2026-08" });
     expect(agosto).toHaveLength(1);

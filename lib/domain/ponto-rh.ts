@@ -12,11 +12,13 @@ import type {
 import { somenteDigitosTelefone } from "./rh";
 
 export const AVISO_PONTO_HORAS_PADRAO = 24;
+export const TOLERANCIA_ATRASO_MINUTOS_PADRAO = 10;
 
 export function configRhPadrao(agora = new Date().toISOString()): ConfigRh {
   return {
     antecedencia_minima_dias: 3,
     aviso_ponto_horas: AVISO_PONTO_HORAS_PADRAO,
+    tolerancia_atraso_minutos: TOLERANCIA_ATRASO_MINUTOS_PADRAO,
     atualizado_em: agora,
   };
 }
@@ -39,6 +41,13 @@ export function garantirConfigRh(db: DB, agora = new Date().toISOString()): Conf
     db.config_rh.antecedencia_minima_dias = 3;
     db.config_rh.atualizado_em = agora;
   }
+  if (
+    !Number.isFinite(db.config_rh.tolerancia_atraso_minutos) ||
+    db.config_rh.tolerancia_atraso_minutos < 0
+  ) {
+    db.config_rh.tolerancia_atraso_minutos = TOLERANCIA_ATRASO_MINUTOS_PADRAO;
+    db.config_rh.atualizado_em = agora;
+  }
   return db.config_rh;
 }
 
@@ -46,6 +55,12 @@ export function avisoPontoHorasDoDb(db: Pick<DB, "config_rh"> | null | undefined
   const n = db?.config_rh?.aviso_ponto_horas;
   if (typeof n === "number" && Number.isFinite(n) && n >= 1) return n;
   return AVISO_PONTO_HORAS_PADRAO;
+}
+
+export function toleranciaAtrasoMinutosDoDb(db: Pick<DB, "config_rh"> | null | undefined): number {
+  const n = db?.config_rh?.tolerancia_atraso_minutos;
+  if (typeof n === "number" && Number.isFinite(n) && n >= 0) return Math.floor(n);
+  return TOLERANCIA_ATRASO_MINUTOS_PADRAO;
 }
 
 export function rotuloStatusPendenciaPonto(status: StatusPendenciaPonto): string {
@@ -531,7 +546,10 @@ export function minutosDeHora(hora: string): number | null {
   return h * 60 + min;
 }
 
-function classificarDiaEspelho(dia: Omit<DiaEspelhoPonto, "status" | "atraso_entrada_min" | "saida_antecipada_min">): {
+function classificarDiaEspelho(
+  dia: Omit<DiaEspelhoPonto, "status" | "atraso_entrada_min" | "saida_antecipada_min">,
+  toleranciaMinutos: number
+): {
   status: StatusDiaEspelho;
   atraso_entrada_min?: number;
   saida_antecipada_min?: number;
@@ -539,6 +557,7 @@ function classificarDiaEspelho(dia: Omit<DiaEspelhoPonto, "status" | "atraso_ent
   const temEscala = Boolean(dia.previsto_entrada && dia.previsto_saida);
   const temEntrada = Boolean(dia.entrada);
   const temSaida = Boolean(dia.saida);
+  const tolerancia = Math.max(0, Math.floor(toleranciaMinutos));
 
   if (!temEscala) {
     return { status: temEntrada || temSaida ? "sem_escala" : "sem_batida" };
@@ -551,12 +570,15 @@ function classificarDiaEspelho(dia: Omit<DiaEspelhoPonto, "status" | "atraso_ent
   const prevS = minutosDeHora(dia.previsto_saida!);
   const realS = minutosDeHora(dia.saida!);
 
-  let atraso: number | undefined;
-  let antecipada: number | undefined;
-  if (prevE != null && realE != null && realE > prevE) atraso = realE - prevE;
-  if (prevS != null && realS != null && realS < prevS) antecipada = prevS - realS;
+  let atrasoBruto = 0;
+  let antecipadaBruta = 0;
+  if (prevE != null && realE != null && realE > prevE) atrasoBruto = realE - prevE;
+  if (prevS != null && realS != null && realS < prevS) antecipadaBruta = prevS - realS;
 
-  if ((atraso != null && atraso > 0) || (antecipada != null && antecipada > 0)) {
+  const atraso = atrasoBruto > tolerancia ? atrasoBruto : undefined;
+  const antecipada = antecipadaBruta > tolerancia ? antecipadaBruta : undefined;
+
+  if (atraso != null || antecipada != null) {
     return {
       status: "atraso",
       atraso_entrada_min: atraso,
@@ -571,10 +593,14 @@ function classificarDiaEspelho(dia: Omit<DiaEspelhoPonto, "status" | "atraso_ent
  * Inclui dias com plantão sem digital e dias com batida sem escala.
  */
 export function montarEspelhoPonto(
-  db: Pick<DB, "batidas_ponto" | "escala_slots">,
-  filtros: { competencia: string; pessoa_id?: string }
+  db: Pick<DB, "batidas_ponto" | "escala_slots" | "config_rh">,
+  filtros: { competencia: string; pessoa_id?: string; tolerancia_atraso_minutos?: number } = {
+    competencia: competenciaDeData(),
+  }
 ): DiaEspelhoPonto[] {
   const prefixo = filtros.competencia.slice(0, 7);
+  const tolerancia =
+    filtros.tolerancia_atraso_minutos ?? toleranciaAtrasoMinutosDoDb(db);
   const mapa = new Map<string, Omit<DiaEspelhoPonto, "status" | "atraso_entrada_min" | "saida_antecipada_min">>();
 
   const garantir = (pessoaId: string, data: string) => {
@@ -617,7 +643,7 @@ export function montarEspelhoPonto(
 
   return Array.from(mapa.values())
     .map((dia) => {
-      const classif = classificarDiaEspelho(dia);
+      const classif = classificarDiaEspelho(dia, tolerancia);
       return { ...dia, ...classif };
     })
     .sort((a, b) => a.data.localeCompare(b.data) || a.pessoa_id.localeCompare(b.pessoa_id));

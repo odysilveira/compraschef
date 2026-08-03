@@ -676,6 +676,11 @@ export interface ConfigRh {
   antecedencia_minima_dias: number;
   /** Horas após o fim do plantão para avisar falta de batida (padrão: 24). */
   aviso_ponto_horas: number;
+  /**
+   * Minutos de folga no espelho antes de marcar atraso / saída antecipada (padrão: 10).
+   * Ex.: entrada 5 min depois do previsto com tolerância 10 → OK.
+   */
+  tolerancia_atraso_minutos: number;
   /** Conexão com REP Control iD (rede local do restaurante). */
   control_id?: ConfigControlId;
   atualizado_em: string;

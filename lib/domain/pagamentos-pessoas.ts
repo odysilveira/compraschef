@@ -1,4 +1,5 @@
 import type { DB, PagamentoPessoa, StatusPagamentoPessoa, TipoPagamentoPessoa } from "../types";
+import { aplicarDescontosNoPagamento, previewFechamentoSalario } from "./consumos-pessoas";
 
 export const TIPOS_PAGAMENTO_PESSOA: Array<{ id: TipoPagamentoPessoa; rotulo: string }> = [
   { id: "salario", rotulo: "Salário" },
@@ -171,4 +172,95 @@ export function registrarDivergenciaPagamentoPessoa(
   pagamento.atualizado_em = agora;
 
   return { sucesso: true, pagamento, erros: [] };
+}
+
+/** Último dia do mês da competência YYYY-MM. */
+export function vencimentoCompetencia(competencia: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(competencia);
+  if (!m) return `${competencia}-28`;
+  const ano = Number(m[1]);
+  const mes = Number(m[2]);
+  const ultimo = new Date(ano, mes, 0).getDate();
+  return `${m[1]}-${m[2]}-${String(ultimo).padStart(2, "0")}`;
+}
+
+export interface ResultadoGerarFolhaClt {
+  sucesso: boolean;
+  criados: number;
+  pulados: number;
+  pagamentos: PagamentoPessoa[];
+  erros: string[];
+  avisos: string[];
+}
+
+/**
+ * Gera pagamentos de salário (status previsto) para colaboradores ativos com salário,
+ * na competência informada. Não duplica se já existir salário da mesma competência.
+ * Aplica descontos de adiantamento/consumo via preview.
+ */
+export function gerarFolhaCltMes(
+  db: DB,
+  competencia: string,
+  opcoes: { agora?: string; idFactory?: () => string; liberar?: boolean } = {}
+): ResultadoGerarFolhaClt {
+  const avisos: string[] = [];
+  if (!/^\d{4}-\d{2}$/.test(competencia)) {
+    return { sucesso: false, criados: 0, pulados: 0, pagamentos: [], erros: ["Competência inválida (use YYYY-MM)."], avisos };
+  }
+  if (!Array.isArray(db.pagamentos_pessoas)) db.pagamentos_pessoas = [];
+
+  const agora = opcoes.agora ?? new Date().toISOString();
+  const vencimento = vencimentoCompetencia(competencia);
+  const colaboradores = (db.pessoas ?? []).filter(
+    (p) => p.ativo && p.tipo === "colaborador" && typeof p.salario === "number" && p.salario > 0
+  );
+
+  let criados = 0;
+  let pulados = 0;
+  const pagamentos: PagamentoPessoa[] = [];
+
+  for (const pessoa of colaboradores) {
+    const jaTem = db.pagamentos_pessoas.some(
+      (p) => p.pessoa_id === pessoa.id && p.tipo === "salario" && p.competencia === competencia
+    );
+    if (jaTem) {
+      pulados += 1;
+      continue;
+    }
+
+    const preview = previewFechamentoSalario(db, pessoa.id, competencia, pessoa.salario);
+    const id = opcoes.idFactory?.() ?? `pagp-folha-${Date.now()}-${criados}`;
+    const pagamento: PagamentoPessoa = {
+      id,
+      pessoa_id: pessoa.id,
+      tipo: "salario",
+      descricao: `Salário ${competencia}`,
+      competencia,
+      vencimento,
+      valor: preview.valor_liquido,
+      valor_bruto: preview.valor_bruto,
+      desconto_adiantamento: preview.desconto_adiantamento || undefined,
+      desconto_consumo: preview.desconto_consumo || undefined,
+      consumo_ids: preview.consumo_ids.length ? preview.consumo_ids : undefined,
+      status: opcoes.liberar ? "liberado" : "previsto",
+      criado_em: agora,
+      atualizado_em: agora,
+    };
+    db.pagamentos_pessoas.push(pagamento);
+
+    // Marca consumos como descontados (mesma lógica de aplicarDescontosNoPagamento)
+    const aplicado = aplicarDescontosNoPagamento(db, pagamento.id);
+    if (!aplicado.sucesso) {
+      avisos.push(`${pessoa.nome}: ${aplicado.erros.join(" ")}`);
+    }
+
+    pagamentos.push(pagamento);
+    criados += 1;
+  }
+
+  if (colaboradores.length === 0) {
+    avisos.push("Nenhum colaborador ativo com salário cadastrado.");
+  }
+
+  return { sucesso: true, criados, pulados, pagamentos, erros: [], avisos };
 }

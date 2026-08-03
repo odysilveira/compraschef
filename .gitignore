@@ -6,3 +6,5 @@ out/
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+# gerado por scripts/copy-pdf-worker.mjs (postinstall / build)
+public/pdf.worker.min.mjs

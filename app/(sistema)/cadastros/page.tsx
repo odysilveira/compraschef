@@ -3,7 +3,7 @@
 // Cadastros — requisitos 1 a 6: fornecedores, produtos, unidades, locais e caixas.
 // + contas bancárias do restaurante (origem dos pagamentos).
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { TituloPagina } from "@/components/ui";
 import { AbaCategorias } from "@/components/cadastros/AbaCategorias";
@@ -26,7 +26,7 @@ const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "contas", rotulo: "Contas bancárias" },
 ];
 
-export default function CadastrosPage() {
+function CadastrosConteudo() {
   const searchParams = useSearchParams();
   const abaParam = searchParams.get("aba");
   const produtoParaAbrirId = searchParams.get("produtoId") ?? undefined;
@@ -69,5 +69,23 @@ export default function CadastrosPage() {
       {aba === "caixas" && <AbaCaixas />}
       {aba === "contas" && <AbaContasBancarias />}
     </div>
+  );
+}
+
+export default function CadastrosPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina
+            titulo="Cadastros"
+            subtitulo="Fornecedores, produtos, unidades, locais, caixas e contas bancárias"
+          />
+          <p className="text-sm text-slate-500">Carregando…</p>
+        </div>
+      }
+    >
+      <CadastrosConteudo />
+    </Suspense>
   );
 }

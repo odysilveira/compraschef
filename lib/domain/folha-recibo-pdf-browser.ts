@@ -1,16 +1,13 @@
 /** Extração de texto de PDF no navegador (folha do contador). */
 
+import { configurarWorkerPdfjs } from "./pdfjs-worker";
+
 export async function extrairTextoPdfBrowser(buffer: ArrayBuffer): Promise<string> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => null);
   if (!pdfjs?.getDocument) {
     throw new Error("Não foi possível carregar o leitor de PDF.");
   }
-  if (pdfjs.GlobalWorkerOptions) {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      "pdfjs-dist/build/pdf.worker.min.mjs",
-      import.meta.url
-    ).toString();
-  }
+  configurarWorkerPdfjs(pdfjs);
 
   const dados = new Uint8Array(buffer.slice(0));
   const loadingTask = pdfjs.getDocument({ data: dados });

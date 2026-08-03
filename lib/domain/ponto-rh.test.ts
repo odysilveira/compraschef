@@ -12,6 +12,7 @@ import {
   exportarEspelhoCsv,
   duracaoMinutosEntreHoras,
   formatarDuracaoHoras,
+  formatarSaldoHoras,
 } from "./ponto-rh";
 
 function pessoaClt(overrides: Partial<PessoaRH> = {}): PessoaRH {
@@ -208,6 +209,7 @@ describe("ponto-rh", () => {
     expect(csv.startsWith("\uFEFF")).toBe(true);
     expect(csv).toContain("Data;Pessoa;");
     expect(csv).toContain("Horas previstas");
+    expect(csv).toContain("Saldo (h)");
     expect(csv).toContain("João");
     expect(csv).toContain("Sem digital");
   });
@@ -217,6 +219,9 @@ describe("ponto-rh", () => {
     expect(duracaoMinutosEntreHoras("22:00", "06:00")).toBe(8 * 60);
     expect(formatarDuracaoHoras(750)).toBe("12:30");
     expect(formatarDuracaoHoras(undefined)).toBe("—");
+    expect(formatarSaldoHoras(30)).toBe("+0:30");
+    expect(formatarSaldoHoras(-75)).toBe("−1:15");
+    expect(formatarSaldoHoras(0)).toBe("0:00");
 
     const db = dbBase();
     importarBatidasPonto(
@@ -230,8 +235,37 @@ describe("ponto-rh", () => {
     const dia = montarEspelhoPonto(db, { competencia: "2026-07" })[0]!;
     expect(dia.previsto_minutos).toBe(12 * 60);
     expect(dia.realizado_minutos).toBe(12 * 60);
+    expect(dia.saldo_minutos).toBe(0);
     const resumo = resumirEspelhoPonto([dia]);
     expect(resumo.previsto_minutos).toBe(12 * 60);
     expect(resumo.realizado_minutos).toBe(12 * 60);
+    expect(resumo.saldo_minutos).toBe(0);
+  });
+
+  it("calcula saldo positivo e negativo no espelho", () => {
+    const db = dbBase();
+    importarBatidasPonto(
+      db,
+      [
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "11:00", tipo: "entrada" },
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "23:30", tipo: "saida" },
+      ],
+      { idFactory: () => `b-${db.batidas_ponto!.length}` }
+    );
+    const extra = montarEspelhoPonto(db, { competencia: "2026-07" })[0]!;
+    expect(extra.saldo_minutos).toBe(30);
+
+    const dbFalta = dbBase();
+    importarBatidasPonto(
+      dbFalta,
+      [
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "11:00", tipo: "entrada" },
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "22:00", tipo: "saida" },
+      ],
+      { idFactory: () => `b-${dbFalta.batidas_ponto!.length}` }
+    );
+    const falta = montarEspelhoPonto(dbFalta, { competencia: "2026-07" })[0]!;
+    expect(falta.saldo_minutos).toBe(-60);
+    expect(exportarEspelhoCsv([extra], () => "João")).toContain("+0:30");
   });
 });

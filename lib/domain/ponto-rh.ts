@@ -514,6 +514,8 @@ export interface DiaEspelhoPonto {
   previsto_minutos?: number;
   /** Duração realizada (entrada→saída), em minutos. */
   realizado_minutos?: number;
+  /** Realizado − previsto (só quando ambos existem). */
+  saldo_minutos?: number;
 }
 
 export type StatusDiaEspelho =
@@ -573,12 +575,45 @@ export function formatarDuracaoHoras(minutos: number | undefined | null): string
   return `${h}:${String(min).padStart(2, "0")}`;
 }
 
+/** Ex.: +0:30, −1:15, 0:00. */
+export function formatarSaldoHoras(minutos: number | undefined | null): string {
+  if (minutos == null || !Number.isFinite(minutos)) return "—";
+  const m = Math.round(minutos);
+  if (m === 0) return "0:00";
+  const sinal = m > 0 ? "+" : "−";
+  const abs = Math.abs(m);
+  const h = Math.floor(abs / 60);
+  const min = abs % 60;
+  return `${sinal}${h}:${String(min).padStart(2, "0")}`;
+}
+
+/** Realizado − previsto; undefined se faltar um dos dois. */
+export function saldoMinutosEspelho(
+  previsto?: number,
+  realizado?: number
+): number | undefined {
+  if (previsto == null || realizado == null) return undefined;
+  if (!Number.isFinite(previsto) || !Number.isFinite(realizado)) return undefined;
+  return realizado - previsto;
+}
+
 function enriquecerDuracoes(
-  dia: Omit<DiaEspelhoPonto, "status" | "atraso_entrada_min" | "saida_antecipada_min" | "previsto_minutos" | "realizado_minutos">
-): Pick<DiaEspelhoPonto, "previsto_minutos" | "realizado_minutos"> {
+  dia: Omit<
+    DiaEspelhoPonto,
+    | "status"
+    | "atraso_entrada_min"
+    | "saida_antecipada_min"
+    | "previsto_minutos"
+    | "realizado_minutos"
+    | "saldo_minutos"
+  >
+): Pick<DiaEspelhoPonto, "previsto_minutos" | "realizado_minutos" | "saldo_minutos"> {
+  const previsto_minutos = duracaoMinutosEntreHoras(dia.previsto_entrada, dia.previsto_saida);
+  const realizado_minutos = duracaoMinutosEntreHoras(dia.entrada, dia.saida);
   return {
-    previsto_minutos: duracaoMinutosEntreHoras(dia.previsto_entrada, dia.previsto_saida),
-    realizado_minutos: duracaoMinutosEntreHoras(dia.entrada, dia.saida),
+    previsto_minutos,
+    realizado_minutos,
+    saldo_minutos: saldoMinutosEspelho(previsto_minutos, realizado_minutos),
   };
 }
 
@@ -695,6 +730,8 @@ export interface ResumoEspelhoPonto {
   sem_escala: number;
   previsto_minutos: number;
   realizado_minutos: number;
+  /** Soma dos saldos dia a dia (só dias com previsto e realizado). */
+  saldo_minutos: number;
 }
 
 export function resumirEspelhoPonto(dias: DiaEspelhoPonto[]): ResumoEspelhoPonto {
@@ -707,11 +744,13 @@ export function resumirEspelhoPonto(dias: DiaEspelhoPonto[]): ResumoEspelhoPonto
     sem_escala: 0,
     previsto_minutos: 0,
     realizado_minutos: 0,
+    saldo_minutos: 0,
   };
   for (const d of dias) {
     r[d.status] += 1;
     if (d.previsto_minutos != null) r.previsto_minutos += d.previsto_minutos;
     if (d.realizado_minutos != null) r.realizado_minutos += d.realizado_minutos;
+    if (d.saldo_minutos != null) r.saldo_minutos += d.saldo_minutos;
   }
   return r;
 }
@@ -738,6 +777,7 @@ export function exportarEspelhoCsv(
     "Realizado entrada",
     "Realizado saída",
     "Horas realizadas",
+    "Saldo (h)",
     "Status",
     "Atraso entrada (min)",
     "Saída antecipada (min)",
@@ -756,6 +796,7 @@ export function exportarEspelhoCsv(
       d.entrada ?? "",
       d.saida ?? "",
       formatarDuracaoHoras(d.realizado_minutos) === "—" ? "" : formatarDuracaoHoras(d.realizado_minutos),
+      formatarSaldoHoras(d.saldo_minutos) === "—" ? "" : formatarSaldoHoras(d.saldo_minutos),
       rotuloStatusDiaEspelho(d.status),
       d.atraso_entrada_min != null ? String(d.atraso_entrada_min) : "",
       d.saida_antecipada_min != null ? String(d.saida_antecipada_min) : "",

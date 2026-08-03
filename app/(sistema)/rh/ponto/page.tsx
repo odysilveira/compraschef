@@ -25,6 +25,7 @@ import {
   resumirEspelhoPonto,
   exportarEspelhoCsv,
   formatarDuracaoHoras,
+  formatarSaldoHoras,
   rotuloOrigemBatidaPonto,
   rotuloStatusDiaEspelho,
   rotuloStatusPendenciaPonto,
@@ -765,6 +766,13 @@ export default function RhPontoPage() {
                     espelhoFiltrado.reduce((acc, d) => acc + (d.realizado_minutos ?? 0), 0)
                   )}
                 </span>
+                {" · "}
+                saldo{" "}
+                <span className="font-semibold tabular-nums text-slate-900">
+                  {formatarSaldoHoras(
+                    espelhoFiltrado.reduce((acc, d) => acc + (d.saldo_minutos ?? 0), 0)
+                  )}
+                </span>
               </p>
 
               {espelhoFiltrado.length === 0 ? (
@@ -779,6 +787,7 @@ export default function RhPontoPage() {
                         <th className="px-3 py-2 font-semibold">Previsto</th>
                         <th className="px-3 py-2 font-semibold">Realizado</th>
                         <th className="px-3 py-2 font-semibold">Horas</th>
+                        <th className="px-3 py-2 font-semibold">Saldo</th>
                         <th className="px-3 py-2 font-semibold">Status</th>
                         <th className="px-3 py-2 font-semibold">Origem</th>
                         <th className="px-3 py-2 font-semibold">Ação</th>
@@ -823,6 +832,19 @@ export default function RhPontoPage() {
                               <span className="font-medium">
                                 {formatarDuracaoHoras(dia.realizado_minutos)}
                               </span>
+                            </td>
+                            <td
+                              className={`px-3 py-2 tabular-nums font-medium ${
+                                dia.saldo_minutos == null
+                                  ? "text-slate-400"
+                                  : dia.saldo_minutos > 0
+                                    ? "text-emerald-700"
+                                    : dia.saldo_minutos < 0
+                                      ? "text-amber-800"
+                                      : "text-slate-700"
+                              }`}
+                            >
+                              {formatarSaldoHoras(dia.saldo_minutos)}
                             </td>
                             <td className="px-3 py-2">
                               <div className="flex flex-col gap-0.5">

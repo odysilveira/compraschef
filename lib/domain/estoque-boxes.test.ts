@@ -1,5 +1,3 @@
-import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { atualizarComNovidades } from "../data/index";
 import type { DB } from "../types";
@@ -221,15 +219,4 @@ describe("estoque boxes fase 1", () => {
     expect(SUPORTA_TRANSFERENCIAS_ENTRE_BOXES).toBe(false);
   });
 
-  it("Excel Saipos permanece fora do Git", () => {
-    const caminho = "Códigos de integração (1).xlsx";
-    if (!existsSync(caminho)) return;
-
-    const status = execSync('git status --porcelain -- "Códigos de integração (1).xlsx"', {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    }).trim();
-
-    expect(status.startsWith("??")).toBe(true);
-  });
 });

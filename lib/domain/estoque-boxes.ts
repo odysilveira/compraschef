@@ -1,10 +1,10 @@
-import type { Caixa } from "../types";
+import type { Caixa, PosicaoFisicaBox, TipoBox } from "../types";
 
-export const TIPOS_BOX = ["NAO_CLASSIFICADO", "RESERVA", "OPERACIONAL", "QUARENTENA"] as const;
-export type TipoBox = (typeof TIPOS_BOX)[number];
+export type { TipoBox, PosicaoFisicaBox } from "../types";
 
-export const POSICOES_BOX = ["FRENTE", "TRAS", "ISOLADA", "OUTRA", "NAO_INFORMADA"] as const;
-export type PosicaoFisicaBox = (typeof POSICOES_BOX)[number];
+export const TIPOS_BOX: readonly TipoBox[] = ["NAO_CLASSIFICADO", "RESERVA", "OPERACIONAL", "QUARENTENA"];
+
+export const POSICOES_BOX: readonly PosicaoFisicaBox[] = ["FRENTE", "TRAS", "ISOLADA", "OUTRA", "NAO_INFORMADA"];
 
 export const ROTULO_TIPO_BOX: Record<TipoBox, string> = {
   NAO_CLASSIFICADO: "Não classificado",

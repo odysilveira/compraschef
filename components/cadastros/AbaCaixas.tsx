@@ -50,7 +50,7 @@ function explicacaoTipoBox(tipo: TipoBox): string {
     case "OPERACIONAL":
       return "Operacional: saldo contínuo para consumo.";
     case "QUARENTENA":
-      return "Quarentena: produto bloqueado para uso.";
+      return "Quarentena: box identificado para isolamento. O bloqueio automático de consumo será implementado na próxima fase.";
     default:
       return "Não classificado: caixa ainda não adaptada ao novo modelo.";
   }
@@ -156,8 +156,11 @@ export function AbaCaixas() {
             <p className="font-semibold text-slate-800">Classificação lógica dos boxes</p>
             <p>Reserva: estoque armazenado.</p>
             <p>Operacional: saldo contínuo para consumo.</p>
-            <p>Quarentena: produto bloqueado para uso.</p>
+            <p>Quarentena: box identificado para isolamento. O bloqueio automático de consumo será implementado na próxima fase.</p>
             <p>Não classificado: caixa ainda não adaptada ao novo modelo.</p>
+            <p className="mt-2 rounded-card border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+              Fase 1: a classificação organiza e identifica os boxes, mas ainda não altera disponibilidade, saldo, FEFO ou consumo.
+            </p>
           </div>
 
           <div className="card p-0 sm:p-2">
@@ -246,6 +249,11 @@ export function AbaCaixas() {
               {avisoIncompatibilidadeBox(form) && (
                 <p className="mt-2 rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
                   {avisoIncompatibilidadeBox(form)}
+                </p>
+              )}
+              {form.tipo_box === "QUARENTENA" && (
+                <p className="mt-2 rounded-card border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  Separe fisicamente este box. Nesta fase, o sistema ainda não impede automaticamente seu uso pelo fluxo de estoque.
                 </p>
               )}
             </div>

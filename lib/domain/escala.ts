@@ -24,6 +24,16 @@ export function pessoaPrecisaConvocacao(tipo: TipoPessoaRH): boolean {
 /** Setor operacional na escala de convocação (intermitente / motoboy). */
 export type SetorConvocacaoEscala = "cozinha" | "balcao" | "motoboy";
 
+/** Inclui CLT no arraste do calendário (sem convocação WhatsApp). */
+export type SetorArrastoEscala = SetorConvocacaoEscala | "clt";
+
+/** Jornada típica 12x36 (12 h brutas, 1 h de intervalo). */
+export const HORARIO_PADRAO_CLT_12X36 = {
+  hora_inicio: "11:00",
+  hora_fim: "23:00",
+  intervalo_min: 60,
+} as const;
+
 export function rotuloSetorConvocacao(setor: SetorConvocacaoEscala): string {
   switch (setor) {
     case "cozinha":
@@ -53,26 +63,73 @@ function normalizarTextoSetor(valor: string): string {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-/** Classifica o plantão pelo tipo da pessoa + texto da função do slot. */
-export function setorDoPlantao(
-  slot: Pick<EscalaSlot, "funcao">,
-  pessoa?: Pick<PessoaRH, "tipo"> | null
-): SetorConvocacaoEscala | null {
-  if (pessoa?.tipo === "entregador") return "motoboy";
-  const texto = normalizarTextoSetor(slot.funcao ?? "");
+/** Cozinha / balcão a partir do texto da função (CLT ou intermitente). */
+export function setorPorTextoFuncao(funcao?: string): Exclude<SetorConvocacaoEscala, "motoboy"> | null {
+  const texto = normalizarTextoSetor(funcao ?? "");
   if (texto.includes("cozinha")) return "cozinha";
   if (texto.includes("balc") || texto.includes("caixa")) return "balcao";
   return null;
 }
 
+/**
+ * Classifica o plantão pelo tipo da pessoa + função do slot (ou da pessoa).
+ * CLT de cozinha conta como cozinha; CLT de balcão/caixa conta como balcão.
+ */
+export function setorDoPlantao(
+  slot: Pick<EscalaSlot, "funcao">,
+  pessoa?: (Pick<PessoaRH, "tipo"> & Partial<Pick<PessoaRH, "funcao" | "funcao_custom">>) | null
+): SetorConvocacaoEscala | null {
+  if (pessoa?.tipo === "entregador") return "motoboy";
+  const textoSlot = slot.funcao?.trim();
+  const textoPessoa = pessoa?.funcao != null ? rotuloFuncao(pessoa as Pick<PessoaRH, "funcao" | "funcao_custom">) : "";
+  return setorPorTextoFuncao(textoSlot || textoPessoa) ?? null;
+}
+
+/** Setor operacional da pessoa no cadastro (para preview ao arrastar CLT). */
+export function setorOperacionalDaPessoa(
+  pessoa: Pick<PessoaRH, "tipo"> & Partial<Pick<PessoaRH, "funcao" | "funcao_custom">>
+): SetorConvocacaoEscala | null {
+  if (pessoa.tipo === "entregador") return "motoboy";
+  if (pessoa.funcao == null) return null;
+  return setorPorTextoFuncao(rotuloFuncao(pessoa as Pick<PessoaRH, "funcao" | "funcao_custom">));
+}
+
+export type ResumoDiaEscala = {
+  /** Intermitentes na cozinha (não CLT). */
+  cozinha: number;
+  /** Intermitentes no balcão/caixa (não CLT). */
+  balcao: number;
+  motoboys: number;
+  /** CLT com função cozinha. */
+  clt_cozinha: number;
+  /** CLT com função balcão/caixa. */
+  clt_balcao: number;
+  /** CLT sem setor cozinha/balcão (gerente, etc.). */
+  clt_outros: number;
+};
+
 export function resumoSetoresDoDia(
   slots: EscalaSlot[],
-  pessoas: Array<Pick<PessoaRH, "id" | "tipo">>
-): { motoboys: number; cozinha: number; balcao: number } {
+  pessoas: Array<Pick<PessoaRH, "id" | "tipo"> & Partial<Pick<PessoaRH, "funcao" | "funcao_custom">>>
+): ResumoDiaEscala {
   const porId = new Map(pessoas.map((p) => [p.id, p]));
-  const resumo = { motoboys: 0, cozinha: 0, balcao: 0 };
+  const resumo: ResumoDiaEscala = {
+    motoboys: 0,
+    cozinha: 0,
+    balcao: 0,
+    clt_cozinha: 0,
+    clt_balcao: 0,
+    clt_outros: 0,
+  };
   for (const slot of slots) {
-    const setor = setorDoPlantao(slot, porId.get(slot.pessoa_id));
+    const pessoa = porId.get(slot.pessoa_id);
+    const setor = setorDoPlantao(slot, pessoa);
+    if (pessoa?.tipo === "colaborador") {
+      if (setor === "cozinha") resumo.clt_cozinha += 1;
+      else if (setor === "balcao") resumo.clt_balcao += 1;
+      else resumo.clt_outros += 1;
+      continue;
+    }
     if (setor === "motoboy") resumo.motoboys += 1;
     else if (setor === "cozinha") resumo.cozinha += 1;
     else if (setor === "balcao") resumo.balcao += 1;
@@ -80,8 +137,12 @@ export function resumoSetoresDoDia(
   return resumo;
 }
 
-export function textoResumoSetores(resumo: { motoboys: number; cozinha: number; balcao: number }): string {
+/** Ex.: "CLT coz 2 · CLT balc 1 · moto 1 · coz 1 · bal 2" */
+export function textoResumoSetores(resumo: ResumoDiaEscala): string {
   const partes: string[] = [];
+  if (resumo.clt_cozinha > 0) partes.push(`CLT coz ${resumo.clt_cozinha}`);
+  if (resumo.clt_balcao > 0) partes.push(`CLT balc ${resumo.clt_balcao}`);
+  if (resumo.clt_outros > 0) partes.push(`CLT ${resumo.clt_outros}`);
   if (resumo.motoboys > 0) partes.push(`${resumo.motoboys} moto`);
   if (resumo.cozinha > 0) partes.push(`${resumo.cozinha} coz`);
   if (resumo.balcao > 0) partes.push(`${resumo.balcao} bal`);
@@ -647,10 +708,10 @@ export function slotsDaPessoaNaJanela(db: DB, pessoaId: string, dias: string[]):
 export type PadraoEscalaClt = "6x1" | "5x2" | "4x2" | "12x36" | "seg_sex";
 
 export const PADROES_ESCALA_CLT: Array<{ id: PadraoEscalaClt; rotulo: string; descricao: string }> = [
+  { id: "12x36", rotulo: "12x36", descricao: "Trabalha um dia, folga o seguinte (mais comum no restaurante)" },
   { id: "6x1", rotulo: "6x1", descricao: "6 dias trabalho · 1 folga (ciclo)" },
   { id: "5x2", rotulo: "5x2", descricao: "5 dias trabalho · 2 folgas (ciclo)" },
   { id: "4x2", rotulo: "4x2", descricao: "4 dias trabalho · 2 folgas (ciclo)" },
-  { id: "12x36", rotulo: "12x36", descricao: "Trabalha um dia, folga o seguinte (alternado)" },
   { id: "seg_sex", rotulo: "Seg–sex", descricao: "Segunda a sexta no calendário" },
 ];
 

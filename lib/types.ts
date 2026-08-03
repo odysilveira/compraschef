@@ -665,6 +665,49 @@ export interface ContaBancariaRestaurante {
   atualizado_em: string;
 }
 
+/** Parâmetros de RH aplicados só após confirmar uma norma. */
+export type ParametroNormaRh = "antecedencia_minima_dias";
+
+export type StatusNormaRh = "pendente" | "aplicada" | "ignorada";
+
+/** Configuração vigente do RH (valores que a escala usa). */
+export interface ConfigRh {
+  /** Dias corridos mínimos entre convocação e serviço (padrão legal/demo: 3). */
+  antecedencia_minima_dias: number;
+  atualizado_em: string;
+}
+
+/**
+ * Norma/publicação detectada para revisão humana.
+ * Na demo, a “varredura” usa um catálogo interno; em produção viria de DOU/eSocial.
+ */
+export interface NormaRh {
+  id: string;
+  /** Chave estável da publicação (evita duplicar na verificação). */
+  chave_fonte: string;
+  titulo: string;
+  resumo: string;
+  /** Órgão ou fonte (ex.: DOU, eSocial, MTE). */
+  fonte: string;
+  /** URL oficial quando houver. */
+  url_fonte?: string;
+  /** Data da publicação YYYY-MM-DD. */
+  publicado_em: string;
+  /** Vigência sugerida YYYY-MM-DD. */
+  vigencia_em?: string;
+  relevancia: "alta" | "media" | "baixa";
+  status: StatusNormaRh;
+  /** Se preenchido, Confirmar aplica esse parâmetro no config_rh. */
+  parametro?: ParametroNormaRh;
+  valor_proposto?: number | string;
+  valor_anterior?: number | string;
+  detectado_em: string;
+  revisado_em?: string;
+  revisado_por?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
 // Banco completo em memória (camada mock)
 export interface DB {
   perfis: Perfil[];
@@ -675,6 +718,10 @@ export interface DB {
   convocacoes: ConvocacaoIntermitente[];
   /** Contas de onde o restaurante paga (origem). */
   contas_bancarias: ContaBancariaRestaurante[];
+  /** Parâmetros RH vigentes (após confirmar normas). */
+  config_rh?: ConfigRh;
+  /** Fila de normas detectadas para revisão. */
+  normas_rh?: NormaRh[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];

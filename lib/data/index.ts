@@ -137,6 +137,19 @@ export function atualizarComNovidades(db: DB): boolean {
     mudou = true;
   }
 
+  if (!Array.isArray(db.normas_rh)) {
+    db.normas_rh = [];
+    mudou = true;
+  }
+
+  if (!db.config_rh) {
+    db.config_rh = {
+      antecedencia_minima_dias: 3,
+      atualizado_em: new Date().toISOString(),
+    };
+    mudou = true;
+  }
+
   // Migração do mock anterior: transforma cada caixa ocupada em um lote canônico,
   // preservando exatamente o saldo que já estava salvo no navegador.
   if (!Array.isArray(db.lotes_estoque)) {

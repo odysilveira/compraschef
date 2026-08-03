@@ -486,6 +486,29 @@ export const seedDB: DB = {
     },
   ],
 
+  config_rh: {
+    antecedencia_minima_dias: 3,
+    atualizado_em: diasAtras(1),
+  },
+
+  normas_rh: [
+    {
+      id: "norma-seed-1",
+      chave_fonte: "demo-seed-cct-entregadores",
+      titulo: "CCT entregadores — lembrete de contrato e eSocial",
+      resumo:
+        "Lembrete demo: entregadores com plantão/pagamento precisam de contrato assinado e eSocial OK antes da convocação. Sem parâmetro automático — só revisão.",
+      fonte: "CCT / sindicato (demo)",
+      publicado_em: soData(diasAtras(2)),
+      vigencia_em: soData(diasAtras(2)),
+      relevancia: "media",
+      status: "pendente",
+      detectado_em: diasAtras(1),
+      criado_em: diasAtras(1),
+      atualizado_em: diasAtras(1),
+    },
+  ],
+
   unidades: [
     { id: "un-kg", codigo_externo: "KG", nome: "quilograma", sigla: "kg" },
     { id: "un-l", codigo_externo: "L", nome: "litro", sigla: "L" },

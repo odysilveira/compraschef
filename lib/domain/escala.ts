@@ -9,6 +9,7 @@ import type {
   TipoPessoaRH,
 } from "../types";
 import { aplicarDescontosNoPagamento } from "./consumos-pessoas";
+import { antecedenciaMinimaDoDb } from "./normas-rh";
 import { rotuloFuncao } from "./rh";
 
 export const ANTECEDENCIA_MINIMA_DIAS = 3;
@@ -470,14 +471,18 @@ export function moverSlotParaData(
       });
       convocacao.horas_brutas = horas.horas_brutas;
       convocacao.horas_pagas = horas.horas_pagas;
-      convocacao.antecedencia_ok = antecedenciaMinimaOk(agora.slice(0, 10), novaData);
+      convocacao.antecedencia_ok = antecedenciaMinimaOk(
+        agora.slice(0, 10),
+        novaData,
+        antecedenciaMinimaDoDb(db)
+      );
       convocacao.atualizado_em = agora;
       if (convocacao.status === "enviada" || convocacao.status === "aceita") {
         avisos.push("Data alterada. Se a convocação já foi enviada, avise a pessoa de novo pelo WhatsApp.");
       }
       if (!convocacao.antecedencia_ok) {
         avisos.push(
-          `Atenção: antecedência menor que ${ANTECEDENCIA_MINIMA_DIAS} dias corridos (exigência do contrato intermitente).`
+          `Atenção: antecedência menor que ${antecedenciaMinimaDoDb(db)} dias corridos (exigência do contrato intermitente).`
         );
       }
     }
@@ -604,11 +609,12 @@ export function criarConvocacaoParaSlot(
   }
 
   const valor_estimado = Number((horas.horas_pagas * valor_hora).toFixed(2));
-  const antecedencia_ok = antecedenciaMinimaOk(agora.slice(0, 10), slot.data);
+  const minimoDias = antecedenciaMinimaDoDb(db);
+  const antecedencia_ok = antecedenciaMinimaOk(agora.slice(0, 10), slot.data, minimoDias);
   const avisos: string[] = [];
   if (!antecedencia_ok) {
     avisos.push(
-      `Atenção: antecedência menor que ${ANTECEDENCIA_MINIMA_DIAS} dias corridos (exigência do contrato intermitente).`
+      `Atenção: antecedência menor que ${minimoDias} dias corridos (exigência do contrato intermitente).`
     );
   }
 

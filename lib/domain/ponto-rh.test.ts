@@ -10,6 +10,7 @@ import {
   registrarPropostaPonto,
   resumirEspelhoPonto,
   exportarEspelhoCsv,
+  filtrarEspelhoPonto,
   duracaoMinutosEntreHoras,
   formatarDuracaoHoras,
   formatarSaldoHoras,
@@ -267,5 +268,34 @@ describe("ponto-rh", () => {
     const falta = montarEspelhoPonto(dbFalta, { competencia: "2026-07" })[0]!;
     expect(falta.saldo_minutos).toBe(-60);
     expect(exportarEspelhoCsv([extra], () => "João")).toContain("+0:30");
+  });
+
+  it("filtra espelho por saldo positivo, negativo e zero", () => {
+    const zero = montarEspelhoPonto(
+      (() => {
+        const db = dbBase();
+        importarBatidasPonto(
+          db,
+          [
+            { pessoa_id: "pes-lider", data: "2026-07-30", hora: "11:00", tipo: "entrada" },
+            { pessoa_id: "pes-lider", data: "2026-07-30", hora: "23:00", tipo: "saida" },
+          ],
+          { idFactory: () => `b-${db.batidas_ponto!.length}` }
+        );
+        return db;
+      })(),
+      { competencia: "2026-07" }
+    )[0]!;
+    const mais = { ...zero, realizado_minutos: 12 * 60 + 30, saldo_minutos: 30 };
+    const menos = { ...zero, realizado_minutos: 11 * 60, saldo_minutos: -60 };
+    const dias = [zero, mais, menos];
+    const resumo = resumirEspelhoPonto(dias);
+    expect(resumo.saldo_positivo).toBe(1);
+    expect(resumo.saldo_negativo).toBe(1);
+    expect(resumo.saldo_zero).toBe(1);
+    expect(filtrarEspelhoPonto(dias, "saldo_positivo")).toEqual([mais]);
+    expect(filtrarEspelhoPonto(dias, "saldo_negativo")).toEqual([menos]);
+    expect(filtrarEspelhoPonto(dias, "saldo_zero")).toEqual([zero]);
+    expect(filtrarEspelhoPonto(dias, "ok").length).toBe(3);
   });
 });

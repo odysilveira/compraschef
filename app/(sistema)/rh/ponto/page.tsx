@@ -24,6 +24,7 @@ import {
   registrarPropostaPonto,
   resumirEspelhoPonto,
   exportarEspelhoCsv,
+  filtrarEspelhoPonto,
   formatarDuracaoHoras,
   formatarSaldoHoras,
   rotuloOrigemBatidaPonto,
@@ -32,7 +33,7 @@ import {
   rotuloTipoFaltaPonto,
   toleranciaAtrasoMinutosDoDb,
 } from "@/lib/domain/ponto-rh";
-import type { StatusDiaEspelho } from "@/lib/domain/ponto-rh";
+import type { FiltroEspelhoPonto, StatusDiaEspelho } from "@/lib/domain/ponto-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
@@ -69,7 +70,7 @@ export default function RhPontoPage() {
   const [aba, setAba] = useState<"pendencias" | "espelho">("pendencias");
   const [competenciaEspelho, setCompetenciaEspelho] = useState(() => competenciaDeData());
   const [pessoaEspelho, setPessoaEspelho] = useState<string>("");
-  const [filtroEspelho, setFiltroEspelho] = useState<"todos" | StatusDiaEspelho>("todos");
+  const [filtroEspelho, setFiltroEspelho] = useState<FiltroEspelhoPonto>("todos");
   const [detalheId, setDetalheId] = useState<string | null>(null);
   const [propostaEntrada, setPropostaEntrada] = useState("");
   const [propostaSaida, setPropostaSaida] = useState("");
@@ -106,7 +107,7 @@ export default function RhPontoPage() {
   const resumoEspelho = useMemo(() => resumirEspelhoPonto(espelho), [espelho]);
 
   const espelhoFiltrado = useMemo(
-    () => (filtroEspelho === "todos" ? espelho : espelho.filter((d) => d.status === filtroEspelho)),
+    () => filtrarEspelhoPonto(espelho, filtroEspelho),
     [espelho, filtroEspelho]
   );
 
@@ -329,7 +330,7 @@ export default function RhPontoPage() {
   }
 
   function baixarEspelhoCsv() {
-    const linhas = filtroEspelho === "todos" ? espelho : espelhoFiltrado;
+    const linhas = espelhoFiltrado;
     if (linhas.length === 0) {
       setErro("Nada para exportar neste filtro.");
       return;
@@ -739,6 +740,25 @@ export default function RhPontoPage() {
                     ["incompleto", `Incompleto (${resumoEspelho.incompleto})`],
                     ["sem_batida", `Sem digital (${resumoEspelho.sem_batida})`],
                     ["sem_escala", `Sem escala (${resumoEspelho.sem_escala})`],
+                  ] as const
+                ).map(([id, rotulo]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={filtroEspelho === id ? "btn-primario" : "btn-secundario"}
+                    onClick={() => setFiltroEspelho(id)}
+                  >
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["saldo_positivo", `Saldo + (${resumoEspelho.saldo_positivo})`],
+                    ["saldo_negativo", `Saldo − (${resumoEspelho.saldo_negativo})`],
+                    ["saldo_zero", `Saldo 0 (${resumoEspelho.saldo_zero})`],
                   ] as const
                 ).map(([id, rotulo]) => (
                   <button

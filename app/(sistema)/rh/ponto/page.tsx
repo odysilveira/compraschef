@@ -2,14 +2,16 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Copy, FileUp, Fingerprint, RefreshCw } from "lucide-react";
+import { Check, Copy, FileUp, Fingerprint, RefreshCw, Wifi } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import { importarAfdNoDb } from "@/lib/domain/afd-ponto";
+import { configControlIdPadrao, maiorNsrDoAfd } from "@/lib/domain/controlid-rep";
 import {
   aprovarPendenciaPonto,
   avisoPontoHorasDoDb,
   detectarPendenciasPonto,
+  garantirConfigRh,
   importarBatidasPonto,
   linkWhatsAppPonto,
   marcarAvisoPontoEnviado,
@@ -49,9 +51,15 @@ export default function RhPontoPage() {
   const [propostaMotivo, setPropostaMotivo] = useState("");
   const [copiado, setCopiado] = useState(false);
   const [importandoAfd, setImportandoAfd] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
   const inputAfdRef = useRef<HTMLInputElement>(null);
 
   const horasAviso = avisoPontoHorasDoDb(db);
+  const controlId = db.config_rh?.control_id ?? configControlIdPadrao();
+  const [hostCid, setHostCid] = useState(controlId.host);
+  const [loginCid, setLoginCid] = useState(controlId.login);
+  const [senhaCid, setSenhaCid] = useState(controlId.password);
+  const [mode671, setMode671] = useState(controlId.mode_671 !== false);
   const abertas = useMemo(() => pendenciasPontoAbertas(db), [db]);
   const lista = useMemo(() => {
     const todas = [...(db.pendencias_ponto ?? [])].sort((a, b) => b.data.localeCompare(a.data));
@@ -143,6 +151,83 @@ export default function RhPontoPage() {
     } finally {
       setImportandoAfd(false);
       if (inputAfdRef.current) inputAfdRef.current.value = "";
+    }
+  }
+
+  function salvarConfigControlId() {
+    const proximo = structuredClone(db);
+    garantirConfigRh(proximo);
+    proximo.config_rh!.control_id = {
+      ...(proximo.config_rh!.control_id ?? configControlIdPadrao()),
+      host: hostCid.trim(),
+      login: loginCid.trim() || "admin",
+      password: senhaCid,
+      mode_671: mode671,
+    };
+    proximo.config_rh!.atualizado_em = new Date().toISOString();
+    mutate((atual) => Object.assign(atual, proximo));
+    setMensagem("Configuração Control iD salva neste navegador.");
+    setErro(null);
+  }
+
+  async function sincronizarControlId() {
+    setSincronizando(true);
+    setErro(null);
+    setMensagem(null);
+    try {
+      const res = await fetch("/api/rh/ponto/controlid-afd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: hostCid.trim(),
+          login: loginCid.trim() || "admin",
+          password: senhaCid,
+          mode_671: mode671,
+          initial_nsr: controlId.ultimo_nsr,
+        }),
+      });
+      const data = (await res.json()) as {
+        sucesso?: boolean;
+        erros?: string[];
+        afd_texto?: string;
+      };
+      if (!res.ok || !data.sucesso || !data.afd_texto) {
+        setErro(data.erros?.join(" ") || "Falha ao sincronizar com o REP.");
+        return;
+      }
+      const proximo = structuredClone(db);
+      garantirConfigRh(proximo);
+      const imp = importarAfdNoDb(proximo, data.afd_texto, { idFactory: () => uid("bat") });
+      if (!imp.sucesso && imp.importadas === 0) {
+        setErro(imp.erros.join(" ") || "AFD do REP sem marcações reconhecidas.");
+        return;
+      }
+      const det = detectarPendenciasPonto(proximo, { idFactory: () => uid("pend-ponto") });
+      const maior = maiorNsrDoAfd(data.afd_texto);
+      proximo.config_rh!.control_id = {
+        ...(proximo.config_rh!.control_id ?? configControlIdPadrao()),
+        host: hostCid.trim(),
+        login: loginCid.trim() || "admin",
+        password: senhaCid,
+        mode_671: mode671,
+        ultimo_nsr: maior ?? proximo.config_rh!.control_id?.ultimo_nsr,
+        ultima_sync_em: new Date().toISOString(),
+      };
+      proximo.config_rh!.atualizado_em = new Date().toISOString();
+      mutate((atual) => Object.assign(atual, proximo));
+      const avisos = imp.avisos.length ? ` ${imp.avisos[0]}` : "";
+      setMensagem(
+        `Sync Control iD (${imp.layoutDetectado}): ${imp.marcacoesLidas} marcação(ões), ${imp.importadas} nova(s)` +
+          (maior != null ? ` · NSR até ${maior}` : "") +
+          `. Detecção: ${det.criadas.length} pendência(s).${avisos}`
+      );
+      setFiltro("abertas");
+    } catch {
+      setErro(
+        "Não foi possível conectar. O Next.js precisa rodar na mesma rede do REP (não use só Vercel)."
+      );
+    } finally {
+      setSincronizando(false);
     }
   }
 
@@ -260,10 +345,18 @@ export default function RhPontoPage() {
             <button
               type="button"
               className="btn-secundario"
+              disabled={sincronizando || !hostCid.trim()}
+              onClick={() => void sincronizarControlId()}
+            >
+              <Wifi size={16} /> {sincronizando ? "Sincronizando…" : "Sincronizar Control iD"}
+            </button>
+            <button
+              type="button"
+              className="btn-secundario"
               disabled={importandoAfd}
               onClick={() => inputAfdRef.current?.click()}
             >
-              <FileUp size={16} /> {importandoAfd ? "Importando…" : "Importar AFD (Control iD)"}
+              <FileUp size={16} /> {importandoAfd ? "Importando…" : "Importar AFD"}
             </button>
             <button type="button" className="btn-secundario" onClick={simularImportRelogio}>
               Simular batidas
@@ -284,12 +377,60 @@ export default function RhPontoPage() {
         </Link>
       </div>
 
+      <Card className="mb-4 space-y-3 p-4">
+        <p className="text-sm font-semibold text-slate-900">REP Control iD (rede local)</p>
+        <p className="text-xs text-slate-600">
+          IP do relógio na rede do restaurante. A sincronização usa a API do Next.js nesta máquina
+          (HTTPS com certificado próprio do REP). Em produção na nuvem, rode o app na LAN ou use
+          importação de arquivo.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Campo rotulo="IP ou host">
+            <input
+              className="input"
+              placeholder="192.168.0.129"
+              value={hostCid}
+              onChange={(e) => setHostCid(e.target.value)}
+            />
+          </Campo>
+          <Campo rotulo="Login">
+            <input className="input" value={loginCid} onChange={(e) => setLoginCid(e.target.value)} />
+          </Campo>
+          <Campo rotulo="Senha">
+            <input
+              className="input"
+              type="password"
+              value={senhaCid}
+              onChange={(e) => setSenhaCid(e.target.value)}
+              autoComplete="off"
+            />
+          </Campo>
+          <Campo rotulo="Formato AFD">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={mode671} onChange={(e) => setMode671(e.target.checked)} />
+              Portaria 671 (recomendado)
+            </label>
+          </Campo>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="btn-secundario" onClick={salvarConfigControlId}>
+            Salvar config
+          </button>
+          {controlId.ultima_sync_em && (
+            <span className="text-xs text-slate-500">
+              Última sync: {new Date(controlId.ultima_sync_em).toLocaleString("pt-BR")}
+              {controlId.ultimo_nsr != null ? ` · NSR ${controlId.ultimo_nsr}` : ""}
+            </span>
+          )}
+        </div>
+      </Card>
+
       <Card className="mb-4 space-y-2 p-4">
         <p className="text-sm font-semibold text-slate-900">Como funciona</p>
         <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
           <li>
-            Importe o AFD do Control iD (pendrive/porta fiscal ou export da API com{" "}
-            <code className="text-xs">mode=671</code>). Cadastre o CPF igual ao do REP.
+            Configure o IP do REP e clique em <strong>Sincronizar Control iD</strong>, ou importe o
+            arquivo AFD (pendrive / porta fiscal).
           </li>
           <li>Cruzamos com a escala CLT. Sem digital após {horasAviso}h → pendência.</li>
           <li>Avisamos no WhatsApp; o funcionário informa o horário.</li>

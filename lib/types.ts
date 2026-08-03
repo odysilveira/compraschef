@@ -676,7 +676,23 @@ export interface ConfigRh {
   antecedencia_minima_dias: number;
   /** Horas após o fim do plantão para avisar falta de batida (padrão: 24). */
   aviso_ponto_horas: number;
+  /** Conexão com REP Control iD (rede local do restaurante). */
+  control_id?: ConfigControlId;
   atualizado_em: string;
+}
+
+/** Credenciais / host do REP iDClass (API HTTPS local). */
+export interface ConfigControlId {
+  /** IP ou hostname, sem protocolo (ex.: 192.168.0.129). */
+  host: string;
+  login: string;
+  /** Senha do painel do relógio (mock local — não usar em produção compartilhada). */
+  password: string;
+  /** Usar mode=671 na exportação AFD (recomendado). */
+  mode_671: boolean;
+  ultima_sync_em?: string;
+  /** Último NSR sincronizado (sync incremental). */
+  ultimo_nsr?: number;
 }
 
 /**

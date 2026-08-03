@@ -2,6 +2,7 @@ import type {
   BatidaPonto,
   ConfigRh,
   DB,
+  OrigemBatidaPonto,
   PendenciaPonto,
   PessoaRH,
   StatusPendenciaPonto,
@@ -441,4 +442,183 @@ export function importarBatidasPonto(
 
 export function pendenciasPontoAbertas(db: Pick<DB, "pendencias_ponto">): PendenciaPonto[] {
   return (db.pendencias_ponto ?? []).filter((p) => STATUS_ABERTOS.includes(p.status));
+}
+
+export function rotuloTipoBatidaPonto(tipo: TipoBatidaPonto): string {
+  switch (tipo) {
+    case "entrada":
+      return "Entrada";
+    case "saida":
+      return "Saída";
+    case "intervalo_inicio":
+      return "Início intervalo";
+    case "intervalo_fim":
+      return "Fim intervalo";
+    default:
+      return tipo;
+  }
+}
+
+export function rotuloOrigemBatidaPonto(origem: OrigemBatidaPonto): string {
+  switch (origem) {
+    case "relogio":
+      return "Relógio";
+    case "aprovacao":
+      return "Aprovado (pendência)";
+    case "manual":
+      return "Manual";
+    default:
+      return origem;
+  }
+}
+
+/** YYYY-MM a partir de Date (fuso local). */
+export function competenciaDeData(data = new Date()): string {
+  const y = data.getFullYear();
+  const m = String(data.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+export interface DiaEspelhoPonto {
+  pessoa_id: string;
+  data: string;
+  /** Previsto pela escala (se houver plantão no dia). */
+  previsto_entrada?: string;
+  previsto_saida?: string;
+  entrada?: string;
+  saida?: string;
+  intervalo_inicio?: string;
+  intervalo_fim?: string;
+  batidas: BatidaPonto[];
+  status: StatusDiaEspelho;
+  /** Minutos de atraso na entrada (só se positivo). */
+  atraso_entrada_min?: number;
+  /** Minutos de saída antecipada (só se positivo). */
+  saida_antecipada_min?: number;
+}
+
+export type StatusDiaEspelho =
+  | "ok"
+  | "atraso"
+  | "incompleto"
+  | "sem_batida"
+  | "sem_escala";
+
+export function rotuloStatusDiaEspelho(status: StatusDiaEspelho): string {
+  switch (status) {
+    case "ok":
+      return "OK";
+    case "atraso":
+      return "Atraso";
+    case "incompleto":
+      return "Incompleto";
+    case "sem_batida":
+      return "Sem digital";
+    case "sem_escala":
+      return "Sem escala";
+    default:
+      return status;
+  }
+}
+
+/** Converte HH:MM em minutos desde 00:00. */
+export function minutosDeHora(hora: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hora.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min) || h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function classificarDiaEspelho(dia: Omit<DiaEspelhoPonto, "status" | "atraso_entrada_min" | "saida_antecipada_min">): {
+  status: StatusDiaEspelho;
+  atraso_entrada_min?: number;
+  saida_antecipada_min?: number;
+} {
+  const temEscala = Boolean(dia.previsto_entrada && dia.previsto_saida);
+  const temEntrada = Boolean(dia.entrada);
+  const temSaida = Boolean(dia.saida);
+
+  if (!temEscala) {
+    return { status: temEntrada || temSaida ? "sem_escala" : "sem_batida" };
+  }
+  if (!temEntrada && !temSaida) return { status: "sem_batida" };
+  if (!temEntrada || !temSaida) return { status: "incompleto" };
+
+  const prevE = minutosDeHora(dia.previsto_entrada!);
+  const realE = minutosDeHora(dia.entrada!);
+  const prevS = minutosDeHora(dia.previsto_saida!);
+  const realS = minutosDeHora(dia.saida!);
+
+  let atraso: number | undefined;
+  let antecipada: number | undefined;
+  if (prevE != null && realE != null && realE > prevE) atraso = realE - prevE;
+  if (prevS != null && realS != null && realS < prevS) antecipada = prevS - realS;
+
+  if ((atraso != null && atraso > 0) || (antecipada != null && antecipada > 0)) {
+    return {
+      status: "atraso",
+      atraso_entrada_min: atraso,
+      saida_antecipada_min: antecipada,
+    };
+  }
+  return { status: "ok" };
+}
+
+/**
+ * Espelho oficial: cruza escala (previsto) × batidas (realizado) no mês.
+ * Inclui dias com plantão sem digital e dias com batida sem escala.
+ */
+export function montarEspelhoPonto(
+  db: Pick<DB, "batidas_ponto" | "escala_slots">,
+  filtros: { competencia: string; pessoa_id?: string }
+): DiaEspelhoPonto[] {
+  const prefixo = filtros.competencia.slice(0, 7);
+  const mapa = new Map<string, Omit<DiaEspelhoPonto, "status" | "atraso_entrada_min" | "saida_antecipada_min">>();
+
+  const garantir = (pessoaId: string, data: string) => {
+    const chave = `${pessoaId}|${data}`;
+    let dia = mapa.get(chave);
+    if (!dia) {
+      dia = { pessoa_id: pessoaId, data, batidas: [] };
+      mapa.set(chave, dia);
+    }
+    return dia;
+  };
+
+  for (const slot of db.escala_slots ?? []) {
+    if (!slot.data.startsWith(prefixo)) continue;
+    if (filtros.pessoa_id && slot.pessoa_id !== filtros.pessoa_id) continue;
+    const dia = garantir(slot.pessoa_id, slot.data);
+    // Se houver mais de um plantão no dia, usa o primeiro início e o último fim.
+    if (!dia.previsto_entrada || slot.hora_inicio < dia.previsto_entrada) {
+      dia.previsto_entrada = slot.hora_inicio;
+    }
+    if (!dia.previsto_saida || slot.hora_fim > dia.previsto_saida) {
+      dia.previsto_saida = slot.hora_fim;
+    }
+  }
+
+  const lista = (db.batidas_ponto ?? [])
+    .filter((b) => b.data.startsWith(prefixo))
+    .filter((b) => !filtros.pessoa_id || b.pessoa_id === filtros.pessoa_id)
+    .slice()
+    .sort((a, b) => a.data.localeCompare(b.data) || a.hora.localeCompare(b.hora) || a.tipo.localeCompare(b.tipo));
+
+  for (const b of lista) {
+    const dia = garantir(b.pessoa_id, b.data);
+    dia.batidas.push(b);
+    if (b.tipo === "entrada" && !dia.entrada) dia.entrada = b.hora;
+    if (b.tipo === "saida") dia.saida = b.hora;
+    if (b.tipo === "intervalo_inicio" && !dia.intervalo_inicio) dia.intervalo_inicio = b.hora;
+    if (b.tipo === "intervalo_fim") dia.intervalo_fim = b.hora;
+  }
+
+  return Array.from(mapa.values())
+    .map((dia) => {
+      const classif = classificarDiaEspelho(dia);
+      return { ...dia, ...classif };
+    })
+    .sort((a, b) => a.data.localeCompare(b.data) || a.pessoa_id.localeCompare(b.pessoa_id));
 }

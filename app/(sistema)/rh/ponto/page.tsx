@@ -10,21 +10,26 @@ import { configControlIdPadrao, maiorNsrDoAfd } from "@/lib/domain/controlid-rep
 import {
   aprovarPendenciaPonto,
   avisoPontoHorasDoDb,
+  competenciaDeData,
   detectarPendenciasPonto,
   garantirConfigRh,
   importarBatidasPonto,
   linkWhatsAppPonto,
   marcarAvisoPontoEnviado,
+  montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
   pendenciasPontoAbertas,
   recusarPendenciaPonto,
   registrarPropostaPonto,
+  rotuloOrigemBatidaPonto,
+  rotuloStatusDiaEspelho,
   rotuloStatusPendenciaPonto,
   rotuloTipoFaltaPonto,
 } from "@/lib/domain/ponto-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
+import type { StatusDiaEspelho } from "@/lib/domain/ponto-rh";
 
 function BadgeStatus({ status }: { status: StatusPendenciaPonto }) {
   const cor =
@@ -38,6 +43,16 @@ function BadgeStatus({ status }: { status: StatusPendenciaPonto }) {
   return <Badge cor={cor}>{rotuloStatusPendenciaPonto(status)}</Badge>;
 }
 
+function BadgeEspelho({ status }: { status: StatusDiaEspelho }) {
+  const cor =
+    status === "ok"
+      ? "verde"
+      : status === "atraso" || status === "incompleto" || status === "sem_batida"
+        ? "laranja"
+        : "cinza";
+  return <Badge cor={cor}>{rotuloStatusDiaEspelho(status)}</Badge>;
+}
+
 export default function RhPontoPage() {
   const db = useDB();
   const { papel } = usePapel();
@@ -45,6 +60,9 @@ export default function RhPontoPage() {
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<"abertas" | "todas">("abertas");
+  const [aba, setAba] = useState<"pendencias" | "espelho">("pendencias");
+  const [competenciaEspelho, setCompetenciaEspelho] = useState(() => competenciaDeData());
+  const [pessoaEspelho, setPessoaEspelho] = useState<string>("");
   const [detalheId, setDetalheId] = useState<string | null>(null);
   const [propostaEntrada, setPropostaEntrada] = useState("");
   const [propostaSaida, setPropostaSaida] = useState("");
@@ -65,6 +83,24 @@ export default function RhPontoPage() {
     const todas = [...(db.pendencias_ponto ?? [])].sort((a, b) => b.data.localeCompare(a.data));
     return filtro === "abertas" ? todas.filter((p) => abertas.some((a) => a.id === p.id)) : todas;
   }, [abertas, db.pendencias_ponto, filtro]);
+
+  const espelho = useMemo(
+    () =>
+      montarEspelhoPonto(db, {
+        competencia: competenciaEspelho,
+        pessoa_id: pessoaEspelho || undefined,
+      }),
+    [competenciaEspelho, db, pessoaEspelho]
+  );
+
+  const colaboradoresEspelho = useMemo(
+    () =>
+      (db.pessoas ?? [])
+        .filter((p) => p.tipo === "colaborador" && p.ativo)
+        .slice()
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
+    [db.pessoas]
+  );
 
   const detalhe = detalheId ? db.pendencias_ponto?.find((p) => p.id === detalheId) : undefined;
   const detalhePessoa = detalhe ? db.pessoas.find((p) => p.id === detalhe.pessoa_id) : undefined;
@@ -310,6 +346,7 @@ export default function RhPontoPage() {
     }
     mutate((atual) => Object.assign(atual, proximo));
     setDetalheId(null);
+    setAba("espelho");
     setMensagem("Aprovado — batidas gravadas no espelho de ponto.");
     setErro(null);
   }
@@ -455,68 +492,191 @@ export default function RhPontoPage() {
       <div className="mb-3 flex flex-wrap gap-2">
         <button
           type="button"
-          className={filtro === "abertas" ? "btn-primario" : "btn-secundario"}
-          onClick={() => setFiltro("abertas")}
+          className={aba === "pendencias" ? "btn-primario" : "btn-secundario"}
+          onClick={() => setAba("pendencias")}
         >
-          Abertas ({abertas.length})
+          Pendências ({abertas.length})
         </button>
         <button
           type="button"
-          className={filtro === "todas" ? "btn-primario" : "btn-secundario"}
-          onClick={() => setFiltro("todas")}
+          className={aba === "espelho" ? "btn-primario" : "btn-secundario"}
+          onClick={() => setAba("espelho")}
         >
-          Todas
+          Espelho
         </button>
       </div>
 
-      {lista.length === 0 ? (
-        <Vazio
-          mensagem={
-            filtro === "abertas"
-              ? "Nenhuma pendência aberta. Clique em Detectar faltas (há plantão do João sem digital na seed)."
-              : "Nenhuma pendência registrada."
-          }
-        />
-      ) : (
-        <div className="grid gap-3">
-          {lista.map((p) => (
-            <Card key={p.id} className="space-y-2 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="text-lg font-bold text-slate-900">{nomePessoa(p.pessoa_id)}</p>
-                  <p className="text-sm text-slate-600">
-                    {dataBR(p.data)}
-                    {p.horario_previsto_entrada && p.horario_previsto_saida
-                      ? ` · previsto ${p.horario_previsto_entrada}–${p.horario_previsto_saida}`
-                      : ""}
-                  </p>
-                  <p className="text-sm text-slate-500">{rotuloTipoFaltaPonto(p.tipo_falta)}</p>
-                </div>
-                <BadgeStatus status={p.status} />
-              </div>
-              {p.status === "proposta" && (
-                <p className="text-sm text-amber-900">
-                  Proposta: {p.proposta_entrada ?? "—"} → {p.proposta_saida ?? "—"}
-                  {p.proposta_motivo ? ` · ${p.proposta_motivo}` : ""}
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn-secundario" onClick={() => abrirDetalhe(p)}>
-                  Abrir
-                </button>
-                {(p.status === "aguardando_aviso" || p.status === "aguardando_funcionario") && (
-                  <>
-                    <button type="button" className="btn-primario" onClick={() => abrirWhatsApp(p)}>
-                      Avisar no WhatsApp
+      {aba === "pendencias" && (
+        <>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={filtro === "abertas" ? "btn-primario" : "btn-secundario"}
+              onClick={() => setFiltro("abertas")}
+            >
+              Abertas ({abertas.length})
+            </button>
+            <button
+              type="button"
+              className={filtro === "todas" ? "btn-primario" : "btn-secundario"}
+              onClick={() => setFiltro("todas")}
+            >
+              Todas
+            </button>
+          </div>
+
+          {lista.length === 0 ? (
+            <Vazio
+              mensagem={
+                filtro === "abertas"
+                  ? "Nenhuma pendência aberta. Clique em Detectar faltas (há plantão do João sem digital na seed)."
+                  : "Nenhuma pendência registrada."
+              }
+            />
+          ) : (
+            <div className="grid gap-3">
+              {lista.map((p) => (
+                <Card key={p.id} className="space-y-2 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-lg font-bold text-slate-900">{nomePessoa(p.pessoa_id)}</p>
+                      <p className="text-sm text-slate-600">
+                        {dataBR(p.data)}
+                        {p.horario_previsto_entrada && p.horario_previsto_saida
+                          ? ` · previsto ${p.horario_previsto_entrada}–${p.horario_previsto_saida}`
+                          : ""}
+                      </p>
+                      <p className="text-sm text-slate-500">{rotuloTipoFaltaPonto(p.tipo_falta)}</p>
+                    </div>
+                    <BadgeStatus status={p.status} />
+                  </div>
+                  {p.status === "proposta" && (
+                    <p className="text-sm text-amber-900">
+                      Proposta: {p.proposta_entrada ?? "—"} → {p.proposta_saida ?? "—"}
+                      {p.proposta_motivo ? ` · ${p.proposta_motivo}` : ""}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn-secundario" onClick={() => abrirDetalhe(p)}>
+                      Abrir
                     </button>
-                    <button type="button" className="btn-secundario" onClick={() => void copiarAviso(p)}>
-                      {copiado ? <Check size={16} /> : <Copy size={16} />} Copiar aviso
-                    </button>
-                  </>
-                )}
-              </div>
-            </Card>
-          ))}
+                    {(p.status === "aguardando_aviso" || p.status === "aguardando_funcionario") && (
+                      <>
+                        <button type="button" className="btn-primario" onClick={() => abrirWhatsApp(p)}>
+                          Avisar no WhatsApp
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() => void copiarAviso(p)}
+                        >
+                          {copiado ? <Check size={16} /> : <Copy size={16} />} Copiar aviso
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {aba === "espelho" && (
+        <div className="space-y-4">
+          <Card className="space-y-3 p-4">
+            <p className="text-sm text-slate-600">
+              Cruza a escala (previsto) com as batidas oficiais (relógio / aprovação / manual). Dias
+              com plantão e sem digital também aparecem.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Campo rotulo="Competência">
+                <input
+                  className="input"
+                  type="month"
+                  value={competenciaEspelho}
+                  onChange={(e) => setCompetenciaEspelho(e.target.value)}
+                />
+              </Campo>
+              <Campo rotulo="Pessoa">
+                <select
+                  className="input"
+                  value={pessoaEspelho}
+                  onChange={(e) => setPessoaEspelho(e.target.value)}
+                >
+                  <option value="">Todas</option>
+                  {colaboradoresEspelho.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nome}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+            </div>
+          </Card>
+
+          {espelho.length === 0 ? (
+            <Vazio mensagem="Nenhum plantão nem batida neste mês. Monte a escala ou sincronize o REP." />
+          ) : (
+            <div className="overflow-x-auto rounded-card border border-slate-200 bg-white">
+              <table className="min-w-full text-left text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Data</th>
+                    <th className="px-3 py-2 font-semibold">Pessoa</th>
+                    <th className="px-3 py-2 font-semibold">Previsto</th>
+                    <th className="px-3 py-2 font-semibold">Realizado</th>
+                    <th className="px-3 py-2 font-semibold">Status</th>
+                    <th className="px-3 py-2 font-semibold">Origem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {espelho.map((dia) => {
+                    const origens = Array.from(
+                      new Set(dia.batidas.map((b) => rotuloOrigemBatidaPonto(b.origem)))
+                    );
+                    const detalheAtraso = [
+                      dia.atraso_entrada_min != null && dia.atraso_entrada_min > 0
+                        ? `+${dia.atraso_entrada_min} min entrada`
+                        : null,
+                      dia.saida_antecipada_min != null && dia.saida_antecipada_min > 0
+                        ? `−${dia.saida_antecipada_min} min saída`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+                    return (
+                      <tr key={`${dia.pessoa_id}-${dia.data}`} className="border-b border-slate-100">
+                        <td className="px-3 py-2 whitespace-nowrap">{dataBR(dia.data)}</td>
+                        <td className="px-3 py-2 font-medium text-slate-900">{nomePessoa(dia.pessoa_id)}</td>
+                        <td className="px-3 py-2 tabular-nums text-slate-600">
+                          {dia.previsto_entrada && dia.previsto_saida
+                            ? `${dia.previsto_entrada}–${dia.previsto_saida}`
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums">
+                          {dia.entrada || dia.saida
+                            ? `${dia.entrada ?? "—"}–${dia.saida ?? "—"}`
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-col gap-0.5">
+                            <BadgeEspelho status={dia.status} />
+                            {detalheAtraso && (
+                              <span className="text-xs text-amber-800">{detalheAtraso}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">
+                          {origens.length ? origens.join(", ") : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

@@ -5,6 +5,7 @@ import {
   detectarPendenciasPonto,
   importarBatidasPonto,
   marcarAvisoPontoEnviado,
+  montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
   registrarPropostaPonto,
 } from "./ponto-rh";
@@ -135,5 +136,38 @@ describe("ponto-rh", () => {
     );
     const r = detectarPendenciasPonto(db, { agora: "2026-08-03T15:00:00.000Z", idFactory: () => "p-s" });
     expect(r.criadas[0]!.tipo_falta).toBe("saida");
+  });
+
+  it("monta espelho cruzando escala × batidas", () => {
+    const db = dbBase();
+    importarBatidasPonto(
+      db,
+      [
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "11:05", tipo: "entrada" },
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "23:01", tipo: "saida" },
+        { pessoa_id: "pes-lider", data: "2026-08-01", hora: "11:00", tipo: "entrada" },
+      ],
+      { idFactory: () => `b-${db.batidas_ponto!.length}` }
+    );
+    const julho = montarEspelhoPonto(db, { competencia: "2026-07" });
+    expect(julho).toHaveLength(1);
+    expect(julho[0]!.previsto_entrada).toBe("11:00");
+    expect(julho[0]!.previsto_saida).toBe("23:00");
+    expect(julho[0]!.entrada).toBe("11:05");
+    expect(julho[0]!.saida).toBe("23:01");
+    expect(julho[0]!.status).toBe("atraso");
+    expect(julho[0]!.atraso_entrada_min).toBe(5);
+
+    const agosto = montarEspelhoPonto(db, { competencia: "2026-08" });
+    expect(agosto).toHaveLength(1);
+    expect(agosto[0]!.status).toBe("sem_escala");
+  });
+
+  it("lista plantão sem digital no espelho", () => {
+    const db = dbBase();
+    const dias = montarEspelhoPonto(db, { competencia: "2026-07" });
+    expect(dias).toHaveLength(1);
+    expect(dias[0]!.status).toBe("sem_batida");
+    expect(dias[0]!.previsto_entrada).toBe("11:00");
   });
 });

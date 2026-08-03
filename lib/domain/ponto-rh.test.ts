@@ -10,6 +10,8 @@ import {
   registrarPropostaPonto,
   resumirEspelhoPonto,
   exportarEspelhoCsv,
+  duracaoMinutosEntreHoras,
+  formatarDuracaoHoras,
 } from "./ponto-rh";
 
 function pessoaClt(overrides: Partial<PessoaRH> = {}): PessoaRH {
@@ -205,7 +207,31 @@ describe("ponto-rh", () => {
     const csv = exportarEspelhoCsv(dias, () => "João");
     expect(csv.startsWith("\uFEFF")).toBe(true);
     expect(csv).toContain("Data;Pessoa;");
+    expect(csv).toContain("Horas previstas");
     expect(csv).toContain("João");
     expect(csv).toContain("Sem digital");
+  });
+
+  it("calcula duração e formata horas (inclui virada de noite)", () => {
+    expect(duracaoMinutosEntreHoras("11:00", "23:00")).toBe(12 * 60);
+    expect(duracaoMinutosEntreHoras("22:00", "06:00")).toBe(8 * 60);
+    expect(formatarDuracaoHoras(750)).toBe("12:30");
+    expect(formatarDuracaoHoras(undefined)).toBe("—");
+
+    const db = dbBase();
+    importarBatidasPonto(
+      db,
+      [
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "11:00", tipo: "entrada" },
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "23:00", tipo: "saida" },
+      ],
+      { idFactory: () => `b-${db.batidas_ponto!.length}` }
+    );
+    const dia = montarEspelhoPonto(db, { competencia: "2026-07" })[0]!;
+    expect(dia.previsto_minutos).toBe(12 * 60);
+    expect(dia.realizado_minutos).toBe(12 * 60);
+    const resumo = resumirEspelhoPonto([dia]);
+    expect(resumo.previsto_minutos).toBe(12 * 60);
+    expect(resumo.realizado_minutos).toBe(12 * 60);
   });
 });

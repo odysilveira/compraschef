@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { baixarAfdControlId, maiorNsrDoAfd } from "@/lib/domain/controlid-rep";
+import { baixarAfdControlId } from "@/lib/domain/controlid-rep-server";
+import { maiorNsrDoAfd } from "@/lib/domain/controlid-rep";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

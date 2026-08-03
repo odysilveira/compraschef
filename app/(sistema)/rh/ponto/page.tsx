@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Copy, Fingerprint, RefreshCw } from "lucide-react";
+import { Check, Copy, FileUp, Fingerprint, RefreshCw } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
+import { importarAfdNoDb } from "@/lib/domain/afd-ponto";
 import {
   aprovarPendenciaPonto,
   avisoPontoHorasDoDb,
@@ -47,6 +48,8 @@ export default function RhPontoPage() {
   const [propostaSaida, setPropostaSaida] = useState("");
   const [propostaMotivo, setPropostaMotivo] = useState("");
   const [copiado, setCopiado] = useState(false);
+  const [importandoAfd, setImportandoAfd] = useState(false);
+  const inputAfdRef = useRef<HTMLInputElement>(null);
 
   const horasAviso = avisoPontoHorasDoDb(db);
   const abertas = useMemo(() => pendenciasPontoAbertas(db), [db]);
@@ -111,6 +114,36 @@ export default function RhPontoPage() {
     setMensagem(
       `Importação demo: ${imp.importadas} batida(s). Detecção: ${det.criadas.length} nova(s), ${det.canceladas.length} cancelada(s).`
     );
+  }
+
+  async function aoEscolherAfd(arquivo: File | null) {
+    if (!arquivo) return;
+    setImportandoAfd(true);
+    setErro(null);
+    setMensagem(null);
+    try {
+      const texto = await arquivo.text();
+      const proximo = structuredClone(db);
+      const imp = importarAfdNoDb(proximo, texto, { idFactory: () => uid("bat") });
+      if (!imp.sucesso && imp.importadas === 0) {
+        setErro(imp.erros.join(" ") || "Arquivo AFD sem marcações reconhecidas.");
+        return;
+      }
+      const det = detectarPendenciasPonto(proximo, { idFactory: () => uid("pend-ponto") });
+      mutate((atual) => Object.assign(atual, proximo));
+      const avisos = imp.avisos.length ? ` ${imp.avisos[0]}` : "";
+      setMensagem(
+        `AFD (${imp.layoutDetectado}): ${imp.marcacoesLidas} marcação(ões), ${imp.importadas} batida(s) nova(s)` +
+          (imp.semPessoa ? `, ${imp.semPessoa} CPF sem cadastro` : "") +
+          `. Detecção: ${det.criadas.length} pendência(s).${avisos}`
+      );
+      setFiltro("abertas");
+    } catch {
+      setErro("Não foi possível ler o arquivo AFD.");
+    } finally {
+      setImportandoAfd(false);
+      if (inputAfdRef.current) inputAfdRef.current.value = "";
+    }
   }
 
   function textoAviso(pendencia: PendenciaPonto) {
@@ -217,8 +250,23 @@ export default function RhPontoPage() {
         subtitulo={`Falta de digital: após ${horasAviso}h do fim do plantão, avisamos o funcionário; ele propõe o horário e o gestor confirma.`}
         acao={
           <div className="flex flex-wrap gap-2">
+            <input
+              ref={inputAfdRef}
+              type="file"
+              accept=".txt,text/plain"
+              className="hidden"
+              onChange={(e) => void aoEscolherAfd(e.target.files?.[0] ?? null)}
+            />
+            <button
+              type="button"
+              className="btn-secundario"
+              disabled={importandoAfd}
+              onClick={() => inputAfdRef.current?.click()}
+            >
+              <FileUp size={16} /> {importandoAfd ? "Importando…" : "Importar AFD (Control iD)"}
+            </button>
             <button type="button" className="btn-secundario" onClick={simularImportRelogio}>
-              Simular importação do relógio
+              Simular batidas
             </button>
             <button type="button" className="btn-primario" onClick={detectar}>
               <RefreshCw size={16} /> Detectar faltas
@@ -239,7 +287,10 @@ export default function RhPontoPage() {
       <Card className="mb-4 space-y-2 p-4">
         <p className="text-sm font-semibold text-slate-900">Como funciona</p>
         <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
-          <li>Batidas vêm do relógio (hoje: importação demo; depois API/arquivo automático).</li>
+          <li>
+            Importe o AFD do Control iD (pendrive/porta fiscal ou export da API com{" "}
+            <code className="text-xs">mode=671</code>). Cadastre o CPF igual ao do REP.
+          </li>
           <li>Cruzamos com a escala CLT. Sem digital após {horasAviso}h → pendência.</li>
           <li>Avisamos no WhatsApp; o funcionário informa o horário.</li>
           <li>Você confirma — só então entra no espelho oficial.</li>

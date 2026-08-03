@@ -732,6 +732,33 @@ export interface ResumoEspelhoPonto {
   realizado_minutos: number;
   /** Soma dos saldos dia a dia (só dias com previsto e realizado). */
   saldo_minutos: number;
+  saldo_positivo: number;
+  saldo_negativo: number;
+  saldo_zero: number;
+}
+
+export type FiltroEspelhoPonto =
+  | "todos"
+  | StatusDiaEspelho
+  | "saldo_positivo"
+  | "saldo_negativo"
+  | "saldo_zero";
+
+export function filtrarEspelhoPonto(
+  dias: DiaEspelhoPonto[],
+  filtro: FiltroEspelhoPonto
+): DiaEspelhoPonto[] {
+  if (filtro === "todos") return dias;
+  if (filtro === "saldo_positivo") {
+    return dias.filter((d) => d.saldo_minutos != null && d.saldo_minutos > 0);
+  }
+  if (filtro === "saldo_negativo") {
+    return dias.filter((d) => d.saldo_minutos != null && d.saldo_minutos < 0);
+  }
+  if (filtro === "saldo_zero") {
+    return dias.filter((d) => d.saldo_minutos === 0);
+  }
+  return dias.filter((d) => d.status === filtro);
 }
 
 export function resumirEspelhoPonto(dias: DiaEspelhoPonto[]): ResumoEspelhoPonto {
@@ -745,12 +772,20 @@ export function resumirEspelhoPonto(dias: DiaEspelhoPonto[]): ResumoEspelhoPonto
     previsto_minutos: 0,
     realizado_minutos: 0,
     saldo_minutos: 0,
+    saldo_positivo: 0,
+    saldo_negativo: 0,
+    saldo_zero: 0,
   };
   for (const d of dias) {
     r[d.status] += 1;
     if (d.previsto_minutos != null) r.previsto_minutos += d.previsto_minutos;
     if (d.realizado_minutos != null) r.realizado_minutos += d.realizado_minutos;
-    if (d.saldo_minutos != null) r.saldo_minutos += d.saldo_minutos;
+    if (d.saldo_minutos != null) {
+      r.saldo_minutos += d.saldo_minutos;
+      if (d.saldo_minutos > 0) r.saldo_positivo += 1;
+      else if (d.saldo_minutos < 0) r.saldo_negativo += 1;
+      else r.saldo_zero += 1;
+    }
   }
   return r;
 }

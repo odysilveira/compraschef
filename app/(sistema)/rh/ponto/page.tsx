@@ -662,11 +662,27 @@ export default function RhPontoPage() {
       {aba === "espelho" && (
         <div className="space-y-4">
           <Card className="space-y-3 p-4">
-            <p className="text-sm text-slate-600">
-              Cruza a escala (previsto) com as batidas oficiais (relógio / aprovação / manual). Dias
-              com plantão e sem digital também aparecem. Atraso só conta acima da tolerância (
-              {toleranciaEspelho} min).
-            </p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <p className="text-sm text-slate-600 max-w-2xl">
+                Cruza a escala (previsto) com as batidas oficiais (relógio / aprovação / manual). Dias
+                com plantão e sem digital também aparecem. Atraso só conta acima da tolerância (
+                {toleranciaEspelho} min).
+              </p>
+              <button
+                type="button"
+                className="btn-primario shrink-0"
+                disabled={espelhoFiltrado.length === 0}
+                onClick={baixarEspelhoCsv}
+                title={
+                  espelhoFiltrado.length === 0
+                    ? "Não há linhas neste filtro/mês para exportar"
+                    : "Baixar CSV do filtro atual"
+                }
+              >
+                <Download size={16} /> Exportar CSV
+                {espelhoFiltrado.length > 0 ? ` (${espelhoFiltrado.length})` : ""}
+              </button>
+            </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <Campo rotulo="Competência">
                 <input
@@ -712,7 +728,7 @@ export default function RhPontoPage() {
             <Vazio mensagem="Nenhum plantão nem batida neste mês. Monte a escala ou sincronize o REP." />
           ) : (
             <>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-2">
                 {(
                   [
                     ["todos", `Todos (${resumoEspelho.total})`],
@@ -732,14 +748,6 @@ export default function RhPontoPage() {
                     {rotulo}
                   </button>
                 ))}
-                <button
-                  type="button"
-                  className="btn-secundario ml-auto"
-                  disabled={espelhoFiltrado.length === 0}
-                  onClick={baixarEspelhoCsv}
-                >
-                  <Download size={16} /> Exportar CSV
-                </button>
               </div>
 
               {espelhoFiltrado.length === 0 ? (

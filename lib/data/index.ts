@@ -13,6 +13,7 @@ import { extrairCnpjEmitenteDaChaveAcesso } from "../domain/nfe-parcelas";
 import { associarCategoriasProdutos } from "../domain/produtos";
 import { recuperarVinculosLegadosBoletos } from "../domain/recuperacao-boleto-legado";
 import { pessoaParaSeedDePerfil } from "../domain/rh";
+import { garantirChecklistDocumentos } from "../domain/documentos-pessoa";
 
 const STORAGE_KEY = "compraschef-db-v1";
 
@@ -150,6 +151,16 @@ export function atualizarComNovidades(db: DB): boolean {
   if (!Array.isArray(db.normas_rh)) {
     db.normas_rh = [];
     mudou = true;
+  }
+
+  if (Array.isArray(db.pessoas)) {
+    const agoraDocs = new Date().toISOString();
+    for (const pessoa of db.pessoas) {
+      if (!Array.isArray(pessoa.documentos)) {
+        pessoa.documentos = garantirChecklistDocumentos(pessoa, agoraDocs);
+        mudou = true;
+      }
+    }
   }
 
   if (!db.config_rh) {

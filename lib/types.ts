@@ -47,6 +47,28 @@ export interface ContratoArquivoPessoa {
   data_url: string;
 }
 
+export type TipoDocumentoPessoa =
+  | "contrato"
+  | "esocial"
+  | "aso"
+  | "rg"
+  | "ctps"
+  | "cnh"
+  | "outro";
+
+export type StatusDocumentoPessoa = "presente" | "ausente" | "vencido";
+
+export interface DocumentoPessoa {
+  id: string;
+  tipo: TipoDocumentoPessoa;
+  rotulo: string;
+  presente: boolean;
+  /** Validade YYYY-MM-DD (ASO, CNH…). */
+  validade?: string;
+  arquivo?: ContratoArquivoPessoa;
+  atualizado_em?: string;
+}
+
 export interface PessoaRH {
   id: string;
   nome: string;
@@ -68,6 +90,8 @@ export interface PessoaRH {
   esocial_ok?: boolean;
   /** Cópia do contrato assinado (PDF ou imagem) — demo em localStorage. */
   contrato_arquivo?: ContratoArquivoPessoa;
+  /** Checklist de documentos (contrato, ASO, CNH…). */
+  documentos?: DocumentoPessoa[];
   tem_acesso_sistema: boolean;
   login?: string;
   /** Demo local — trocar por hash quando Auth/Supabase existir. */

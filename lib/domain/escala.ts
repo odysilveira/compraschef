@@ -9,6 +9,7 @@ import type {
   TipoPessoaRH,
 } from "../types";
 import { aplicarDescontosNoPagamento } from "./consumos-pessoas";
+import { antecedenciaMinimaDoDb } from "./normas-rh";
 import { rotuloFuncao } from "./rh";
 
 export const ANTECEDENCIA_MINIMA_DIAS = 3;
@@ -22,7 +23,7 @@ export function pessoaPrecisaConvocacao(tipo: TipoPessoaRH): boolean {
 }
 
 /** Setor operacional na escala de convocação (intermitente / motoboy). */
-export type SetorConvocacaoEscala = "cozinha" | "balcao" | "motoboy";
+export type SetorConvocacaoEscala = "cozinha" | "balcao" | "salao" | "motoboy";
 
 /** Inclui CLT no arraste do calendário (sem convocação WhatsApp). */
 export type SetorArrastoEscala = SetorConvocacaoEscala | "clt";
@@ -40,6 +41,8 @@ export function rotuloSetorConvocacao(setor: SetorConvocacaoEscala): string {
       return "Cozinha";
     case "balcao":
       return "Balcão / Caixa";
+    case "salao":
+      return "Salão";
     case "motoboy":
       return "Motoboy";
   }
@@ -51,6 +54,8 @@ export function abrevSetorConvocacao(setor: SetorConvocacaoEscala): string {
       return "Coz";
     case "balcao":
       return "Bal";
+    case "salao":
+      return "Sal";
     case "motoboy":
       return "Moto";
   }
@@ -63,11 +68,12 @@ function normalizarTextoSetor(valor: string): string {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-/** Cozinha / balcão a partir do texto da função (CLT ou intermitente). */
+/** Cozinha / balcão / salão a partir do texto da função (CLT ou intermitente). */
 export function setorPorTextoFuncao(funcao?: string): Exclude<SetorConvocacaoEscala, "motoboy"> | null {
   const texto = normalizarTextoSetor(funcao ?? "");
   if (texto.includes("cozinha")) return "cozinha";
   if (texto.includes("balc") || texto.includes("caixa")) return "balcao";
+  if (texto.includes("salao") || texto.includes("garcom") || texto.includes("garcon")) return "salao";
   return null;
 }
 
@@ -99,12 +105,16 @@ export type ResumoDiaEscala = {
   cozinha: number;
   /** Intermitentes no balcão/caixa (não CLT). */
   balcao: number;
+  /** Intermitentes no salão (não CLT). */
+  salao: number;
   motoboys: number;
   /** CLT com função cozinha. */
   clt_cozinha: number;
   /** CLT com função balcão/caixa. */
   clt_balcao: number;
-  /** CLT sem setor cozinha/balcão (gerente, etc.). */
+  /** CLT com função salão. */
+  clt_salao: number;
+  /** CLT sem setor cozinha/balcão/salão (gerente, etc.). */
   clt_outros: number;
 };
 
@@ -117,8 +127,10 @@ export function resumoSetoresDoDia(
     motoboys: 0,
     cozinha: 0,
     balcao: 0,
+    salao: 0,
     clt_cozinha: 0,
     clt_balcao: 0,
+    clt_salao: 0,
     clt_outros: 0,
   };
   for (const slot of slots) {
@@ -127,25 +139,29 @@ export function resumoSetoresDoDia(
     if (pessoa?.tipo === "colaborador") {
       if (setor === "cozinha") resumo.clt_cozinha += 1;
       else if (setor === "balcao") resumo.clt_balcao += 1;
+      else if (setor === "salao") resumo.clt_salao += 1;
       else resumo.clt_outros += 1;
       continue;
     }
     if (setor === "motoboy") resumo.motoboys += 1;
     else if (setor === "cozinha") resumo.cozinha += 1;
     else if (setor === "balcao") resumo.balcao += 1;
+    else if (setor === "salao") resumo.salao += 1;
   }
   return resumo;
 }
 
-/** Ex.: "CLT coz 2 · CLT balc 1 · moto 1 · coz 1 · bal 2" */
+/** Ex.: "CLT coz 2 · CLT balc 1 · CLT salão 1 · moto 1 · coz 1 · bal 2 · salão 1" */
 export function textoResumoSetores(resumo: ResumoDiaEscala): string {
   const partes: string[] = [];
   if (resumo.clt_cozinha > 0) partes.push(`CLT coz ${resumo.clt_cozinha}`);
   if (resumo.clt_balcao > 0) partes.push(`CLT balc ${resumo.clt_balcao}`);
+  if (resumo.clt_salao > 0) partes.push(`CLT salão ${resumo.clt_salao}`);
   if (resumo.clt_outros > 0) partes.push(`CLT ${resumo.clt_outros}`);
   if (resumo.motoboys > 0) partes.push(`${resumo.motoboys} moto`);
   if (resumo.cozinha > 0) partes.push(`${resumo.cozinha} coz`);
   if (resumo.balcao > 0) partes.push(`${resumo.balcao} bal`);
+  if (resumo.salao > 0) partes.push(`${resumo.salao} salão`);
   return partes.join(" · ");
 }
 
@@ -455,14 +471,18 @@ export function moverSlotParaData(
       });
       convocacao.horas_brutas = horas.horas_brutas;
       convocacao.horas_pagas = horas.horas_pagas;
-      convocacao.antecedencia_ok = antecedenciaMinimaOk(agora.slice(0, 10), novaData);
+      convocacao.antecedencia_ok = antecedenciaMinimaOk(
+        agora.slice(0, 10),
+        novaData,
+        antecedenciaMinimaDoDb(db)
+      );
       convocacao.atualizado_em = agora;
       if (convocacao.status === "enviada" || convocacao.status === "aceita") {
         avisos.push("Data alterada. Se a convocação já foi enviada, avise a pessoa de novo pelo WhatsApp.");
       }
       if (!convocacao.antecedencia_ok) {
         avisos.push(
-          `Atenção: antecedência menor que ${ANTECEDENCIA_MINIMA_DIAS} dias corridos (exigência do contrato intermitente).`
+          `Atenção: antecedência menor que ${antecedenciaMinimaDoDb(db)} dias corridos (exigência do contrato intermitente).`
         );
       }
     }
@@ -477,6 +497,56 @@ export function moverSlotParaData(
   }
 
   return { sucesso: true, slot, convocacao, pagamento, erros: [], avisos };
+}
+
+/**
+ * Remove um plantão da escala.
+ * Bloqueia se o pagamento já foi informado/pago (mesmas travas de mover).
+ * Apaga convocação rascunho/enviada ligada; pagamento só `previsto` sai junto.
+ */
+export function excluirSlot(db: DB, slotId: string): ResultadoEscala {
+  const avisos: string[] = [];
+  const slot = (db.escala_slots ?? []).find((s) => s.id === slotId);
+  if (!slot) return { sucesso: false, erros: ["Plantão não encontrado."], avisos };
+
+  const convocacao = convocacaoDoSlot(db, slotId);
+  const pagamento = convocacao ? pagamentoDaConvocacao(db, convocacao.id) : undefined;
+  if (
+    pagamento &&
+    (pagamento.status === "pago" ||
+      pagamento.status === "aguardando_conciliacao" ||
+      pagamento.status === "liberado")
+  ) {
+    return {
+      sucesso: false,
+      erros: ["Não dá para excluir: o pagamento deste período já foi informado ou pago."],
+      avisos,
+    };
+  }
+
+  if (pagamento && pagamento.status === "previsto") {
+    db.pagamentos_pessoas = (db.pagamentos_pessoas ?? []).filter((p) => p.id !== pagamento.id);
+  }
+
+  if (convocacao) {
+    if (convocacao.status === "aceita") {
+      avisos.push("Convocação aceita removida junto com o plantão.");
+    } else if (convocacao.status === "enviada") {
+      avisos.push("Convocação enviada removida — se a pessoa já recebeu o WhatsApp, avise que o período foi cancelado.");
+    }
+    db.convocacoes = (db.convocacoes ?? []).filter((c) => c.id !== convocacao.id);
+  }
+
+  db.escala_slots = (db.escala_slots ?? []).filter((s) => s.id !== slotId);
+  return { sucesso: true, erros: [], avisos };
+}
+
+/** Monta link wa.me com texto da convocação (DDI 55). */
+export function linkWhatsAppConvocacao(telefone: string | undefined, texto: string): string | null {
+  const digitos = (telefone ?? "").replace(/\D/g, "");
+  if (!digitos) return null;
+  const comDdi = digitos.startsWith("55") ? digitos : `55${digitos}`;
+  return `https://wa.me/${comDdi}?text=${encodeURIComponent(texto)}`;
 }
 
 export function montarTextoConvocacaoWhatsApp(input: {
@@ -539,11 +609,12 @@ export function criarConvocacaoParaSlot(
   }
 
   const valor_estimado = Number((horas.horas_pagas * valor_hora).toFixed(2));
-  const antecedencia_ok = antecedenciaMinimaOk(agora.slice(0, 10), slot.data);
+  const minimoDias = antecedenciaMinimaDoDb(db);
+  const antecedencia_ok = antecedenciaMinimaOk(agora.slice(0, 10), slot.data, minimoDias);
   const avisos: string[] = [];
   if (!antecedencia_ok) {
     avisos.push(
-      `Atenção: antecedência menor que ${ANTECEDENCIA_MINIMA_DIAS} dias corridos (exigência do contrato intermitente).`
+      `Atenção: antecedência menor que ${minimoDias} dias corridos (exigência do contrato intermitente).`
     );
   }
 

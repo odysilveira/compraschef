@@ -27,6 +27,7 @@ import {
   UtensilsCrossed,
   CalendarDays,
   Fingerprint,
+  Scale,
 } from "lucide-react";
 import { PapelProvider, usePapel, usePermissoes, ROTULO_PAPEL } from "@/lib/roles";
 import { useDB } from "@/lib/data";
@@ -77,6 +78,7 @@ const MENU: SecaoMenu[] = [
       { href: "/rh/consumos", rotulo: "Consumos", icone: UtensilsCrossed, modulo: "rh" },
       { href: "/rh/escala", rotulo: "Escala", icone: CalendarDays, modulo: "rh" },
       { href: "/rh/ponto", rotulo: "Ponto", icone: Fingerprint, modulo: "rh" },
+      { href: "/rh/normas", rotulo: "Normas", icone: Scale, modulo: "rh" },
     ],
   },
   {

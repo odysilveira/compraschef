@@ -53,7 +53,7 @@ function dbBase(): DB {
     ],
     batidas_ponto: [],
     pendencias_ponto: [],
-    config_rh: { aviso_ponto_horas: 24, atualizado_em: "2026-08-01T12:00:00.000Z" },
+    config_rh: { antecedencia_minima_dias: 3, aviso_ponto_horas: 24, atualizado_em: "2026-08-01T12:00:00.000Z" },
   } as unknown as DB;
 }
 

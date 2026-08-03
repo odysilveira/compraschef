@@ -30,6 +30,10 @@ type FormNovaPessoa = {
   cpf: string;
   salario: string;
   adiantamento_valor: string;
+  valor_hora: string;
+  chave_pix: string;
+  contrato_assinado: boolean;
+  esocial_ok: boolean;
   observacao: string;
   tem_acesso_sistema: boolean;
   login: string;
@@ -48,12 +52,20 @@ function formVazio(): FormNovaPessoa {
     cpf: "",
     salario: "",
     adiantamento_valor: "",
+    valor_hora: "",
+    chave_pix: "",
+    contrato_assinado: false,
+    esocial_ok: false,
     observacao: "",
     tem_acesso_sistema: false,
     login: "",
     senha: "demo123",
     papel_sistema: "lider",
   };
+}
+
+function precisaDadosConvocacao(tipo: TipoPessoaRH): boolean {
+  return tipo === "intermitente" || tipo === "entregador";
 }
 
 function BadgeTipo({ tipo }: { tipo: TipoPessoaRH }) {
@@ -126,6 +138,19 @@ export default function RhPage() {
       }
     }
 
+    const ehConvocavel = precisaDadosConvocacao(form.tipo);
+    const valorHora = form.valor_hora ? Number(form.valor_hora.replace(",", ".")) : undefined;
+    if (ehConvocavel) {
+      if (!form.telefone.trim()) {
+        setErro("Informe o telefone / WhatsApp para convocar.");
+        return;
+      }
+      if (!Number.isFinite(valorHora) || !(valorHora as number > 0)) {
+        setErro("Informe o valor-hora (necessário para a escala).");
+        return;
+      }
+    }
+
     const agora = new Date().toISOString();
     const permissoes = form.tem_acesso_sistema ? permissoesPorPapel(form.papel_sistema) : permissoesVazias();
 
@@ -142,6 +167,9 @@ export default function RhPage() {
         salario: Number.isFinite(salario) && (salario as number) > 0 ? salario : undefined,
         adiantamento_valor:
           Number.isFinite(adiantamento) && (adiantamento as number) > 0 ? adiantamento : undefined,
+        valor_hora:
+          ehConvocavel && Number.isFinite(valorHora) && (valorHora as number) > 0 ? valorHora : undefined,
+        chave_pix: ehConvocavel && form.chave_pix.trim() ? form.chave_pix.trim() : undefined,
         observacao: form.observacao.trim() || undefined,
         tem_acesso_sistema: form.tem_acesso_sistema,
         login: form.tem_acesso_sistema ? form.login.trim().toLowerCase() : undefined,
@@ -151,8 +179,8 @@ export default function RhPage() {
         ativo: true,
         criado_em: agora,
         atualizado_em: agora,
-        contrato_assinado: form.tipo === "colaborador" ? true : false,
-        esocial_ok: form.tipo === "colaborador" ? true : false,
+        contrato_assinado: form.tipo === "colaborador" ? true : form.contrato_assinado,
+        esocial_ok: form.tipo === "colaborador" ? true : form.esocial_ok,
       };
 
       if (form.tem_acesso_sistema) {
@@ -177,7 +205,7 @@ export default function RhPage() {
     <div>
       <TituloPagina
         titulo="RH — Pessoas"
-        subtitulo="Colaboradores, intermitentes e entregadores. Escalas e pagamentos vêm na próxima fase."
+        subtitulo="Cadastro do time — escala em Escala e valores em Pagamentos."
         acao={
           <button type="button" className="btn-primario" onClick={() => setForm(formVazio())}>
             <Plus size={16} /> Nova pessoa
@@ -347,7 +375,52 @@ export default function RhPage() {
                   </Campo>
                 </>
               )}
+              {precisaDadosConvocacao(form.tipo) && (
+                <>
+                  <Campo rotulo="Valor-hora *">
+                    <input
+                      className="campo"
+                      inputMode="decimal"
+                      required
+                      value={form.valor_hora}
+                      onChange={(e) => setForm({ ...form, valor_hora: e.target.value })}
+                      placeholder="12,50"
+                    />
+                  </Campo>
+                  <Campo rotulo="Chave PIX">
+                    <input
+                      className="campo"
+                      value={form.chave_pix}
+                      onChange={(e) => setForm({ ...form, chave_pix: e.target.value })}
+                      placeholder="CPF, e-mail ou chave aleatória"
+                    />
+                  </Campo>
+                </>
+              )}
             </div>
+            {precisaDadosConvocacao(form.tipo) && (
+              <div className="space-y-2 rounded-card border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs font-medium text-slate-600">
+                  Necessários antes da primeira convocação na escala (WhatsApp não substitui o contrato).
+                </p>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.contrato_assinado}
+                    onChange={(e) => setForm({ ...form, contrato_assinado: e.target.checked })}
+                  />
+                  <span>Contrato intermitente assinado</span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.esocial_ok}
+                    onChange={(e) => setForm({ ...form, esocial_ok: e.target.checked })}
+                  />
+                  <span>eSocial OK</span>
+                </label>
+              </div>
+            )}
             <Campo rotulo="Observação">
               <textarea
                 className="campo min-h-20"

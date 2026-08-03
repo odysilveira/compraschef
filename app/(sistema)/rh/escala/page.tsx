@@ -12,9 +12,11 @@ import {
   abrevSetorConvocacao,
   convocacaoDoSlot,
   criarSlot,
+  excluirSlot,
   formatDataBrLonga,
   gerarEscalaPadraoClt,
   janelaCalendarioEscala,
+  linkWhatsAppConvocacao,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
   moverSlotParaData,
@@ -46,6 +48,13 @@ import { rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
 import type { ConvocacaoIntermitente, EscalaSlot, PessoaRH, StatusConvocacao } from "@/lib/types";
+
+function filtrarIntermitentesPorSetor(
+  pessoas: PessoaRH[],
+  setor: Exclude<SetorConvocacaoEscala, "motoboy">
+): PessoaRH[] {
+  return pessoas.filter((p) => setorOperacionalDaPessoa(p) === setor);
+}
 
 function hojeISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -220,6 +229,18 @@ export default function RhEscalaPage() {
     () => pessoasAtivas.filter((p) => p.tipo === "intermitente"),
     [pessoasAtivas]
   );
+  const intermitentesCozinha = useMemo(
+    () => filtrarIntermitentesPorSetor(intermitentes, "cozinha"),
+    [intermitentes]
+  );
+  const intermitentesBalcao = useMemo(
+    () => filtrarIntermitentesPorSetor(intermitentes, "balcao"),
+    [intermitentes]
+  );
+  const intermitentesSalao = useMemo(
+    () => filtrarIntermitentesPorSetor(intermitentes, "salao"),
+    [intermitentes]
+  );
   const entregadores = useMemo(
     () => pessoasAtivas.filter((p) => p.tipo === "entregador"),
     [pessoasAtivas]
@@ -333,6 +354,42 @@ export default function RhEscalaPage() {
     } catch {
       setErro("Não foi possível copiar. Selecione o texto manualmente.");
     }
+  }
+
+  function abrirWhatsAppConvocacao(convocacaoId: string) {
+    const convocacao = db.convocacoes.find((c) => c.id === convocacaoId);
+    if (!convocacao) {
+      setErro("Convocação não encontrada.");
+      return;
+    }
+    const pessoa = db.pessoas.find((p) => p.id === convocacao.pessoa_id);
+    const url = linkWhatsAppConvocacao(pessoa?.telefone, convocacao.texto_mensagem);
+    if (!url) {
+      setErro("Cadastre o telefone / WhatsApp no perfil para abrir a conversa.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = marcarConvocacaoEnviada(proximo, convocacaoId);
+    if (r.sucesso) {
+      mutate((atual) => Object.assign(atual, proximo));
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    setMensagem("WhatsApp aberto. Convocação marcada como enviada.");
+    setErro(null);
+  }
+
+  function excluirPlantao(slotId: string) {
+    const proximo = structuredClone(db);
+    const r = excluirSlot(proximo, slotId);
+    if (!r.sucesso) {
+      setErro(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setDetalheSlotId(null);
+    setErro(null);
+    setMensagem("Plantão excluído.");
+    if (r.avisos.length) setAviso(r.avisos.join(" "));
   }
 
   async function copiarReciboDoPagamento(convocacaoId: string, variante: "recibo" | "confirmacao") {
@@ -484,7 +541,13 @@ export default function RhEscalaPage() {
       const nomeCurto = pessoa.nome.split(/\s+/)[0];
       const setorPessoa = setorOperacionalDaPessoa(pessoa);
       const setorTxt =
-        setorPessoa === "cozinha" ? "cozinha" : setorPessoa === "balcao" ? "balcão" : rotuloFuncao(pessoa);
+        setorPessoa === "cozinha"
+          ? "cozinha"
+          : setorPessoa === "balcao"
+            ? "balcão"
+            : setorPessoa === "salao"
+              ? "salão"
+              : rotuloFuncao(pessoa);
       setMensagem(
         `${nomeCurto} (CLT · ${setorTxt}): ${gerado.criados} dia(s) no 12x36 a partir de ${formatDataBrLonga(data)}` +
           (gerado.pulados ? ` (${gerado.pulados} já existiam)` : "") +
@@ -549,7 +612,7 @@ export default function RhEscalaPage() {
       const pessoaId = dataTransfer.getData("text/escala-pessoa-id") || (arrasto?.tipo === "pessoa" ? arrasto.id : "");
       const setorBruto =
         dataTransfer.getData("text/escala-setor") || (arrasto?.tipo === "pessoa" ? arrasto.setor : "");
-      const setor = (["cozinha", "balcao", "motoboy", "clt"] as SetorArrastoEscala[]).includes(
+      const setor = (["cozinha", "balcao", "salao", "motoboy", "clt"] as SetorArrastoEscala[]).includes(
         setorBruto as SetorArrastoEscala
       )
         ? (setorBruto as SetorArrastoEscala)
@@ -566,6 +629,11 @@ export default function RhEscalaPage() {
     ? convocacaoDoSlot(db, detalheSlot.id)
     : undefined;
   const detalhePagamento = detalheConv ? pagamentoDaConvocacao(db, detalheConv.id) : undefined;
+  const detalhePessoa = detalheSlot ? db.pessoas.find((p) => p.id === detalheSlot.pessoa_id) : undefined;
+  const linkWaDetalhe =
+    detalheConv && detalhePessoa
+      ? linkWhatsAppConvocacao(detalhePessoa.telefone, detalheConv.texto_mensagem)
+      : null;
 
   return (
     <div>
@@ -619,8 +687,8 @@ export default function RhEscalaPage() {
             <div>
               <p className="text-sm font-bold text-slate-900">Quem entra na escala</p>
               <p className="text-xs text-slate-600">
-                CLT: solte num dia e o sistema preenche o resto em 12x36 (dia sim / dia não). Cozinha e balcão entram no
-                saldo do dia como CLT coz / CLT balc.
+                CLT: solte num dia e o sistema preenche o resto em 12x36 (dia sim / dia não). Cozinha, balcão e salão
+                entram no saldo do dia como CLT coz / CLT balc / CLT salão.
               </p>
             </div>
             <BancoPessoas
@@ -637,7 +705,7 @@ export default function RhEscalaPage() {
             />
             <BancoPessoas
               titulo="Intermitentes — Cozinha"
-              pessoas={intermitentes}
+              pessoas={intermitentesCozinha}
               setor="cozinha"
               arrasto={arrasto}
               onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
@@ -648,8 +716,19 @@ export default function RhEscalaPage() {
             />
             <BancoPessoas
               titulo="Intermitentes — Balcão / Caixa"
-              pessoas={intermitentes}
+              pessoas={intermitentesBalcao}
               setor="balcao"
+              arrasto={arrasto}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
+              onDragEnd={() => {
+                setArrasto(null);
+                setDiaDestinoHover(null);
+              }}
+            />
+            <BancoPessoas
+              titulo="Intermitentes — Salão"
+              pessoas={intermitentesSalao}
+              setor="salao"
               arrasto={arrasto}
               onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
               onDragEnd={() => {
@@ -732,12 +811,19 @@ export default function RhEscalaPage() {
                                     clt_cozinha:
                                       resumo.clt_cozinha + (ehClt && setorEfetivo === "cozinha" ? 1 : 0),
                                     clt_balcao: resumo.clt_balcao + (ehClt && setorEfetivo === "balcao" ? 1 : 0),
+                                    clt_salao: resumo.clt_salao + (ehClt && setorEfetivo === "salao" ? 1 : 0),
                                     clt_outros:
                                       resumo.clt_outros +
-                                      (ehClt && setorEfetivo !== "cozinha" && setorEfetivo !== "balcao" ? 1 : 0),
+                                      (ehClt &&
+                                      setorEfetivo !== "cozinha" &&
+                                      setorEfetivo !== "balcao" &&
+                                      setorEfetivo !== "salao"
+                                        ? 1
+                                        : 0),
                                     motoboys: resumo.motoboys + (!ehClt && setorEfetivo === "motoboy" ? 1 : 0),
                                     cozinha: resumo.cozinha + (!ehClt && setorEfetivo === "cozinha" ? 1 : 0),
                                     balcao: resumo.balcao + (!ehClt && setorEfetivo === "balcao" ? 1 : 0),
+                                    salao: resumo.salao + (!ehClt && setorEfetivo === "salao" ? 1 : 0),
                                   };
                                 })()
                               : resumo;
@@ -861,7 +947,7 @@ export default function RhEscalaPage() {
                                   className={`mt-1 border-t border-stone-200/80 pt-1 text-[10px] leading-tight ${
                                     ehDestino ? "font-semibold text-primaria-escura" : "text-slate-500"
                                   }`}
-                                  title="CLT coz · CLT balc · moto · coz (intermitentes) · bal (intermitentes)"
+                                  title="CLT coz · CLT balc · CLT salão · moto · coz · bal · salão"
                                 >
                                   {textoResumo || "—"}
                                 </p>
@@ -878,8 +964,8 @@ export default function RhEscalaPage() {
           </Card>
 
           <p className="mt-3 text-center text-xs text-slate-500">
-            Saldo do dia: CLT coz · CLT balc · moto · coz · bal. Soltar CLT num dia gera automaticamente os dias
-            alternados (12x36) a partir daí.
+            Saldo do dia: CLT coz · CLT balc · CLT salão · moto · coz · bal · salão. Soltar CLT num dia gera
+            automaticamente os dias alternados (12x36) a partir daí.
           </p>
         </div>
       </div>
@@ -1119,7 +1205,7 @@ export default function RhEscalaPage() {
                 Cancelar
               </button>
               <button type="submit" className="btn-primario">
-                Gerar 28 dias
+                Gerar no calendário
               </button>
             </div>
           </form>
@@ -1165,9 +1251,18 @@ export default function RhEscalaPage() {
                 </p>
                 <textarea className="campo min-h-40 font-mono text-xs" readOnly value={detalheConv.texto_mensagem} />
                 <div className="flex flex-wrap gap-2">
+                  {linkWaDetalhe && (
+                    <button
+                      type="button"
+                      className="btn-primario"
+                      onClick={() => abrirWhatsAppConvocacao(detalheConv.id)}
+                    >
+                      Abrir WhatsApp
+                    </button>
+                  )}
                   <button
                     type="button"
-                    className="btn-primario"
+                    className={linkWaDetalhe ? "btn-secundario" : "btn-primario"}
                     onClick={() => void copiarTexto(detalheConv.texto_mensagem, detalheConv.id)}
                   >
                     {copiado ? <Check size={16} /> : <Copy size={16} />}{" "}
@@ -1243,6 +1338,16 @@ export default function RhEscalaPage() {
             )}
 
             {erro && <p className="text-sm font-medium text-destaque">{erro}</p>}
+
+            <div className="flex justify-end border-t border-stone-200 pt-3">
+              <button
+                type="button"
+                className="btn-secundario text-destaque"
+                onClick={() => excluirPlantao(detalheSlot.id)}
+              >
+                Excluir plantão
+              </button>
+            </div>
           </div>
         )}
       </Modal>

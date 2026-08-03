@@ -147,18 +147,33 @@ export function atualizarComNovidades(db: DB): boolean {
     mudou = true;
   }
 
+  if (!Array.isArray(db.normas_rh)) {
+    db.normas_rh = [];
+    mudou = true;
+  }
+
   if (!db.config_rh) {
     db.config_rh = {
+      antecedencia_minima_dias: 3,
       aviso_ponto_horas: 24,
       atualizado_em: new Date().toISOString(),
     };
     mudou = true;
-  } else if (
-    typeof db.config_rh.aviso_ponto_horas !== "number" ||
-    !Number.isFinite(db.config_rh.aviso_ponto_horas)
-  ) {
-    db.config_rh.aviso_ponto_horas = 24;
-    mudou = true;
+  } else {
+    if (
+      typeof db.config_rh.aviso_ponto_horas !== "number" ||
+      !Number.isFinite(db.config_rh.aviso_ponto_horas)
+    ) {
+      db.config_rh.aviso_ponto_horas = 24;
+      mudou = true;
+    }
+    if (
+      typeof db.config_rh.antecedencia_minima_dias !== "number" ||
+      !Number.isFinite(db.config_rh.antecedencia_minima_dias)
+    ) {
+      db.config_rh.antecedencia_minima_dias = 3;
+      mudou = true;
+    }
   }
 
   // Migração do mock anterior: transforma cada caixa ocupada em um lote canônico,

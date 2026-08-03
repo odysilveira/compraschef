@@ -19,18 +19,20 @@ import {
   montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
   pendenciasPontoAbertas,
+  pendenciaAbertaNoDia,
   recusarPendenciaPonto,
   registrarPropostaPonto,
+  resumirEspelhoPonto,
   rotuloOrigemBatidaPonto,
   rotuloStatusDiaEspelho,
   rotuloStatusPendenciaPonto,
   rotuloTipoFaltaPonto,
   toleranciaAtrasoMinutosDoDb,
 } from "@/lib/domain/ponto-rh";
+import type { StatusDiaEspelho } from "@/lib/domain/ponto-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
-import type { StatusDiaEspelho } from "@/lib/domain/ponto-rh";
 
 function BadgeStatus({ status }: { status: StatusPendenciaPonto }) {
   const cor =
@@ -64,6 +66,7 @@ export default function RhPontoPage() {
   const [aba, setAba] = useState<"pendencias" | "espelho">("pendencias");
   const [competenciaEspelho, setCompetenciaEspelho] = useState(() => competenciaDeData());
   const [pessoaEspelho, setPessoaEspelho] = useState<string>("");
+  const [filtroEspelho, setFiltroEspelho] = useState<"todos" | StatusDiaEspelho>("todos");
   const [detalheId, setDetalheId] = useState<string | null>(null);
   const [propostaEntrada, setPropostaEntrada] = useState("");
   const [propostaSaida, setPropostaSaida] = useState("");
@@ -95,6 +98,13 @@ export default function RhPontoPage() {
         tolerancia_atraso_minutos: toleranciaEspelho,
       }),
     [competenciaEspelho, db, pessoaEspelho, toleranciaEspelho]
+  );
+
+  const resumoEspelho = useMemo(() => resumirEspelhoPonto(espelho), [espelho]);
+
+  const espelhoFiltrado = useMemo(
+    () => (filtroEspelho === "todos" ? espelho : espelho.filter((d) => d.status === filtroEspelho)),
+    [espelho, filtroEspelho]
   );
 
   const colaboradoresEspelho = useMemo(
@@ -140,6 +150,34 @@ export default function RhPontoPage() {
         : "Nenhuma pendência nova. Escala CLT e batidas já estão alinhadas no prazo."
     );
     setFiltro("abertas");
+    return { proximo, r };
+  }
+
+  function irParaPendenciaDoDia(pessoaId: string, data: string) {
+    const jaAberta = pendenciaAbertaNoDia(db.pendencias_ponto ?? [], pessoaId, data);
+    if (jaAberta) {
+      setAba("pendencias");
+      setFiltro("abertas");
+      abrirDetalhe(jaAberta);
+      setErro(null);
+      return;
+    }
+
+    const { proximo, r } = detectar();
+    const criada =
+      r.criadas.find((p) => p.pessoa_id === pessoaId && p.data === data) ??
+      pendenciaAbertaNoDia(proximo.pendencias_ponto ?? [], pessoaId, data);
+
+    setAba("pendencias");
+    setFiltro("abertas");
+    if (criada) {
+      abrirDetalhe(criada);
+      setMensagem(`Pendência pronta para ${nomePessoa(pessoaId)} em ${dataBR(data)}.`);
+    } else {
+      setMensagem(
+        "Ainda sem pendência para este dia (fora do prazo de aviso ou já resolvida). Confira a lista."
+      );
+    }
   }
 
   function simularImportRelogio() {
@@ -654,64 +692,106 @@ export default function RhPontoPage() {
           {espelho.length === 0 ? (
             <Vazio mensagem="Nenhum plantão nem batida neste mês. Monte a escala ou sincronize o REP." />
           ) : (
-            <div className="overflow-x-auto rounded-card border border-slate-200 bg-white">
-              <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">Data</th>
-                    <th className="px-3 py-2 font-semibold">Pessoa</th>
-                    <th className="px-3 py-2 font-semibold">Previsto</th>
-                    <th className="px-3 py-2 font-semibold">Realizado</th>
-                    <th className="px-3 py-2 font-semibold">Status</th>
-                    <th className="px-3 py-2 font-semibold">Origem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {espelho.map((dia) => {
-                    const origens = Array.from(
-                      new Set(dia.batidas.map((b) => rotuloOrigemBatidaPonto(b.origem)))
-                    );
-                    const detalheAtraso = [
-                      dia.atraso_entrada_min != null && dia.atraso_entrada_min > 0
-                        ? `+${dia.atraso_entrada_min} min entrada`
-                        : null,
-                      dia.saida_antecipada_min != null && dia.saida_antecipada_min > 0
-                        ? `−${dia.saida_antecipada_min} min saída`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ");
-                    return (
-                      <tr key={`${dia.pessoa_id}-${dia.data}`} className="border-b border-slate-100">
-                        <td className="px-3 py-2 whitespace-nowrap">{dataBR(dia.data)}</td>
-                        <td className="px-3 py-2 font-medium text-slate-900">{nomePessoa(dia.pessoa_id)}</td>
-                        <td className="px-3 py-2 tabular-nums text-slate-600">
-                          {dia.previsto_entrada && dia.previsto_saida
-                            ? `${dia.previsto_entrada}–${dia.previsto_saida}`
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-2 tabular-nums">
-                          {dia.entrada || dia.saida
-                            ? `${dia.entrada ?? "—"}–${dia.saida ?? "—"}`
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-col gap-0.5">
-                            <BadgeEspelho status={dia.status} />
-                            {detalheAtraso && (
-                              <span className="text-xs text-amber-800">{detalheAtraso}</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-slate-600">
-                          {origens.length ? origens.join(", ") : "—"}
-                        </td>
+            <>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["todos", `Todos (${resumoEspelho.total})`],
+                    ["ok", `OK (${resumoEspelho.ok})`],
+                    ["atraso", `Atraso (${resumoEspelho.atraso})`],
+                    ["incompleto", `Incompleto (${resumoEspelho.incompleto})`],
+                    ["sem_batida", `Sem digital (${resumoEspelho.sem_batida})`],
+                    ["sem_escala", `Sem escala (${resumoEspelho.sem_escala})`],
+                  ] as const
+                ).map(([id, rotulo]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={filtroEspelho === id ? "btn-primario" : "btn-secundario"}
+                    onClick={() => setFiltroEspelho(id)}
+                  >
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+
+              {espelhoFiltrado.length === 0 ? (
+                <Vazio mensagem="Nenhum dia neste filtro." />
+              ) : (
+                <div className="overflow-x-auto rounded-card border border-slate-200 bg-white">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Data</th>
+                        <th className="px-3 py-2 font-semibold">Pessoa</th>
+                        <th className="px-3 py-2 font-semibold">Previsto</th>
+                        <th className="px-3 py-2 font-semibold">Realizado</th>
+                        <th className="px-3 py-2 font-semibold">Status</th>
+                        <th className="px-3 py-2 font-semibold">Origem</th>
+                        <th className="px-3 py-2 font-semibold">Ação</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {espelhoFiltrado.map((dia) => {
+                        const origens = Array.from(
+                          new Set(dia.batidas.map((b) => rotuloOrigemBatidaPonto(b.origem)))
+                        );
+                        const detalheAtraso = [
+                          dia.atraso_entrada_min != null && dia.atraso_entrada_min > 0
+                            ? `+${dia.atraso_entrada_min} min entrada`
+                            : null,
+                          dia.saida_antecipada_min != null && dia.saida_antecipada_min > 0
+                            ? `−${dia.saida_antecipada_min} min saída`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ");
+                        return (
+                          <tr key={`${dia.pessoa_id}-${dia.data}`} className="border-b border-slate-100">
+                            <td className="px-3 py-2 whitespace-nowrap">{dataBR(dia.data)}</td>
+                            <td className="px-3 py-2 font-medium text-slate-900">
+                              {nomePessoa(dia.pessoa_id)}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-slate-600">
+                              {dia.previsto_entrada && dia.previsto_saida
+                                ? `${dia.previsto_entrada}–${dia.previsto_saida}`
+                                : "—"}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">
+                              {dia.entrada || dia.saida
+                                ? `${dia.entrada ?? "—"}–${dia.saida ?? "—"}`
+                                : "—"}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-col gap-0.5">
+                                <BadgeEspelho status={dia.status} />
+                                {detalheAtraso && (
+                                  <span className="text-xs text-amber-800">{detalheAtraso}</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-slate-600">
+                              {origens.length ? origens.join(", ") : "—"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {(dia.status === "sem_batida" || dia.status === "incompleto") && (
+                                <button
+                                  type="button"
+                                  className="btn-secundario"
+                                  onClick={() => irParaPendenciaDoDia(dia.pessoa_id, dia.data)}
+                                >
+                                  Pendência
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

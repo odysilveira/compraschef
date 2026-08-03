@@ -648,3 +648,27 @@ export function montarEspelhoPonto(
     })
     .sort((a, b) => a.data.localeCompare(b.data) || a.pessoa_id.localeCompare(b.pessoa_id));
 }
+
+export interface ResumoEspelhoPonto {
+  total: number;
+  ok: number;
+  atraso: number;
+  incompleto: number;
+  sem_batida: number;
+  sem_escala: number;
+}
+
+export function resumirEspelhoPonto(dias: DiaEspelhoPonto[]): ResumoEspelhoPonto {
+  const r: ResumoEspelhoPonto = {
+    total: dias.length,
+    ok: 0,
+    atraso: 0,
+    incompleto: 0,
+    sem_batida: 0,
+    sem_escala: 0,
+  };
+  for (const d of dias) {
+    r[d.status] += 1;
+  }
+  return r;
+}

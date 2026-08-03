@@ -8,6 +8,7 @@ import {
   montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
   registrarPropostaPonto,
+  resumirEspelhoPonto,
 } from "./ponto-rh";
 
 function pessoaClt(overrides: Partial<PessoaRH> = {}): PessoaRH {
@@ -179,5 +180,21 @@ describe("ponto-rh", () => {
     expect(dias).toHaveLength(1);
     expect(dias[0]!.status).toBe("sem_batida");
     expect(dias[0]!.previsto_entrada).toBe("11:00");
+  });
+
+  it("resume contagens do espelho", () => {
+    const db = dbBase();
+    importarBatidasPonto(
+      db,
+      [
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "11:00", tipo: "entrada" },
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "23:00", tipo: "saida" },
+      ],
+      { idFactory: () => `b-${db.batidas_ponto!.length}` }
+    );
+    const resumo = resumirEspelhoPonto(montarEspelhoPonto(db, { competencia: "2026-07" }));
+    expect(resumo.total).toBe(1);
+    expect(resumo.ok).toBe(1);
+    expect(resumo.sem_batida).toBe(0);
   });
 });

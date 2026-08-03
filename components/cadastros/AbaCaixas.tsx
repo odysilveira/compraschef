@@ -7,6 +7,14 @@ import { useState, type FormEvent } from "react";
 import { Plus, QrCode } from "lucide-react";
 import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
 import { mutate, nomeLocal, nomeProduto, siglaUnidadeUso, uid, useDB } from "@/lib/data";
+import {
+  aplicarMetadadosBox,
+  avisoIncompatibilidadeBox,
+  ROTULO_POSICAO_BOX,
+  ROTULO_TIPO_BOX,
+  type PosicaoFisicaBox,
+  type TipoBox,
+} from "@/lib/domain/estoque-boxes";
 import { qtd, rotuloValidade } from "@/lib/format";
 import type { Caixa, StatusCaixa } from "@/lib/types";
 import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
@@ -22,13 +30,55 @@ function BadgeStatus({ status }: { status: StatusCaixa }) {
   return <Badge cor={cor}>{ROTULO_STATUS[status]}</Badge>;
 }
 
+function corTipoBox(tipo: TipoBox): "cinza" | "azul" | "laranja" | "vermelho" {
+  switch (tipo) {
+    case "RESERVA":
+      return "azul";
+    case "OPERACIONAL":
+      return "laranja";
+    case "QUARENTENA":
+      return "vermelho";
+    default:
+      return "cinza";
+  }
+}
+
+function explicacaoTipoBox(tipo: TipoBox): string {
+  switch (tipo) {
+    case "RESERVA":
+      return "Reserva: estoque armazenado.";
+    case "OPERACIONAL":
+      return "Operacional: saldo contínuo para consumo.";
+    case "QUARENTENA":
+      return "Quarentena: box identificado para isolamento. O bloqueio automático de consumo será implementado na próxima fase.";
+    default:
+      return "Não classificado: caixa ainda não adaptada ao novo modelo.";
+  }
+}
+
+function BadgeTipoBox({ tipo }: { tipo: TipoBox }) {
+  return <Badge cor={corTipoBox(tipo)}>{ROTULO_TIPO_BOX[tipo]}</Badge>;
+}
+
 export function AbaCaixas() {
   const db = useDB();
   const [busca, setBusca] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState<TipoBox | "">("");
   const [form, setForm] = useState<Caixa | null>(null);
 
   const lista = db.caixas
-    .filter((c) => contem(busca, c.numero, c.qr_code, nomeProduto(db, c.produto_id), ROTULO_STATUS[c.status]))
+    .filter((c) => {
+      if (filtroTipo && c.tipo_box !== filtroTipo) return false;
+      return contem(
+        busca,
+        c.numero,
+        c.qr_code,
+        nomeProduto(db, c.produto_id),
+        ROTULO_STATUS[c.status],
+        ROTULO_TIPO_BOX[c.tipo_box],
+        ROTULO_POSICAO_BOX[c.posicao_fisica]
+      );
+    })
     .sort((a, b) => a.numero - b.numero);
 
   function novaCaixa(): Caixa {
@@ -37,6 +87,8 @@ export function AbaCaixas() {
       id: "",
       numero: proximoNumero,
       qr_code: `CXCHEF-${String(proximoNumero).padStart(3, "0")}`,
+      tipo_box: "NAO_CLASSIFICADO",
+      posicao_fisica: "NAO_INFORMADA",
       status: "vazia",
       atualizado_em: new Date().toISOString(),
     };
@@ -48,8 +100,14 @@ export function AbaCaixas() {
     mutate((banco) => {
       if (form.id) {
         const i = banco.caixas.findIndex((c) => c.id === form.id);
-        // Só número e QR são editáveis aqui; status/conteúdo ficam como estão.
-        if (i >= 0) banco.caixas[i] = { ...banco.caixas[i], numero: form.numero, qr_code: form.qr_code };
+        if (i >= 0) {
+          banco.caixas[i] = aplicarMetadadosBox(banco.caixas[i], {
+            numero: form.numero,
+            qr_code: form.qr_code,
+            tipo_box: form.tipo_box,
+            posicao_fisica: form.posicao_fisica,
+          });
+        }
       } else {
         banco.caixas.push({ ...form, id: uid("cx"), atualizado_em: new Date().toISOString() });
       }
@@ -74,6 +132,12 @@ export function AbaCaixas() {
     <div>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <BarraBusca valor={busca} onMudar={setBusca} placeholder="Buscar por número, QR, produto…" />
+        <select className="campo mb-4 min-w-[220px]" value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value as TipoBox | "") }>
+          <option value="">Todos os tipos de box</option>
+          {(Object.keys(ROTULO_TIPO_BOX) as TipoBox[]).map((tipo) => (
+            <option key={tipo} value={tipo}>{ROTULO_TIPO_BOX[tipo]}</option>
+          ))}
+        </select>
         <div className="mb-4 flex gap-2">
           <a href="/etiquetas" target="_blank" rel="noopener" className="btn-secundario">
             <QrCode size={16} /> Imprimir etiquetas
@@ -87,8 +151,20 @@ export function AbaCaixas() {
       {lista.length === 0 ? (
         <Vazio mensagem="Nenhuma caixa encontrada." />
       ) : (
-        <div className="card p-0 sm:p-2">
-          <Tabela cabecalho={["Nº", "QR code", "Status", "Conteúdo", "Local"]}>
+        <>
+          <div className="card mb-3 p-3 text-sm text-slate-600">
+            <p className="font-semibold text-slate-800">Classificação lógica dos boxes</p>
+            <p>Reserva: estoque armazenado.</p>
+            <p>Operacional: saldo contínuo para consumo.</p>
+            <p>Quarentena: box identificado para isolamento. O bloqueio automático de consumo será implementado na próxima fase.</p>
+            <p>Não classificado: caixa ainda não adaptada ao novo modelo.</p>
+            <p className="mt-2 rounded-card border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+              Fase 1: a classificação organiza e identifica os boxes, mas ainda não altera disponibilidade, saldo, FEFO ou consumo.
+            </p>
+          </div>
+
+          <div className="card p-0 sm:p-2">
+            <Tabela cabecalho={["Nº", "QR code", "Tipo", "Posição", "Status", "Conteúdo", "Local"]}>
             {lista.map((c) => (
               <tr
                 key={c.id}
@@ -102,6 +178,10 @@ export function AbaCaixas() {
                   </span>
                 </td>
                 <td className="px-3 py-2.5">
+                  <BadgeTipoBox tipo={c.tipo_box} />
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-600">{ROTULO_POSICAO_BOX[c.posicao_fisica]}</td>
+                <td className="px-3 py-2.5">
                   <BadgeStatus status={c.status} />
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5">
@@ -112,8 +192,9 @@ export function AbaCaixas() {
                 <td className="whitespace-nowrap px-3 py-2.5">{c.produto_id ? nomeLocal(db, c.local_id) : "—"}</td>
               </tr>
             ))}
-          </Tabela>
-        </div>
+            </Tabela>
+          </div>
+        </>
       )}
 
       <Modal
@@ -143,6 +224,40 @@ export function AbaCaixas() {
               />
             </Campo>
 
+            <Campo rotulo="Tipo do box *">
+              <select className="campo" value={form.tipo_box} onChange={(e) => setForm({ ...form, tipo_box: e.target.value as TipoBox })}>
+                {(Object.keys(ROTULO_TIPO_BOX) as TipoBox[]).map((tipo) => (
+                  <option key={tipo} value={tipo}>{ROTULO_TIPO_BOX[tipo]}</option>
+                ))}
+              </select>
+            </Campo>
+            <Campo rotulo="Posição física *">
+              <select className="campo" value={form.posicao_fisica} onChange={(e) => setForm({ ...form, posicao_fisica: e.target.value as PosicaoFisicaBox })}>
+                {(Object.keys(ROTULO_POSICAO_BOX) as PosicaoFisicaBox[]).map((posicao) => (
+                  <option key={posicao} value={posicao}>{ROTULO_POSICAO_BOX[posicao]}</option>
+                ))}
+              </select>
+            </Campo>
+
+            <div className="rounded-card border border-slate-200 bg-fundo p-3 sm:col-span-2">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span className="rotulo">Classificação atual</span>
+                <BadgeTipoBox tipo={form.tipo_box} />
+              </div>
+              <p className="text-sm text-slate-600">{explicacaoTipoBox(form.tipo_box)}</p>
+              <p className="mt-2 text-sm text-slate-600">Posição: {ROTULO_POSICAO_BOX[form.posicao_fisica]}</p>
+              {avisoIncompatibilidadeBox(form) && (
+                <p className="mt-2 rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
+                  {avisoIncompatibilidadeBox(form)}
+                </p>
+              )}
+              {form.tipo_box === "QUARENTENA" && (
+                <p className="mt-2 rounded-card border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  Separe fisicamente este box. Nesta fase, o sistema ainda não impede automaticamente seu uso pelo fluxo de estoque.
+                </p>
+              )}
+            </div>
+
             <div className="rounded-card border border-slate-200 bg-fundo p-3 sm:col-span-2">
               <div className="mb-2 flex items-center justify-between">
                 <span className="rotulo">Situação atual (somente leitura)</span>
@@ -163,7 +278,7 @@ export function AbaCaixas() {
                 <p className="text-sm text-slate-500">Caixa vazia, pronta para uso.</p>
               )}
               <p className="mt-2 text-xs text-slate-400">
-                Para encher ou esvaziar a caixa, use a tela Estoque.
+                Alterar tipo ou posição não muda saldo, lote, validade nem QR code existente.
               </p>
             </div>
 

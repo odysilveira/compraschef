@@ -103,6 +103,8 @@ export default function EtiquetasPage() {
           id: uid("cx"),
           numero: nova.numero,
           qr_code: nova.qr,
+          tipo_box: "NAO_CLASSIFICADO",
+          posicao_fisica: "NAO_INFORMADA",
           status: "vazia",
           atualizado_em: agora,
         });

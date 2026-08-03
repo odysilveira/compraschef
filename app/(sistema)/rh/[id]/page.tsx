@@ -6,7 +6,11 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, FileUp, Save, Trash2, Users } from "lucide-react";
 import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, useDB } from "@/lib/data";
-import { validarAdiantamento, TETO_ADIANTAMENTO_PCT } from "@/lib/domain/consumos-pessoas";
+import {
+  validarAdiantamento,
+  TETO_ADIANTAMENTO_PCT,
+  rotuloStatusConsumo,
+} from "@/lib/domain/consumos-pessoas";
 import {
   TAMANHO_MAX_CONTRATO_BYTES,
   formatarTamanhoArquivo,
@@ -24,6 +28,10 @@ import {
   slotsDaPessoaNaJanela,
 } from "@/lib/domain/escala";
 import {
+  rotuloStatusPagamentoPessoa,
+  rotuloTipoPagamentoPessoa,
+} from "@/lib/domain/pagamentos-pessoas";
+import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
   TIPOS_PESSOA_RH,
@@ -36,10 +44,10 @@ import {
   validarCpf,
 } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
-import { moeda } from "@/lib/format";
+import { dataBR, moeda } from "@/lib/format";
 import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
-type AbaPerfil = "dados" | "acesso" | "escala";
+type AbaPerfil = "dados" | "acesso" | "escala" | "pagamentos" | "consumos";
 
 export default function RhPerfilPage() {
   const params = useParams<{ id: string }>();
@@ -63,6 +71,18 @@ export default function RhPerfilPage() {
     () => (pessoa ? slotsDaPessoaNaJanela(db, pessoa.id, diasJanela) : []),
     [db, pessoa, diasJanela]
   );
+  const pagamentosPessoa = useMemo(() => {
+    if (!pessoa) return [];
+    return [...(db.pagamentos_pessoas ?? [])]
+      .filter((p) => p.pessoa_id === pessoa.id)
+      .sort((a, b) => b.vencimento.localeCompare(a.vencimento));
+  }, [db.pagamentos_pessoas, pessoa]);
+  const consumosPessoa = useMemo(() => {
+    if (!pessoa) return [];
+    return [...(db.consumos_pessoas ?? [])]
+      .filter((c) => c.pessoa_id === pessoa.id)
+      .sort((a, b) => b.data.localeCompare(a.data));
+  }, [db.consumos_pessoas, pessoa]);
   const porDiaPessoa = useMemo(() => {
     const map = new Map<string, typeof plantaoesPessoa>();
     for (const dia of diasJanela) map.set(dia, []);
@@ -307,6 +327,8 @@ export default function RhPerfilPage() {
             ["dados", "Dados"],
             ["acesso", "Acesso"],
             ["escala", "Escala"],
+            ["pagamentos", "Pagamentos"],
+            ["consumos", "Consumos"],
           ] as const
         ).map(([id, rotulo]) => (
           <button
@@ -774,6 +796,86 @@ export default function RhPerfilPage() {
             No calendário da equipe (RH → Escala) você vê os nomes de todo mundo em cada dia. Avaliações e
             histórico entram depois neste perfil.
           </p>
+        </Card>
+      )}
+
+      {aba === "pagamentos" && (
+        <Card className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-bold">Pagamentos desta pessoa</h2>
+            <Link href="/rh/pagamentos" className="btn-secundario text-sm">
+              Abrir pagamentos
+            </Link>
+          </div>
+          {pagamentosPessoa.length === 0 ? (
+            <Vazio mensagem="Nenhum pagamento lançado para esta pessoa." />
+          ) : (
+            <div className="space-y-2">
+              {pagamentosPessoa.map((pagamento) => (
+                <div
+                  key={pagamento.id}
+                  className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-900">
+                      {rotuloTipoPagamentoPessoa(pagamento.tipo)}
+                      {pagamento.descricao ? ` · ${pagamento.descricao}` : ""}
+                    </p>
+                    <p className="text-lg font-bold">{moeda(pagamento.pagamento_valor ?? pagamento.valor)}</p>
+                    <p className="text-xs text-slate-500">
+                      Venc. {dataBR(pagamento.vencimento)}
+                      {pagamento.competencia ? ` · ${pagamento.competencia}` : ""}
+                    </p>
+                  </div>
+                  <Badge
+                    cor={
+                      pagamento.status === "pago"
+                        ? "verde"
+                        : pagamento.status === "aguardando_conciliacao"
+                          ? "azul"
+                          : "laranja"
+                    }
+                  >
+                    {rotuloStatusPagamentoPessoa(pagamento.status)}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {aba === "consumos" && (
+        <Card className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-bold">Consumos no restaurante</h2>
+            <Link href="/rh/consumos" className="btn-secundario text-sm">
+              Lançar consumo
+            </Link>
+          </div>
+          {consumosPessoa.length === 0 ? (
+            <Vazio mensagem="Nenhum consumo lançado para esta pessoa." />
+          ) : (
+            <div className="space-y-2">
+              {consumosPessoa.map((consumo) => (
+                <div
+                  key={consumo.id}
+                  className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-900">{consumo.descricao}</p>
+                    <p className="text-sm text-slate-600">
+                      {dataBR(consumo.data)} · qtd {consumo.quantidade} · líquido{" "}
+                      {moeda(consumo.valor_liquido)}
+                    </p>
+                  </div>
+                  <Badge cor={consumo.status === "pendente" ? "laranja" : "verde"}>
+                    {rotuloStatusConsumo(consumo.status)}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       )}
     </div>

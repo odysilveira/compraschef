@@ -8,6 +8,7 @@ import { mutate, uid, useDB } from "@/lib/data";
 import {
   TIPOS_PAGAMENTO_PESSOA,
   conciliarPagamentoPessoa,
+  gerarFolhaCltMes,
   informarPagamentoPessoa,
   liberarPagamentoPessoa,
   registrarDivergenciaPagamentoPessoa,
@@ -94,6 +95,9 @@ export default function RhPagamentosPage() {
   const db = useDB();
   const podeRh = usePodeAcessarModulo("rh");
   const [filtro, setFiltro] = useState<"abertos" | "aguardando" | "pagos" | "todos">("abertos");
+  const [filtroPessoa, setFiltroPessoa] = useState<string>("todos");
+  const [filtroTipo, setFiltroTipo] = useState<TipoPagamentoPessoa | "todos">("todos");
+  const [filtroCompetencia, setFiltroCompetencia] = useState<string>("");
   const [formNovo, setFormNovo] = useState<FormNovo | null>(null);
   const [erroNovo, setErroNovo] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
@@ -133,13 +137,23 @@ export default function RhPagamentosPage() {
   const lista = useMemo(() => {
     const todos = [...(db.pagamentos_pessoas ?? [])];
     const filtrados = todos.filter((p) => {
-      if (filtro === "todos") return true;
-      if (filtro === "aguardando") return p.status === "aguardando_conciliacao";
-      if (filtro === "pagos") return p.status === "pago";
-      return p.status === "previsto" || p.status === "liberado" || p.status === "aguardando_conciliacao";
+      if (filtro === "aguardando" && p.status !== "aguardando_conciliacao") return false;
+      if (filtro === "pagos" && p.status !== "pago") return false;
+      if (
+        filtro === "abertos" &&
+        p.status !== "previsto" &&
+        p.status !== "liberado" &&
+        p.status !== "aguardando_conciliacao"
+      ) {
+        return false;
+      }
+      if (filtroPessoa !== "todos" && p.pessoa_id !== filtroPessoa) return false;
+      if (filtroTipo !== "todos" && p.tipo !== filtroTipo) return false;
+      if (filtroCompetencia.trim() && (p.competencia ?? "") !== filtroCompetencia.trim()) return false;
+      return true;
     });
     return filtrados.sort((a, b) => a.vencimento.localeCompare(b.vencimento));
-  }, [db.pagamentos_pessoas, filtro]);
+  }, [db.pagamentos_pessoas, filtro, filtroCompetencia, filtroPessoa, filtroTipo]);
 
   const totais = useMemo(() => {
     const itens = db.pagamentos_pessoas ?? [];
@@ -422,6 +436,26 @@ export default function RhPagamentosPage() {
     );
   }
 
+  function gerarFolhaMes() {
+    const competencia = competenciaAtual();
+    const proximo = structuredClone(db);
+    const r = gerarFolhaCltMes(proximo, competencia, { idFactory: () => uid("pagp") });
+    if (!r.sucesso) {
+      setMensagem(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setFiltroCompetencia(competencia);
+    setFiltroTipo("salario");
+    setFiltro("abertos");
+    const avisos = r.avisos.length ? ` ${r.avisos.join(" ")}` : "";
+    setMensagem(
+      `Folha ${competencia}: ${r.criados} salário(s) criado(s)${
+        r.pulados ? ` · ${r.pulados} já existia(m)` : ""
+      }.${avisos}`
+    );
+  }
+
   const pagamentoInformar = informarId ? db.pagamentos_pessoas.find((p) => p.id === informarId) : null;
   const pagamentoConciliar = conciliarId ? db.pagamentos_pessoas.find((p) => p.id === conciliarId) : null;
   const pagamentoDivergencia = divergenciaId ? db.pagamentos_pessoas.find((p) => p.id === divergenciaId) : null;
@@ -433,6 +467,9 @@ export default function RhPagamentosPage() {
         subtitulo="Informar pagamento ≠ pago. A baixa definitiva depende da conciliação bancária."
         acao={
           <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-secundario" onClick={gerarFolhaMes}>
+              Gerar folha do mês
+            </button>
             <button type="button" className="btn-secundario" onClick={abrirImportacao}>
               <FileUp size={16} /> Importar folha PDF
             </button>
@@ -483,6 +520,44 @@ export default function RhPagamentosPage() {
         <Link href="/rh/consumos" className="btn-secundario">
           Consumos
         </Link>
+      </div>
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <label className="block">
+          <span className="rotulo mb-1 block">Pessoa</span>
+          <select className="input w-full" value={filtroPessoa} onChange={(e) => setFiltroPessoa(e.target.value)}>
+            <option value="todos">Todas</option>
+            {pessoasAtivas.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="rotulo mb-1 block">Tipo</span>
+          <select
+            className="input w-full"
+            value={filtroTipo}
+            onChange={(e) => setFiltroTipo(e.target.value as TipoPagamentoPessoa | "todos")}
+          >
+            <option value="todos">Todos</option>
+            {TIPOS_PAGAMENTO_PESSOA.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.rotulo}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="rotulo mb-1 block">Competência (YYYY-MM)</span>
+          <input
+            className="input w-full"
+            value={filtroCompetencia}
+            onChange={(e) => setFiltroCompetencia(e.target.value)}
+            placeholder={competenciaAtual()}
+          />
+        </label>
       </div>
 
       {lista.length === 0 ? (

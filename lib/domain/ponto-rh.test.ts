@@ -138,7 +138,7 @@ describe("ponto-rh", () => {
     expect(r.criadas[0]!.tipo_falta).toBe("saida");
   });
 
-  it("monta espelho por competência com entrada e saída", () => {
+  it("monta espelho cruzando escala × batidas", () => {
     const db = dbBase();
     importarBatidasPonto(
       db,
@@ -151,8 +151,23 @@ describe("ponto-rh", () => {
     );
     const julho = montarEspelhoPonto(db, { competencia: "2026-07" });
     expect(julho).toHaveLength(1);
+    expect(julho[0]!.previsto_entrada).toBe("11:00");
+    expect(julho[0]!.previsto_saida).toBe("23:00");
     expect(julho[0]!.entrada).toBe("11:05");
     expect(julho[0]!.saida).toBe("23:01");
-    expect(montarEspelhoPonto(db, { competencia: "2026-08" })).toHaveLength(1);
+    expect(julho[0]!.status).toBe("atraso");
+    expect(julho[0]!.atraso_entrada_min).toBe(5);
+
+    const agosto = montarEspelhoPonto(db, { competencia: "2026-08" });
+    expect(agosto).toHaveLength(1);
+    expect(agosto[0]!.status).toBe("sem_escala");
+  });
+
+  it("lista plantão sem digital no espelho", () => {
+    const db = dbBase();
+    const dias = montarEspelhoPonto(db, { competencia: "2026-07" });
+    expect(dias).toHaveLength(1);
+    expect(dias[0]!.status).toBe("sem_batida");
+    expect(dias[0]!.previsto_entrada).toBe("11:00");
   });
 });

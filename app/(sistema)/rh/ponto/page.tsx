@@ -22,12 +22,14 @@ import {
   recusarPendenciaPonto,
   registrarPropostaPonto,
   rotuloOrigemBatidaPonto,
+  rotuloStatusDiaEspelho,
   rotuloStatusPendenciaPonto,
   rotuloTipoFaltaPonto,
 } from "@/lib/domain/ponto-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
+import type { StatusDiaEspelho } from "@/lib/domain/ponto-rh";
 
 function BadgeStatus({ status }: { status: StatusPendenciaPonto }) {
   const cor =
@@ -39,6 +41,16 @@ function BadgeStatus({ status }: { status: StatusPendenciaPonto }) {
           ? "cinza"
           : "azul";
   return <Badge cor={cor}>{rotuloStatusPendenciaPonto(status)}</Badge>;
+}
+
+function BadgeEspelho({ status }: { status: StatusDiaEspelho }) {
+  const cor =
+    status === "ok"
+      ? "verde"
+      : status === "atraso" || status === "incompleto" || status === "sem_batida"
+        ? "laranja"
+        : "cinza";
+  return <Badge cor={cor}>{rotuloStatusDiaEspelho(status)}</Badge>;
 }
 
 export default function RhPontoPage() {
@@ -574,8 +586,8 @@ export default function RhPontoPage() {
         <div className="space-y-4">
           <Card className="space-y-3 p-4">
             <p className="text-sm text-slate-600">
-              Batidas oficiais do mês (relógio, aprovação de pendência ou manual). Use após sincronizar
-              o Control iD ou importar o AFD.
+              Cruza a escala (previsto) com as batidas oficiais (relógio / aprovação / manual). Dias
+              com plantão e sem digital também aparecem.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Campo rotulo="Competência">
@@ -604,7 +616,7 @@ export default function RhPontoPage() {
           </Card>
 
           {espelho.length === 0 ? (
-            <Vazio mensagem="Nenhuma batida neste mês. Sincronize o REP, importe o AFD ou aprove pendências." />
+            <Vazio mensagem="Nenhum plantão nem batida neste mês. Monte a escala ou sincronize o REP." />
           ) : (
             <div className="overflow-x-auto rounded-card border border-slate-200 bg-white">
               <table className="min-w-full text-left text-sm">
@@ -612,27 +624,52 @@ export default function RhPontoPage() {
                   <tr>
                     <th className="px-3 py-2 font-semibold">Data</th>
                     <th className="px-3 py-2 font-semibold">Pessoa</th>
-                    <th className="px-3 py-2 font-semibold">Entrada</th>
-                    <th className="px-3 py-2 font-semibold">Saída</th>
-                    <th className="px-3 py-2 font-semibold">Intervalo</th>
+                    <th className="px-3 py-2 font-semibold">Previsto</th>
+                    <th className="px-3 py-2 font-semibold">Realizado</th>
+                    <th className="px-3 py-2 font-semibold">Status</th>
                     <th className="px-3 py-2 font-semibold">Origem</th>
                   </tr>
                 </thead>
                 <tbody>
                   {espelho.map((dia) => {
-                    const origens = Array.from(new Set(dia.batidas.map((b) => rotuloOrigemBatidaPonto(b.origem))));
+                    const origens = Array.from(
+                      new Set(dia.batidas.map((b) => rotuloOrigemBatidaPonto(b.origem)))
+                    );
+                    const detalheAtraso = [
+                      dia.atraso_entrada_min != null && dia.atraso_entrada_min > 0
+                        ? `+${dia.atraso_entrada_min} min entrada`
+                        : null,
+                      dia.saida_antecipada_min != null && dia.saida_antecipada_min > 0
+                        ? `−${dia.saida_antecipada_min} min saída`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
                     return (
                       <tr key={`${dia.pessoa_id}-${dia.data}`} className="border-b border-slate-100">
                         <td className="px-3 py-2 whitespace-nowrap">{dataBR(dia.data)}</td>
                         <td className="px-3 py-2 font-medium text-slate-900">{nomePessoa(dia.pessoa_id)}</td>
-                        <td className="px-3 py-2 tabular-nums">{dia.entrada ?? "—"}</td>
-                        <td className="px-3 py-2 tabular-nums">{dia.saida ?? "—"}</td>
                         <td className="px-3 py-2 tabular-nums text-slate-600">
-                          {dia.intervalo_inicio || dia.intervalo_fim
-                            ? `${dia.intervalo_inicio ?? "—"}–${dia.intervalo_fim ?? "—"}`
+                          {dia.previsto_entrada && dia.previsto_saida
+                            ? `${dia.previsto_entrada}–${dia.previsto_saida}`
                             : "—"}
                         </td>
-                        <td className="px-3 py-2 text-slate-600">{origens.join(", ")}</td>
+                        <td className="px-3 py-2 tabular-nums">
+                          {dia.entrada || dia.saida
+                            ? `${dia.entrada ?? "—"}–${dia.saida ?? "—"}`
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-col gap-0.5">
+                            <BadgeEspelho status={dia.status} />
+                            {detalheAtraso && (
+                              <span className="text-xs text-amber-800">{detalheAtraso}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">
+                          {origens.length ? origens.join(", ") : "—"}
+                        </td>
                       </tr>
                     );
                   })}

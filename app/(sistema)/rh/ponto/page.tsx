@@ -24,6 +24,7 @@ import {
   registrarPropostaPonto,
   resumirEspelhoPonto,
   exportarEspelhoCsv,
+  formatarDuracaoHoras,
   rotuloOrigemBatidaPonto,
   rotuloStatusDiaEspelho,
   rotuloStatusPendenciaPonto,
@@ -750,6 +751,22 @@ export default function RhPontoPage() {
                 ))}
               </div>
 
+              <p className="text-sm text-slate-600">
+                Horas no filtro: previsto{" "}
+                <span className="font-semibold tabular-nums text-slate-900">
+                  {formatarDuracaoHoras(
+                    espelhoFiltrado.reduce((acc, d) => acc + (d.previsto_minutos ?? 0), 0)
+                  )}
+                </span>
+                {" · "}
+                realizado{" "}
+                <span className="font-semibold tabular-nums text-slate-900">
+                  {formatarDuracaoHoras(
+                    espelhoFiltrado.reduce((acc, d) => acc + (d.realizado_minutos ?? 0), 0)
+                  )}
+                </span>
+              </p>
+
               {espelhoFiltrado.length === 0 ? (
                 <Vazio mensagem="Nenhum dia neste filtro." />
               ) : (
@@ -761,6 +778,7 @@ export default function RhPontoPage() {
                         <th className="px-3 py-2 font-semibold">Pessoa</th>
                         <th className="px-3 py-2 font-semibold">Previsto</th>
                         <th className="px-3 py-2 font-semibold">Realizado</th>
+                        <th className="px-3 py-2 font-semibold">Horas</th>
                         <th className="px-3 py-2 font-semibold">Status</th>
                         <th className="px-3 py-2 font-semibold">Origem</th>
                         <th className="px-3 py-2 font-semibold">Ação</th>
@@ -796,6 +814,15 @@ export default function RhPontoPage() {
                               {dia.entrada || dia.saida
                                 ? `${dia.entrada ?? "—"}–${dia.saida ?? "—"}`
                                 : "—"}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-slate-700">
+                              <span className="text-slate-500">
+                                {formatarDuracaoHoras(dia.previsto_minutos)}
+                              </span>
+                              <span className="mx-1 text-slate-300">/</span>
+                              <span className="font-medium">
+                                {formatarDuracaoHoras(dia.realizado_minutos)}
+                              </span>
                             </td>
                             <td className="px-3 py-2">
                               <div className="flex flex-col gap-0.5">

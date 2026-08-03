@@ -510,6 +510,10 @@ export interface DiaEspelhoPonto {
   atraso_entrada_min?: number;
   /** Minutos de saída antecipada (só se positivo). */
   saida_antecipada_min?: number;
+  /** Duração prevista (escala), em minutos. */
+  previsto_minutos?: number;
+  /** Duração realizada (entrada→saída), em minutos. */
+  realizado_minutos?: number;
 }
 
 export type StatusDiaEspelho =
@@ -544,6 +548,38 @@ export function minutosDeHora(hora: string): number | null {
   const min = Number(m[2]);
   if (!Number.isFinite(h) || !Number.isFinite(min) || h > 23 || min > 59) return null;
   return h * 60 + min;
+}
+
+/**
+ * Duração em minutos entre duas HH:MM.
+ * Se a saída for menor que a entrada, assume plantão que vira a noite (+24h).
+ */
+export function duracaoMinutosEntreHoras(inicio?: string, fim?: string): number | undefined {
+  if (!inicio || !fim) return undefined;
+  const a = minutosDeHora(inicio);
+  const b = minutosDeHora(fim);
+  if (a == null || b == null) return undefined;
+  let diff = b - a;
+  if (diff < 0) diff += 24 * 60;
+  return diff;
+}
+
+/** Ex.: 750 → "12:30"; 0 → "0:00". */
+export function formatarDuracaoHoras(minutos: number | undefined | null): string {
+  if (minutos == null || !Number.isFinite(minutos) || minutos < 0) return "—";
+  const m = Math.round(minutos);
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${h}:${String(min).padStart(2, "0")}`;
+}
+
+function enriquecerDuracoes(
+  dia: Omit<DiaEspelhoPonto, "status" | "atraso_entrada_min" | "saida_antecipada_min" | "previsto_minutos" | "realizado_minutos">
+): Pick<DiaEspelhoPonto, "previsto_minutos" | "realizado_minutos"> {
+  return {
+    previsto_minutos: duracaoMinutosEntreHoras(dia.previsto_entrada, dia.previsto_saida),
+    realizado_minutos: duracaoMinutosEntreHoras(dia.entrada, dia.saida),
+  };
 }
 
 function classificarDiaEspelho(
@@ -644,7 +680,8 @@ export function montarEspelhoPonto(
   return Array.from(mapa.values())
     .map((dia) => {
       const classif = classificarDiaEspelho(dia, tolerancia);
-      return { ...dia, ...classif };
+      const duracoes = enriquecerDuracoes(dia);
+      return { ...dia, ...classif, ...duracoes };
     })
     .sort((a, b) => a.data.localeCompare(b.data) || a.pessoa_id.localeCompare(b.pessoa_id));
 }
@@ -656,6 +693,8 @@ export interface ResumoEspelhoPonto {
   incompleto: number;
   sem_batida: number;
   sem_escala: number;
+  previsto_minutos: number;
+  realizado_minutos: number;
 }
 
 export function resumirEspelhoPonto(dias: DiaEspelhoPonto[]): ResumoEspelhoPonto {
@@ -666,9 +705,13 @@ export function resumirEspelhoPonto(dias: DiaEspelhoPonto[]): ResumoEspelhoPonto
     incompleto: 0,
     sem_batida: 0,
     sem_escala: 0,
+    previsto_minutos: 0,
+    realizado_minutos: 0,
   };
   for (const d of dias) {
     r[d.status] += 1;
+    if (d.previsto_minutos != null) r.previsto_minutos += d.previsto_minutos;
+    if (d.realizado_minutos != null) r.realizado_minutos += d.realizado_minutos;
   }
   return r;
 }
@@ -691,8 +734,10 @@ export function exportarEspelhoCsv(
     "Pessoa",
     "Previsto entrada",
     "Previsto saída",
+    "Horas previstas",
     "Realizado entrada",
     "Realizado saída",
+    "Horas realizadas",
     "Status",
     "Atraso entrada (min)",
     "Saída antecipada (min)",
@@ -707,8 +752,10 @@ export function exportarEspelhoCsv(
       nomePorId(d.pessoa_id),
       d.previsto_entrada ?? "",
       d.previsto_saida ?? "",
+      formatarDuracaoHoras(d.previsto_minutos) === "—" ? "" : formatarDuracaoHoras(d.previsto_minutos),
       d.entrada ?? "",
       d.saida ?? "",
+      formatarDuracaoHoras(d.realizado_minutos) === "—" ? "" : formatarDuracaoHoras(d.realizado_minutos),
       rotuloStatusDiaEspelho(d.status),
       d.atraso_entrada_min != null ? String(d.atraso_entrada_min) : "",
       d.saida_antecipada_min != null ? String(d.saida_antecipada_min) : "",

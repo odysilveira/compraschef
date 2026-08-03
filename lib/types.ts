@@ -665,6 +665,69 @@ export interface ContaBancariaRestaurante {
   atualizado_em: string;
 }
 
+/** Configuração RH (ponto, convocação, etc.). */
+export interface ConfigRh {
+  /** Horas após o fim do plantão para avisar falta de batida (padrão: 24). */
+  aviso_ponto_horas: number;
+  atualizado_em: string;
+}
+
+export type TipoBatidaPonto = "entrada" | "saida" | "intervalo_inicio" | "intervalo_fim";
+
+export type OrigemBatidaPonto = "relogio" | "manual" | "aprovacao";
+
+/** Batida de ponto (relógio, manual ou após aprovação da pendência). */
+export interface BatidaPonto {
+  id: string;
+  pessoa_id: string;
+  /** YYYY-MM-DD */
+  data: string;
+  /** HH:MM */
+  hora: string;
+  tipo: TipoBatidaPonto;
+  origem: OrigemBatidaPonto;
+  /** Vínculo com pendência que gerou a batida (se origem aprovacao). */
+  pendencia_id?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type TipoFaltaPonto = "entrada" | "saida" | "ambos";
+
+export type StatusPendenciaPonto =
+  | "aguardando_aviso"
+  | "aguardando_funcionario"
+  | "proposta"
+  | "aprovada"
+  | "recusada"
+  | "cancelada";
+
+/**
+ * Falta de digital detectada após o prazo (ex.: 24h).
+ * Funcionário propõe horário; gestor confirma antes de gravar no espelho.
+ */
+export interface PendenciaPonto {
+  id: string;
+  pessoa_id: string;
+  escala_slot_id?: string;
+  /** Dia do plantão YYYY-MM-DD */
+  data: string;
+  tipo_falta: TipoFaltaPonto;
+  horario_previsto_entrada?: string;
+  horario_previsto_saida?: string;
+  status: StatusPendenciaPonto;
+  texto_aviso?: string;
+  aviso_em?: string;
+  proposta_entrada?: string;
+  proposta_saida?: string;
+  proposta_motivo?: string;
+  proposta_em?: string;
+  revisado_em?: string;
+  revisado_por?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
 // Banco completo em memória (camada mock)
 export interface DB {
   perfis: Perfil[];
@@ -675,6 +738,12 @@ export interface DB {
   convocacoes: ConvocacaoIntermitente[];
   /** Contas de onde o restaurante paga (origem). */
   contas_bancarias: ContaBancariaRestaurante[];
+  /** Parâmetros RH (aviso de ponto, etc.). */
+  config_rh?: ConfigRh;
+  /** Batidas importadas do relógio ou aprovadas. */
+  batidas_ponto?: BatidaPonto[];
+  /** Faltas de ponto aguardando aviso / proposta / confirmação. */
+  pendencias_ponto?: PendenciaPonto[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];

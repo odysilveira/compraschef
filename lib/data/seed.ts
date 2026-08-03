@@ -335,6 +335,31 @@ export const seedDB: DB = {
       atualizado_em: diasAtras(1),
     },
     {
+      id: "esc-ponto-ontem",
+      pessoa_id: "pes-lider",
+      data: soData(diasAtras(2)),
+      hora_inicio: "11:00",
+      hora_fim: "23:00",
+      intervalo_min: 60,
+      funcao: "Cozinha",
+      local: "Vera Bela Restaurante",
+      observacao: "CLT · demo falta de digital",
+      criado_em: diasAtras(3),
+      atualizado_em: diasAtras(2),
+    },
+    {
+      id: "esc-ponto-ok",
+      pessoa_id: "pes-caixa",
+      data: soData(diasAtras(2)),
+      hora_inicio: "09:00",
+      hora_fim: "17:00",
+      intervalo_min: 60,
+      funcao: "Caixa",
+      local: "Vera Bela Restaurante",
+      criado_em: diasAtras(3),
+      atualizado_em: diasAtras(2),
+    },
+    {
       id: "esc-2",
       pessoa_id: "pes-inter-1",
       data: soData(diasAFrente(5)),
@@ -390,6 +415,37 @@ export const seedDB: DB = {
       atualizado_em: diasAtras(30),
     },
   ],
+
+  config_rh: {
+    aviso_ponto_horas: 24,
+    atualizado_em: diasAtras(1),
+  },
+
+  /** Ana bateu normal; João (líder) sem digital no dia — pendência após detectar. */
+  batidas_ponto: [
+    {
+      id: "bat-ana-e",
+      pessoa_id: "pes-caixa",
+      data: soData(diasAtras(2)),
+      hora: "09:02",
+      tipo: "entrada",
+      origem: "relogio",
+      criado_em: diasAtras(2),
+      atualizado_em: diasAtras(2),
+    },
+    {
+      id: "bat-ana-s",
+      pessoa_id: "pes-caixa",
+      data: soData(diasAtras(2)),
+      hora: "17:05",
+      tipo: "saida",
+      origem: "relogio",
+      criado_em: diasAtras(2),
+      atualizado_em: diasAtras(2),
+    },
+  ],
+
+  pendencias_ponto: [],
 
   unidades: [
     { id: "un-kg", codigo_externo: "KG", nome: "quilograma", sigla: "kg" },

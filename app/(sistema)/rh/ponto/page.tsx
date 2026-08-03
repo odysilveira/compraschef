@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Copy, FileUp, Fingerprint, RefreshCw, Wifi } from "lucide-react";
+import { Check, Copy, Download, FileUp, Fingerprint, RefreshCw, Wifi } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import { importarAfdNoDb } from "@/lib/domain/afd-ponto";
@@ -23,6 +23,7 @@ import {
   recusarPendenciaPonto,
   registrarPropostaPonto,
   resumirEspelhoPonto,
+  exportarEspelhoCsv,
   rotuloOrigemBatidaPonto,
   rotuloStatusDiaEspelho,
   rotuloStatusPendenciaPonto,
@@ -323,6 +324,24 @@ export default function RhPontoPage() {
     } finally {
       setSincronizando(false);
     }
+  }
+
+  function baixarEspelhoCsv() {
+    const linhas = filtroEspelho === "todos" ? espelho : espelhoFiltrado;
+    if (linhas.length === 0) {
+      setErro("Nada para exportar neste filtro.");
+      return;
+    }
+    const csv = exportarEspelhoCsv(linhas, nomePessoa);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `espelho-ponto-${competenciaEspelho}${filtroEspelho !== "todos" ? `-${filtroEspelho}` : ""}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagem(`CSV baixado (${linhas.length} linha(s)).`);
+    setErro(null);
   }
 
   function textoAviso(pendencia: PendenciaPonto) {
@@ -693,7 +712,7 @@ export default function RhPontoPage() {
             <Vazio mensagem="Nenhum plantão nem batida neste mês. Monte a escala ou sincronize o REP." />
           ) : (
             <>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {(
                   [
                     ["todos", `Todos (${resumoEspelho.total})`],
@@ -713,6 +732,14 @@ export default function RhPontoPage() {
                     {rotulo}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className="btn-secundario ml-auto"
+                  disabled={espelhoFiltrado.length === 0}
+                  onClick={baixarEspelhoCsv}
+                >
+                  <Download size={16} /> Exportar CSV
+                </button>
               </div>
 
               {espelhoFiltrado.length === 0 ? (

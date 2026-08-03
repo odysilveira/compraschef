@@ -51,6 +51,7 @@ export const CATALOGO_PUBLICACOES_RH: PublicacaoNormaCatalogo[] = [
 export function configRhPadrao(agora = new Date().toISOString()): ConfigRh {
   return {
     antecedencia_minima_dias: ANTECEDENCIA_MINIMA_PADRAO,
+    aviso_ponto_horas: 24,
     atualizado_em: agora,
   };
 }
@@ -64,6 +65,13 @@ export function garantirConfigRh(db: DB, agora = new Date().toISOString()): Conf
     db.config_rh.antecedencia_minima_dias < 0
   ) {
     db.config_rh.antecedencia_minima_dias = ANTECEDENCIA_MINIMA_PADRAO;
+    db.config_rh.atualizado_em = agora;
+  }
+  if (
+    !Number.isFinite(db.config_rh.aviso_ponto_horas) ||
+    db.config_rh.aviso_ponto_horas < 1
+  ) {
+    db.config_rh.aviso_ponto_horas = 24;
     db.config_rh.atualizado_em = agora;
   }
   return db.config_rh;

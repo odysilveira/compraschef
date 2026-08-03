@@ -1,0 +1,412 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { Check, Copy, Fingerprint, RefreshCw } from "lucide-react";
+import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
+import { mutate, uid, useDB } from "@/lib/data";
+import {
+  aprovarPendenciaPonto,
+  avisoPontoHorasDoDb,
+  detectarPendenciasPonto,
+  importarBatidasPonto,
+  linkWhatsAppPonto,
+  marcarAvisoPontoEnviado,
+  montarTextoAvisoPontoWhatsApp,
+  pendenciasPontoAbertas,
+  recusarPendenciaPonto,
+  registrarPropostaPonto,
+  rotuloStatusPendenciaPonto,
+  rotuloTipoFaltaPonto,
+} from "@/lib/domain/ponto-rh";
+import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
+import { dataBR } from "@/lib/format";
+import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
+
+function BadgeStatus({ status }: { status: StatusPendenciaPonto }) {
+  const cor =
+    status === "aprovada"
+      ? "verde"
+      : status === "proposta"
+        ? "laranja"
+        : status === "recusada" || status === "cancelada"
+          ? "cinza"
+          : "azul";
+  return <Badge cor={cor}>{rotuloStatusPendenciaPonto(status)}</Badge>;
+}
+
+export default function RhPontoPage() {
+  const db = useDB();
+  const { papel } = usePapel();
+  const podeRh = usePodeAcessarModulo("rh");
+  const [mensagem, setMensagem] = useState<string | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState<"abertas" | "todas">("abertas");
+  const [detalheId, setDetalheId] = useState<string | null>(null);
+  const [propostaEntrada, setPropostaEntrada] = useState("");
+  const [propostaSaida, setPropostaSaida] = useState("");
+  const [propostaMotivo, setPropostaMotivo] = useState("");
+  const [copiado, setCopiado] = useState(false);
+
+  const horasAviso = avisoPontoHorasDoDb(db);
+  const abertas = useMemo(() => pendenciasPontoAbertas(db), [db]);
+  const lista = useMemo(() => {
+    const todas = [...(db.pendencias_ponto ?? [])].sort((a, b) => b.data.localeCompare(a.data));
+    return filtro === "abertas" ? todas.filter((p) => abertas.some((a) => a.id === p.id)) : todas;
+  }, [abertas, db.pendencias_ponto, filtro]);
+
+  const detalhe = detalheId ? db.pendencias_ponto?.find((p) => p.id === detalheId) : undefined;
+  const detalhePessoa = detalhe ? db.pessoas.find((p) => p.id === detalhe.pessoa_id) : undefined;
+
+  if (!podeRh) {
+    return (
+      <div className="mx-auto max-w-lg">
+        <TituloPagina titulo="Ponto" />
+        <Card className="py-10 text-center">
+          <Fingerprint size={40} className="mx-auto text-slate-400" />
+          <p className="mt-3 font-bold">Área restrita</p>
+        </Card>
+      </div>
+    );
+  }
+
+  function nomePessoa(id: string) {
+    return db.pessoas.find((p) => p.id === id)?.nome ?? "—";
+  }
+
+  function detectar() {
+    const proximo = structuredClone(db);
+    const r = detectarPendenciasPonto(proximo, { idFactory: () => uid("pend-ponto") });
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(null);
+    const partes = [
+      r.criadas.length ? `${r.criadas.length} nova(s)` : null,
+      r.canceladas.length ? `${r.canceladas.length} cancelada(s) (batida chegou)` : null,
+    ].filter(Boolean);
+    setMensagem(
+      partes.length
+        ? `Detecção: ${partes.join(" · ")}.`
+        : "Nenhuma pendência nova. Escala CLT e batidas já estão alinhadas no prazo."
+    );
+    setFiltro("abertas");
+  }
+
+  function simularImportRelogio() {
+    const data = new Date();
+    data.setDate(data.getDate() - 2);
+    data.setHours(12, 0, 0, 0);
+    const dia = data.toISOString().slice(0, 10);
+    const proximo = structuredClone(db);
+    const imp = importarBatidasPonto(
+      proximo,
+      [
+        { pessoa_id: "pes-caixa", data: dia, hora: "09:02", tipo: "entrada" },
+        { pessoa_id: "pes-caixa", data: dia, hora: "17:05", tipo: "saida" },
+      ],
+      { idFactory: () => uid("bat") }
+    );
+    const det = detectarPendenciasPonto(proximo, { idFactory: () => uid("pend-ponto") });
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(null);
+    setMensagem(
+      `Importação demo: ${imp.importadas} batida(s). Detecção: ${det.criadas.length} nova(s), ${det.canceladas.length} cancelada(s).`
+    );
+  }
+
+  function textoAviso(pendencia: PendenciaPonto) {
+    const pessoa = db.pessoas.find((p) => p.id === pendencia.pessoa_id);
+    if (!pessoa) return pendencia.texto_aviso ?? "";
+    return (
+      pendencia.texto_aviso ??
+      montarTextoAvisoPontoWhatsApp({ pessoa, pendencia, horasAviso })
+    );
+  }
+
+  async function copiarAviso(pendencia: PendenciaPonto) {
+    const texto = textoAviso(pendencia);
+    try {
+      await navigator.clipboard.writeText(texto);
+      const proximo = structuredClone(db);
+      marcarAvisoPontoEnviado(proximo, pendencia.id, { texto });
+      mutate((atual) => Object.assign(atual, proximo));
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+      setMensagem("Aviso copiado. Pendência marcada como aguardando funcionário.");
+      setErro(null);
+    } catch {
+      setErro("Não foi possível copiar.");
+    }
+  }
+
+  function abrirWhatsApp(pendencia: PendenciaPonto) {
+    const pessoa = db.pessoas.find((p) => p.id === pendencia.pessoa_id);
+    const texto = textoAviso(pendencia);
+    const url = linkWhatsAppPonto(pessoa?.telefone, texto);
+    if (!url) {
+      setErro("Cadastre o telefone da pessoa para abrir o WhatsApp.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    marcarAvisoPontoEnviado(proximo, pendencia.id, { texto });
+    mutate((atual) => Object.assign(atual, proximo));
+    window.open(url, "_blank", "noopener,noreferrer");
+    setMensagem("WhatsApp aberto. Aguardando resposta do funcionário.");
+    setErro(null);
+  }
+
+  function abrirDetalhe(pendencia: PendenciaPonto) {
+    setDetalheId(pendencia.id);
+    setPropostaEntrada(pendencia.proposta_entrada ?? pendencia.horario_previsto_entrada ?? "");
+    setPropostaSaida(pendencia.proposta_saida ?? pendencia.horario_previsto_saida ?? "");
+    setPropostaMotivo(pendencia.proposta_motivo ?? "");
+    setErro(null);
+  }
+
+  function salvarProposta() {
+    if (!detalheId) return;
+    const proximo = structuredClone(db);
+    const r = registrarPropostaPonto(
+      proximo,
+      detalheId,
+      { entrada: propostaEntrada, saida: propostaSaida, motivo: propostaMotivo },
+    );
+    if (!r.sucesso) {
+      setErro(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setMensagem("Proposta registrada — confirme ou recuse.");
+    setErro(null);
+  }
+
+  function aprovar() {
+    if (!detalheId) return;
+    const proximo = structuredClone(db);
+    const r = aprovarPendenciaPonto(proximo, detalheId, {
+      revisado_por: papel,
+      idFactory: () => uid("bat"),
+    });
+    if (!r.sucesso) {
+      setErro(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setDetalheId(null);
+    setMensagem("Aprovado — batidas gravadas no espelho de ponto.");
+    setErro(null);
+  }
+
+  function recusar() {
+    if (!detalheId) return;
+    const proximo = structuredClone(db);
+    const r = recusarPendenciaPonto(proximo, detalheId, { revisado_por: papel });
+    if (!r.sucesso) {
+      setErro(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setDetalheId(null);
+    setMensagem("Pendência recusada.");
+    setErro(null);
+  }
+
+  return (
+    <div>
+      <TituloPagina
+        titulo="Ponto"
+        subtitulo={`Falta de digital: após ${horasAviso}h do fim do plantão, avisamos o funcionário; ele propõe o horário e o gestor confirma.`}
+        acao={
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-secundario" onClick={simularImportRelogio}>
+              Simular importação do relógio
+            </button>
+            <button type="button" className="btn-primario" onClick={detectar}>
+              <RefreshCw size={16} /> Detectar faltas
+            </button>
+          </div>
+        }
+      />
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Link href="/rh" className="btn-secundario">
+          Pessoas
+        </Link>
+        <Link href="/rh/escala" className="btn-secundario">
+          Escala
+        </Link>
+      </div>
+
+      <Card className="mb-4 space-y-2 p-4">
+        <p className="text-sm font-semibold text-slate-900">Como funciona</p>
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
+          <li>Batidas vêm do relógio (hoje: importação demo; depois API/arquivo automático).</li>
+          <li>Cruzamos com a escala CLT. Sem digital após {horasAviso}h → pendência.</li>
+          <li>Avisamos no WhatsApp; o funcionário informa o horário.</li>
+          <li>Você confirma — só então entra no espelho oficial.</li>
+        </ol>
+        {abertas.length > 0 && (
+          <p className="text-sm font-medium text-amber-800">{abertas.length} pendência(s) aberta(s).</p>
+        )}
+      </Card>
+
+      {mensagem && (
+        <p className="mb-3 rounded-card border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          {mensagem}
+        </p>
+      )}
+      {erro && !detalheId && (
+        <p className="mb-3 rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">
+          {erro}
+        </p>
+      )}
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={filtro === "abertas" ? "btn-primario" : "btn-secundario"}
+          onClick={() => setFiltro("abertas")}
+        >
+          Abertas ({abertas.length})
+        </button>
+        <button
+          type="button"
+          className={filtro === "todas" ? "btn-primario" : "btn-secundario"}
+          onClick={() => setFiltro("todas")}
+        >
+          Todas
+        </button>
+      </div>
+
+      {lista.length === 0 ? (
+        <Vazio
+          mensagem={
+            filtro === "abertas"
+              ? "Nenhuma pendência aberta. Clique em Detectar faltas (há plantão do João sem digital na seed)."
+              : "Nenhuma pendência registrada."
+          }
+        />
+      ) : (
+        <div className="grid gap-3">
+          {lista.map((p) => (
+            <Card key={p.id} className="space-y-2 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="text-lg font-bold text-slate-900">{nomePessoa(p.pessoa_id)}</p>
+                  <p className="text-sm text-slate-600">
+                    {dataBR(p.data)}
+                    {p.horario_previsto_entrada && p.horario_previsto_saida
+                      ? ` · previsto ${p.horario_previsto_entrada}–${p.horario_previsto_saida}`
+                      : ""}
+                  </p>
+                  <p className="text-sm text-slate-500">{rotuloTipoFaltaPonto(p.tipo_falta)}</p>
+                </div>
+                <BadgeStatus status={p.status} />
+              </div>
+              {p.status === "proposta" && (
+                <p className="text-sm text-amber-900">
+                  Proposta: {p.proposta_entrada ?? "—"} → {p.proposta_saida ?? "—"}
+                  {p.proposta_motivo ? ` · ${p.proposta_motivo}` : ""}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-secundario" onClick={() => abrirDetalhe(p)}>
+                  Abrir
+                </button>
+                {(p.status === "aguardando_aviso" || p.status === "aguardando_funcionario") && (
+                  <>
+                    <button type="button" className="btn-primario" onClick={() => abrirWhatsApp(p)}>
+                      Avisar no WhatsApp
+                    </button>
+                    <button type="button" className="btn-secundario" onClick={() => void copiarAviso(p)}>
+                      {copiado ? <Check size={16} /> : <Copy size={16} />} Copiar aviso
+                    </button>
+                  </>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Modal
+        aberto={Boolean(detalhe)}
+        titulo="Pendência de ponto"
+        onFechar={() => setDetalheId(null)}
+        fecharAoClicarFundo={false}
+      >
+        {detalhe && detalhePessoa && (
+          <div className="space-y-3">
+            <div>
+              <p className="text-lg font-bold">{detalhePessoa.nome}</p>
+              <p className="text-sm text-slate-600">
+                {dataBR(detalhe.data)} · {rotuloTipoFaltaPonto(detalhe.tipo_falta)}
+              </p>
+              <BadgeStatus status={detalhe.status} />
+            </div>
+
+            {(detalhe.status === "aguardando_aviso" ||
+              detalhe.status === "aguardando_funcionario" ||
+              detalhe.status === "proposta") && (
+              <div className="space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-3">
+                <p className="text-sm font-semibold">Horário informado pelo funcionário</p>
+                <p className="text-xs text-slate-500">
+                  Na demo, o RH registra aqui a resposta do WhatsApp. Depois pode vir do app do funcionário.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(detalhe.tipo_falta === "entrada" || detalhe.tipo_falta === "ambos") && (
+                    <Campo rotulo="Entrada">
+                      <input
+                        type="time"
+                        className="campo"
+                        value={propostaEntrada}
+                        onChange={(e) => setPropostaEntrada(e.target.value)}
+                      />
+                    </Campo>
+                  )}
+                  {(detalhe.tipo_falta === "saida" || detalhe.tipo_falta === "ambos") && (
+                    <Campo rotulo="Saída">
+                      <input
+                        type="time"
+                        className="campo"
+                        value={propostaSaida}
+                        onChange={(e) => setPropostaSaida(e.target.value)}
+                      />
+                    </Campo>
+                  )}
+                </div>
+                <Campo rotulo="Motivo">
+                  <input
+                    className="campo"
+                    value={propostaMotivo}
+                    onChange={(e) => setPropostaMotivo(e.target.value)}
+                    placeholder="Esqueci de bater / relógio offline…"
+                  />
+                </Campo>
+                <button type="button" className="btn-secundario" onClick={salvarProposta}>
+                  Registrar proposta
+                </button>
+              </div>
+            )}
+
+            {detalhe.status === "proposta" && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-primario" onClick={aprovar}>
+                  Confirmar e gravar no espelho
+                </button>
+                <button type="button" className="btn-secundario text-destaque" onClick={recusar}>
+                  Recusar
+                </button>
+              </div>
+            )}
+
+            {erro && (
+              <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">
+                {erro}
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}

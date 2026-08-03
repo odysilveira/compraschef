@@ -5,6 +5,7 @@ import {
   detectarPendenciasPonto,
   importarBatidasPonto,
   marcarAvisoPontoEnviado,
+  montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
   registrarPropostaPonto,
 } from "./ponto-rh";
@@ -135,5 +136,23 @@ describe("ponto-rh", () => {
     );
     const r = detectarPendenciasPonto(db, { agora: "2026-08-03T15:00:00.000Z", idFactory: () => "p-s" });
     expect(r.criadas[0]!.tipo_falta).toBe("saida");
+  });
+
+  it("monta espelho por competência com entrada e saída", () => {
+    const db = dbBase();
+    importarBatidasPonto(
+      db,
+      [
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "11:05", tipo: "entrada" },
+        { pessoa_id: "pes-lider", data: "2026-07-30", hora: "23:01", tipo: "saida" },
+        { pessoa_id: "pes-lider", data: "2026-08-01", hora: "11:00", tipo: "entrada" },
+      ],
+      { idFactory: () => `b-${db.batidas_ponto!.length}` }
+    );
+    const julho = montarEspelhoPonto(db, { competencia: "2026-07" });
+    expect(julho).toHaveLength(1);
+    expect(julho[0]!.entrada).toBe("11:05");
+    expect(julho[0]!.saida).toBe("23:01");
+    expect(montarEspelhoPonto(db, { competencia: "2026-08" })).toHaveLength(1);
   });
 });

@@ -2,6 +2,7 @@ import type {
   BatidaPonto,
   ConfigRh,
   DB,
+  OrigemBatidaPonto,
   PendenciaPonto,
   PessoaRH,
   StatusPendenciaPonto,
@@ -441,4 +442,83 @@ export function importarBatidasPonto(
 
 export function pendenciasPontoAbertas(db: Pick<DB, "pendencias_ponto">): PendenciaPonto[] {
   return (db.pendencias_ponto ?? []).filter((p) => STATUS_ABERTOS.includes(p.status));
+}
+
+export function rotuloTipoBatidaPonto(tipo: TipoBatidaPonto): string {
+  switch (tipo) {
+    case "entrada":
+      return "Entrada";
+    case "saida":
+      return "Saída";
+    case "intervalo_inicio":
+      return "Início intervalo";
+    case "intervalo_fim":
+      return "Fim intervalo";
+    default:
+      return tipo;
+  }
+}
+
+export function rotuloOrigemBatidaPonto(origem: OrigemBatidaPonto): string {
+  switch (origem) {
+    case "relogio":
+      return "Relógio";
+    case "aprovacao":
+      return "Aprovado (pendência)";
+    case "manual":
+      return "Manual";
+    default:
+      return origem;
+  }
+}
+
+/** YYYY-MM a partir de Date (fuso local). */
+export function competenciaDeData(data = new Date()): string {
+  const y = data.getFullYear();
+  const m = String(data.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+export interface DiaEspelhoPonto {
+  pessoa_id: string;
+  data: string;
+  entrada?: string;
+  saida?: string;
+  intervalo_inicio?: string;
+  intervalo_fim?: string;
+  batidas: BatidaPonto[];
+}
+
+/**
+ * Espelho oficial: batidas agrupadas por pessoa+dia no mês (competência YYYY-MM).
+ * Entrada/saída = primeira/última do tipo no dia.
+ */
+export function montarEspelhoPonto(
+  db: Pick<DB, "batidas_ponto">,
+  filtros: { competencia: string; pessoa_id?: string }
+): DiaEspelhoPonto[] {
+  const prefixo = filtros.competencia.slice(0, 7);
+  const lista = (db.batidas_ponto ?? [])
+    .filter((b) => b.data.startsWith(prefixo))
+    .filter((b) => !filtros.pessoa_id || b.pessoa_id === filtros.pessoa_id)
+    .slice()
+    .sort((a, b) => a.data.localeCompare(b.data) || a.hora.localeCompare(b.hora) || a.tipo.localeCompare(b.tipo));
+
+  const mapa = new Map<string, DiaEspelhoPonto>();
+  for (const b of lista) {
+    const chave = `${b.pessoa_id}|${b.data}`;
+    let dia = mapa.get(chave);
+    if (!dia) {
+      dia = { pessoa_id: b.pessoa_id, data: b.data, batidas: [] };
+      mapa.set(chave, dia);
+    }
+    dia.batidas.push(b);
+    if (b.tipo === "entrada" && !dia.entrada) dia.entrada = b.hora;
+    if (b.tipo === "saida") dia.saida = b.hora;
+    if (b.tipo === "intervalo_inicio" && !dia.intervalo_inicio) dia.intervalo_inicio = b.hora;
+    if (b.tipo === "intervalo_fim") dia.intervalo_fim = b.hora;
+  }
+  return Array.from(mapa.values()).sort(
+    (a, b) => a.data.localeCompare(b.data) || a.pessoa_id.localeCompare(b.pessoa_id)
+  );
 }

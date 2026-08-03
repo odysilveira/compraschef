@@ -9,6 +9,7 @@ import {
   montarTextoAvisoPontoWhatsApp,
   registrarPropostaPonto,
   resumirEspelhoPonto,
+  exportarEspelhoCsv,
 } from "./ponto-rh";
 
 function pessoaClt(overrides: Partial<PessoaRH> = {}): PessoaRH {
@@ -196,5 +197,15 @@ describe("ponto-rh", () => {
     expect(resumo.total).toBe(1);
     expect(resumo.ok).toBe(1);
     expect(resumo.sem_batida).toBe(0);
+  });
+
+  it("exporta CSV do espelho com cabeçalho e status", () => {
+    const db = dbBase();
+    const dias = montarEspelhoPonto(db, { competencia: "2026-07" });
+    const csv = exportarEspelhoCsv(dias, () => "João");
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Data;Pessoa;");
+    expect(csv).toContain("João");
+    expect(csv).toContain("Sem digital");
   });
 });

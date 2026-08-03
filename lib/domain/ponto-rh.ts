@@ -672,3 +672,50 @@ export function resumirEspelhoPonto(dias: DiaEspelhoPonto[]): ResumoEspelhoPonto
   }
   return r;
 }
+
+function csvEscape(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+/**
+ * CSV do espelho (separador `;`, UTF-8 com BOM) para Excel/pt-BR.
+ * `nomePorId` resolve o nome da pessoa.
+ */
+export function exportarEspelhoCsv(
+  dias: DiaEspelhoPonto[],
+  nomePorId: (pessoaId: string) => string
+): string {
+  const cabecalho = [
+    "Data",
+    "Pessoa",
+    "Previsto entrada",
+    "Previsto saída",
+    "Realizado entrada",
+    "Realizado saída",
+    "Status",
+    "Atraso entrada (min)",
+    "Saída antecipada (min)",
+    "Origem",
+  ];
+  const linhas = dias.map((d) => {
+    const origens = Array.from(new Set(d.batidas.map((b) => rotuloOrigemBatidaPonto(b.origem)))).join(
+      ", "
+    );
+    return [
+      d.data,
+      nomePorId(d.pessoa_id),
+      d.previsto_entrada ?? "",
+      d.previsto_saida ?? "",
+      d.entrada ?? "",
+      d.saida ?? "",
+      rotuloStatusDiaEspelho(d.status),
+      d.atraso_entrada_min != null ? String(d.atraso_entrada_min) : "",
+      d.saida_antecipada_min != null ? String(d.saida_antecipada_min) : "",
+      origens,
+    ]
+      .map((c) => csvEscape(c))
+      .join(";");
+  });
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}

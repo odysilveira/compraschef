@@ -25,6 +25,7 @@ import {
   rotuloStatusDiaEspelho,
   rotuloStatusPendenciaPonto,
   rotuloTipoFaltaPonto,
+  toleranciaAtrasoMinutosDoDb,
 } from "@/lib/domain/ponto-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
@@ -73,6 +74,8 @@ export default function RhPontoPage() {
   const inputAfdRef = useRef<HTMLInputElement>(null);
 
   const horasAviso = avisoPontoHorasDoDb(db);
+  const toleranciaEspelho = toleranciaAtrasoMinutosDoDb(db);
+  const [toleranciaMin, setToleranciaMin] = useState(String(toleranciaEspelho));
   const controlId = db.config_rh?.control_id ?? configControlIdPadrao();
   const [hostCid, setHostCid] = useState(controlId.host);
   const [loginCid, setLoginCid] = useState(controlId.login);
@@ -89,8 +92,9 @@ export default function RhPontoPage() {
       montarEspelhoPonto(db, {
         competencia: competenciaEspelho,
         pessoa_id: pessoaEspelho || undefined,
+        tolerancia_atraso_minutos: toleranciaEspelho,
       }),
-    [competenciaEspelho, db, pessoaEspelho]
+    [competenciaEspelho, db, pessoaEspelho, toleranciaEspelho]
   );
 
   const colaboradoresEspelho = useMemo(
@@ -203,6 +207,22 @@ export default function RhPontoPage() {
     proximo.config_rh!.atualizado_em = new Date().toISOString();
     mutate((atual) => Object.assign(atual, proximo));
     setMensagem("Configuração Control iD salva neste navegador.");
+    setErro(null);
+  }
+
+  function salvarToleranciaEspelho() {
+    const n = Number(toleranciaMin);
+    if (!Number.isFinite(n) || n < 0 || n > 180) {
+      setErro("Tolerância deve ser entre 0 e 180 minutos.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    garantirConfigRh(proximo);
+    proximo.config_rh!.tolerancia_atraso_minutos = Math.floor(n);
+    proximo.config_rh!.atualizado_em = new Date().toISOString();
+    mutate((atual) => Object.assign(atual, proximo));
+    setToleranciaMin(String(Math.floor(n)));
+    setMensagem(`Tolerância do espelho: ${Math.floor(n)} min.`);
     setErro(null);
   }
 
@@ -587,9 +607,10 @@ export default function RhPontoPage() {
           <Card className="space-y-3 p-4">
             <p className="text-sm text-slate-600">
               Cruza a escala (previsto) com as batidas oficiais (relógio / aprovação / manual). Dias
-              com plantão e sem digital também aparecem.
+              com plantão e sem digital também aparecem. Atraso só conta acima da tolerância (
+              {toleranciaEspelho} min).
             </p>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <Campo rotulo="Competência">
                 <input
                   className="input"
@@ -611,6 +632,21 @@ export default function RhPontoPage() {
                     </option>
                   ))}
                 </select>
+              </Campo>
+              <Campo rotulo="Tolerância (min)">
+                <div className="flex gap-2">
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    max={180}
+                    value={toleranciaMin}
+                    onChange={(e) => setToleranciaMin(e.target.value)}
+                  />
+                  <button type="button" className="btn-secundario shrink-0" onClick={salvarToleranciaEspelho}>
+                    Salvar
+                  </button>
+                </div>
               </Campo>
             </div>
           </Card>

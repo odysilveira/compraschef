@@ -156,6 +156,7 @@ export function atualizarComNovidades(db: DB): boolean {
     db.config_rh = {
       antecedencia_minima_dias: 3,
       aviso_ponto_horas: 24,
+      tolerancia_atraso_minutos: 10,
       atualizado_em: new Date().toISOString(),
     };
     mudou = true;
@@ -172,6 +173,14 @@ export function atualizarComNovidades(db: DB): boolean {
       !Number.isFinite(db.config_rh.antecedencia_minima_dias)
     ) {
       db.config_rh.antecedencia_minima_dias = 3;
+      mudou = true;
+    }
+    if (
+      typeof db.config_rh.tolerancia_atraso_minutos !== "number" ||
+      !Number.isFinite(db.config_rh.tolerancia_atraso_minutos) ||
+      db.config_rh.tolerancia_atraso_minutos < 0
+    ) {
+      db.config_rh.tolerancia_atraso_minutos = 10;
       mudou = true;
     }
   }

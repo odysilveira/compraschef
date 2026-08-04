@@ -3,13 +3,14 @@
 import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus, UtensilsCrossed } from "lucide-react";
+import { Download, Plus, UtensilsCrossed } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
   DESCONTO_CONSUMO_PADRAO,
   calcularLinhaConsumo,
   criarConsumoPessoa,
+  exportarConsumosPessoasCsv,
   rotuloStatusConsumo,
 } from "@/lib/domain/consumos-pessoas";
 import {
@@ -166,6 +167,23 @@ function RhConsumosConteudo() {
     setMensagem("Consumo lançado. Será descontado no salário (CLT) ou no pagamento do dia (intermitente).");
   }
 
+  function baixarConsumosCsv() {
+    if (lista.length === 0) {
+      setMensagem("Nenhum consumo neste filtro para exportar.");
+      return;
+    }
+    const csv = exportarConsumosPessoasCsv(lista, nomePessoa);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const sufixoPessoa = filtroPessoa !== "todos" ? `-${filtroPessoa}` : "";
+    a.download = `rh-consumos-${filtro}${sufixoPessoa}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagem(`CSV baixado (${lista.length} consumo(s)).`);
+  }
+
   function BadgeStatus({ consumo }: { consumo: ConsumoPessoa }) {
     return (
       <Badge cor={consumo.status === "pendente" ? "laranja" : "verde"}>
@@ -180,20 +198,36 @@ function RhConsumosConteudo() {
         titulo="Consumo no restaurante"
         subtitulo={`Item a item com ${DESCONTO_CONSUMO_PADRAO}% de desconto. CLT desconta no fim do mês; intermitente no pagamento do dia.`}
         acao={
-          <button
-            type="button"
-            className="btn-primario"
-            onClick={() => {
-              setForm(
-                formVazio(
-                  filtroPessoa !== "todos" ? filtroPessoa : pessoasAtivas[0]?.id ?? ""
-                )
-              );
-              setErro(null);
-            }}
-          >
-            <Plus size={16} /> Novo lançamento
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secundario"
+              disabled={lista.length === 0}
+              onClick={baixarConsumosCsv}
+              title={
+                lista.length === 0
+                  ? "Nada para exportar neste filtro"
+                  : "Exportar consumos do filtro atual (CSV)"
+              }
+            >
+              <Download size={16} /> Exportar CSV
+              {lista.length > 0 ? ` (${lista.length})` : ""}
+            </button>
+            <button
+              type="button"
+              className="btn-primario"
+              onClick={() => {
+                setForm(
+                  formVazio(
+                    filtroPessoa !== "todos" ? filtroPessoa : pessoasAtivas[0]?.id ?? ""
+                  )
+                );
+                setErro(null);
+              }}
+            >
+              <Plus size={16} /> Novo lançamento
+            </button>
+          </div>
         }
       />
 

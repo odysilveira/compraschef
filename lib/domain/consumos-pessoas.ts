@@ -246,3 +246,60 @@ export function aplicarDescontosNoPagamento(db: DB, pagamentoId: string): Result
 
   return { sucesso: true, pagamento, erros: [] };
 }
+
+function csvEscape(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+function formatarValorCsv(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  return n.toFixed(2).replace(".", ",");
+}
+
+/**
+ * CSV dos consumos filtrados (separador `;`, UTF-8 com BOM) para Excel/pt-BR.
+ */
+export function exportarConsumosPessoasCsv(
+  consumos: ConsumoPessoa[],
+  nomePorId: (pessoaId: string) => string
+): string {
+  const cabecalho = [
+    "Pessoa",
+    "Data",
+    "Competência",
+    "Descrição",
+    "Quantidade",
+    "Preço unitário",
+    "Desconto %",
+    "Valor bruto",
+    "Valor líquido",
+    "Status",
+    "Pagamento ID",
+  ];
+  const ordenados = consumos
+    .slice()
+    .sort(
+      (a, b) =>
+        b.data.localeCompare(a.data) ||
+        nomePorId(a.pessoa_id).localeCompare(nomePorId(b.pessoa_id), "pt-BR")
+    );
+  const linhas = ordenados.map((c) =>
+    [
+      nomePorId(c.pessoa_id),
+      c.data,
+      c.competencia,
+      c.descricao,
+      formatarValorCsv(c.quantidade),
+      formatarValorCsv(c.preco_unitario),
+      formatarValorCsv(c.desconto_percentual),
+      formatarValorCsv(c.valor_bruto),
+      formatarValorCsv(c.valor_liquido),
+      rotuloStatusConsumo(c.status),
+      c.pagamento_id ?? "",
+    ]
+      .map((cell) => csvEscape(cell))
+      .join(";")
+  );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}

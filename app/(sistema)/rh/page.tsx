@@ -17,6 +17,7 @@ import {
   validarCpf,
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
+import { alertaDocumentosPessoa } from "@/lib/domain/documentos-pessoa";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -78,16 +79,22 @@ export default function RhPage() {
   const db = useDB();
   const [busca, setBusca] = useState("");
   const [filtroTipo, setFiltroTipo] = useState<TipoPessoaRH | "todos">("todos");
+  const [filtroDocs, setFiltroDocs] = useState<"todos" | "alerta">("todos");
   const [form, setForm] = useState<FormNovaPessoa | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   const podeGerirRh = usePodeAcessarModulo("rh");
+
+  const contagemAlertaDocs = useMemo(() => {
+    return (db.pessoas ?? []).filter((p) => p.ativo && alertaDocumentosPessoa(p).tem_alerta).length;
+  }, [db.pessoas]);
 
   const lista = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     return (db.pessoas ?? [])
       .filter((p) => p.ativo)
       .filter((p) => (filtroTipo === "todos" ? true : p.tipo === filtroTipo))
+      .filter((p) => (filtroDocs === "alerta" ? alertaDocumentosPessoa(p).tem_alerta : true))
       .filter((p) => {
         if (!termo) return true;
         return [p.nome, p.cargo, p.telefone, p.cpf, p.login, rotuloFuncao(p), rotuloTipoPessoa(p.tipo)]
@@ -95,7 +102,7 @@ export default function RhPage() {
           .some((campo) => String(campo).toLowerCase().includes(termo));
       })
       .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
-  }, [busca, db.pessoas, filtroTipo]);
+  }, [busca, db.pessoas, filtroDocs, filtroTipo]);
 
   if (!podeGerirRh) {
     return (
@@ -238,13 +245,26 @@ export default function RhPage() {
             ))}
           </select>
         </label>
+        <label className="block w-full sm:w-56">
+          <span className="rotulo mb-1 block">Documentos</span>
+          <select
+            className="input w-full"
+            value={filtroDocs}
+            onChange={(e) => setFiltroDocs(e.target.value as "todos" | "alerta")}
+          >
+            <option value="todos">Todos</option>
+            <option value="alerta">Com alerta ({contagemAlertaDocs})</option>
+          </select>
+        </label>
       </div>
 
       {lista.length === 0 ? (
         <Vazio mensagem="Nenhuma pessoa encontrada." />
       ) : (
         <div className="grid gap-3">
-          {lista.map((pessoa) => (
+          {lista.map((pessoa) => {
+            const alertaDocs = alertaDocumentosPessoa(pessoa);
+            return (
             <Link key={pessoa.id} href={`/rh/${pessoa.id}`} className="block">
               <Card className="transition-colors hover:border-primaria/40 hover:bg-amber-50/40">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -255,9 +275,19 @@ export default function RhPage() {
                       {pessoa.cargo ? ` · ${pessoa.cargo}` : ""}
                     </p>
                     {pessoa.telefone && <p className="text-sm text-slate-500">{pessoa.telefone}</p>}
+                    {alertaDocs.tem_alerta && (
+                      <p className="mt-1 text-xs text-amber-800">{alertaDocs.rotulo}</p>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <BadgeTipo tipo={pessoa.tipo} />
+                    {alertaDocs.tem_alerta ? (
+                      <Badge cor={alertaDocs.vencido > 0 ? "laranja" : "cinza"}>
+                        {alertaDocs.vencido > 0 ? "Doc. vencido" : "Doc. pendente"}
+                      </Badge>
+                    ) : (
+                      <Badge cor="verde">Docs OK</Badge>
+                    )}
                     {pessoa.tem_acesso_sistema ? (
                       <Badge cor="verde">Acesso ao sistema</Badge>
                     ) : (
@@ -267,7 +297,8 @@ export default function RhPage() {
                 </div>
               </Card>
             </Link>
-          ))}
+            );
+          })}
         </div>
       )}
 

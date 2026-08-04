@@ -544,6 +544,23 @@ describe("escala domain", () => {
     expect(validarPreRequisitosConvocacao(semContrato).ok).toBe(false);
     expect(validarPreRequisitosConvocacao(semContrato).erros.length).toBeGreaterThanOrEqual(2);
 
+    const entregSemCnh = pessoaInter({
+      id: "pes-moto",
+      tipo: "entregador",
+      funcao: "entregador",
+      contrato_assinado: true,
+      esocial_ok: true,
+      documentos: [
+        { id: "d1", tipo: "contrato", rotulo: "Contrato", presente: true },
+        { id: "d2", tipo: "esocial", rotulo: "eSocial", presente: true },
+        { id: "d3", tipo: "rg", rotulo: "RG", presente: true },
+        { id: "d4", tipo: "aso", rotulo: "ASO", presente: true, validade: "2027-01-01" },
+        { id: "d5", tipo: "cnh", rotulo: "CNH", presente: false },
+      ],
+    });
+    expect(validarPreRequisitosConvocacao(entregSemCnh).ok).toBe(false);
+    expect(validarPreRequisitosConvocacao(entregSemCnh).erros.some((e) => /CNH/i.test(e))).toBe(true);
+
     const db = dbBase();
     db.pessoas.push(semContrato);
     const r = criarSlot(

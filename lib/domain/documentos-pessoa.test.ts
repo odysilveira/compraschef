@@ -7,6 +7,7 @@ import {
   atualizarDocumentoNaLista,
   resumirDocumentos,
   catalogoDocumentosPorTipo,
+  alertaDocumentosPessoa,
 } from "./documentos-pessoa";
 import { permissoesVazias } from "./rh";
 
@@ -70,5 +71,53 @@ describe("documentos-pessoa", () => {
     const b = garantirChecklistDocumentos({ ...pessoa, documentos: a });
     expect(b.length).toBe(a.length);
     expect(b.map((d) => d.tipo).sort()).toEqual(a.map((d) => d.tipo).sort());
+  });
+
+  it("monta alerta curto para a lista de pessoas", () => {
+    const alerta = alertaDocumentosPessoa(
+      pessoaBase({
+        tipo: "entregador",
+        contrato_assinado: true,
+        esocial_ok: true,
+        documentos: [
+          {
+            id: "1",
+            tipo: "contrato",
+            rotulo: "Contrato",
+            presente: true,
+          },
+          {
+            id: "2",
+            tipo: "esocial",
+            rotulo: "eSocial",
+            presente: true,
+          },
+          {
+            id: "3",
+            tipo: "rg",
+            rotulo: "RG",
+            presente: false,
+          },
+          {
+            id: "4",
+            tipo: "aso",
+            rotulo: "ASO",
+            presente: true,
+            validade: "2020-01-01",
+          },
+          {
+            id: "5",
+            tipo: "cnh",
+            rotulo: "CNH",
+            presente: false,
+          },
+        ],
+      }),
+      "2026-08-04"
+    );
+    expect(alerta.tem_alerta).toBe(true);
+    expect(alerta.vencido).toBe(1);
+    expect(alerta.ausente).toBeGreaterThanOrEqual(1);
+    expect(alerta.rotulo).toContain("ASO vencido");
   });
 });

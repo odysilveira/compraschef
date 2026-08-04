@@ -17,6 +17,15 @@ import {
   montarContratoArquivo,
 } from "@/lib/domain/contrato-pessoa";
 import {
+  atualizarDocumentoNaLista,
+  garantirChecklistDocumentos,
+  hojeIsoLocal,
+  resumirDocumentos,
+  rotuloStatusDocumento,
+  sincronizarFlagsDocumentos,
+  statusDocumento,
+} from "@/lib/domain/documentos-pessoa";
+import {
   convocacaoDoSlot,
   janelaCalendarioEscala,
   montarGradeCalendario,
@@ -45,9 +54,16 @@ import {
 } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
-import type { FuncaoOperacional, ModuloAcesso, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
+import type {
+  DocumentoPessoa,
+  FuncaoOperacional,
+  ModuloAcesso,
+  Papel,
+  PessoaRH,
+  TipoPessoaRH,
+} from "@/lib/types";
 
-type AbaPerfil = "dados" | "acesso" | "escala" | "pagamentos" | "consumos";
+type AbaPerfil = "dados" | "documentos" | "acesso" | "escala" | "pagamentos" | "consumos";
 
 export default function RhPerfilPage() {
   const params = useParams<{ id: string }>();
@@ -59,6 +75,7 @@ export default function RhPerfilPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [form, setForm] = useState<PessoaRH | null>(null);
   const [enviandoContrato, setEnviandoContrato] = useState(false);
+  const [enviandoDocId, setEnviandoDocId] = useState<string | null>(null);
 
   const pessoa = useMemo(
     () => (db.pessoas ?? []).find((p) => p.id === params.id) ?? null,
@@ -97,8 +114,14 @@ export default function RhPerfilPage() {
   const hojeISO = diasJanela[0] ?? "";
 
   useEffect(() => {
-    if (pessoa) setForm({ ...pessoa, permissoes: { ...pessoa.permissoes } });
-    else setForm(null);
+    if (pessoa) {
+      const docs = garantirChecklistDocumentos(pessoa);
+      setForm({
+        ...pessoa,
+        permissoes: { ...pessoa.permissoes },
+        documentos: docs,
+      });
+    } else setForm(null);
   }, [pessoa]);
 
   if (!podeRh) {
@@ -180,6 +203,65 @@ export default function RhPerfilPage() {
     setMensagem("Arquivo removido. Salve os dados para confirmar.");
   }
 
+  function patchDocumento(
+    documentoId: string,
+    patch: Partial<Pick<DocumentoPessoa, "presente" | "validade" | "arquivo" | "rotulo">>
+  ) {
+    setForm((atual) => {
+      if (!atual) return atual;
+      const documentos = atualizarDocumentoNaLista(
+        garantirChecklistDocumentos(atual),
+        documentoId,
+        patch
+      );
+      const flags = sincronizarFlagsDocumentos({ ...atual, documentos });
+      return {
+        ...atual,
+        documentos,
+        ...flags,
+        atualizado_em: new Date().toISOString(),
+      };
+    });
+    setMensagem(null);
+    setErro(null);
+  }
+
+  async function aoEscolherArquivoDocumento(documentoId: string, arquivo: File | null) {
+    if (!arquivo) return;
+    setErro(null);
+    setMensagem(null);
+    setEnviandoDocId(documentoId);
+    try {
+      const resultado = await montarContratoArquivo(arquivo);
+      if (!resultado.ok) {
+        setErro(resultado.erro);
+        return;
+      }
+      patchDocumento(documentoId, { presente: true, arquivo: resultado.contrato });
+      setMensagem("Arquivo anexado. Salve os documentos para confirmar.");
+    } finally {
+      setEnviandoDocId(null);
+    }
+  }
+
+  function salvarDocumentos(e: FormEvent) {
+    e.preventDefault();
+    const docs = garantirChecklistDocumentos(editando);
+    const flags = sincronizarFlagsDocumentos({ ...editando, documentos: docs });
+    mutate((banco) => {
+      const i = banco.pessoas.findIndex((p) => p.id === editando.id);
+      if (i < 0) return;
+      banco.pessoas[i] = {
+        ...banco.pessoas[i],
+        documentos: docs,
+        ...flags,
+        atualizado_em: new Date().toISOString(),
+      };
+    });
+    setMensagem("Documentos salvos.");
+    setErro(null);
+  }
+
   function salvarDados(e: FormEvent) {
     e.preventDefault();
     if (!editando.nome.trim()) {
@@ -201,6 +283,20 @@ export default function RhPerfilPage() {
     mutate((banco) => {
       const i = banco.pessoas.findIndex((p) => p.id === editando.id);
       if (i < 0) return;
+      const docs = garantirChecklistDocumentos(editando);
+      const docsAlinhados = docs.map((d) => {
+        if (d.tipo === "contrato") {
+          return {
+            ...d,
+            presente: Boolean(editando.contrato_assinado),
+            arquivo: editando.contrato_arquivo ?? d.arquivo,
+          };
+        }
+        if (d.tipo === "esocial") {
+          return { ...d, presente: Boolean(editando.esocial_ok) };
+        }
+        return d;
+      });
       banco.pessoas[i] = {
         ...banco.pessoas[i],
         ...editando,
@@ -211,6 +307,7 @@ export default function RhPerfilPage() {
         observacao: editando.observacao?.trim() || undefined,
         chave_pix: editando.chave_pix?.trim() || undefined,
         funcao_custom: editando.funcao === "custom" ? editando.funcao_custom?.trim() || undefined : undefined,
+        documentos: docsAlinhados,
         atualizado_em: new Date().toISOString(),
       };
 
@@ -325,6 +422,7 @@ export default function RhPerfilPage() {
         {(
           [
             ["dados", "Dados"],
+            ["documentos", "Documentos"],
             ["acesso", "Acesso"],
             ["escala", "Escala"],
             ["pagamentos", "Pagamentos"],
@@ -596,6 +694,124 @@ export default function RhPerfilPage() {
           </div>
         </form>
       )}
+
+      {aba === "documentos" &&
+        (() => {
+          const docs = garantirChecklistDocumentos(editando);
+          const hoje = hojeIsoLocal();
+          const resumo = resumirDocumentos(docs, hoje);
+          return (
+            <form onSubmit={salvarDocumentos} className="space-y-4">
+              <Card className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-base font-bold">Checklist de documentos</h2>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <Badge cor="verde">Presente ({resumo.presente})</Badge>
+                    <Badge cor="cinza">Ausente ({resumo.ausente})</Badge>
+                    <Badge cor="laranja">Vencido ({resumo.vencido})</Badge>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-600">
+                  Marque o que já tem em mão. Contrato e eSocial alimentam a convocação na escala.
+                  Validade (ASO/CNH) marca como vencido quando a data passa.
+                </p>
+                <ul className="space-y-3">
+                  {docs.map((doc) => {
+                    const status = statusDocumento(doc, hoje);
+                    const corBadge =
+                      status === "presente" ? "verde" : status === "vencido" ? "laranja" : "cinza";
+                    return (
+                      <li
+                        key={doc.id}
+                        className="rounded-lg border border-stone-200 bg-stone-50 p-3 space-y-2"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium text-slate-900">{doc.rotulo}</span>
+                            <Badge cor={corBadge}>{rotuloStatusDocumento(status)}</Badge>
+                          </div>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={doc.presente}
+                              onChange={(e) =>
+                                patchDocumento(doc.id, { presente: e.target.checked })
+                              }
+                            />
+                            Em mãos
+                          </label>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Campo rotulo="Validade (opcional)">
+                            <input
+                              type="date"
+                              className="campo"
+                              value={doc.validade ?? ""}
+                              onChange={(e) =>
+                                patchDocumento(doc.id, { validade: e.target.value || undefined })
+                              }
+                            />
+                          </Campo>
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-slate-600">Anexo (opcional)</p>
+                            {doc.arquivo ? (
+                              <div className="flex flex-wrap items-center gap-2 text-sm">
+                                <a
+                                  href={doc.arquivo.data_url}
+                                  download={doc.arquivo.nome_arquivo}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-primaria-escura underline"
+                                >
+                                  {doc.arquivo.nome_arquivo}
+                                </a>
+                                <button
+                                  type="button"
+                                  className="btn-secundario text-xs"
+                                  onClick={() =>
+                                    patchDocumento(doc.id, { arquivo: undefined })
+                                  }
+                                >
+                                  <Trash2 size={14} /> Remover
+                                </button>
+                              </div>
+                            ) : (
+                              <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-primaria-escura">
+                                <FileUp size={16} />
+                                {enviandoDocId === doc.id
+                                  ? "Lendo…"
+                                  : `Anexar (máx. ${formatarTamanhoArquivo(TAMANHO_MAX_CONTRATO_BYTES)})`}
+                                <input
+                                  type="file"
+                                  className="sr-only"
+                                  accept=".pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                                  disabled={enviandoDocId === doc.id}
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0] ?? null;
+                                    void aoEscolherArquivoDocumento(doc.id, f);
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="btn-secundario" onClick={() => router.push("/rh")}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn-primario">
+                  <Save size={16} /> Salvar documentos
+                </button>
+              </div>
+            </form>
+          );
+        })()}
 
       {aba === "acesso" && (
         <form onSubmit={salvarAcesso} className="space-y-4">

@@ -16,6 +16,8 @@ export interface ResumoOperacionalRh {
   convocacoes_enviadas: number;
   /** Enviadas com plantão já passado — triagem de silêncio na escala. */
   convocacoes_sem_resposta: number;
+  /** Rascunhos ainda não enviados no WhatsApp. */
+  convocacoes_rascunho: number;
   /** Títulos informados, aguardando conciliação bancária. */
   pagamentos_aguardando: number;
   /** Previstos + liberados (ainda não pagos / fora de aguardando). */
@@ -53,7 +55,9 @@ export function resumirOperacionalRh(
   }
   const pags = db.pagamentos_pessoas ?? [];
   const slots = db.escala_slots ?? [];
-  const enviadas = (db.convocacoes ?? []).filter((c) => c.status === "enviada");
+  const convocacoes = db.convocacoes ?? [];
+  const enviadas = convocacoes.filter((c) => c.status === "enviada");
+  const convocacoes_rascunho = convocacoes.filter((c) => c.status === "rascunho").length;
   let convocacoes_sem_resposta = 0;
   for (const c of enviadas) {
     const slot = slots.find((s) => s.id === c.escala_slot_id);
@@ -72,6 +76,7 @@ export function resumirOperacionalRh(
     ponto_propostas: ponto.proposta,
     convocacoes_enviadas: enviadas.length,
     convocacoes_sem_resposta,
+    convocacoes_rascunho,
     pagamentos_aguardando: pags.filter((p) => p.status === "aguardando_conciliacao").length,
     pagamentos_abertos: pags.filter(
       (p) => p.status === "previsto" || p.status === "liberado"

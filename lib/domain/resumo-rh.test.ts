@@ -59,7 +59,18 @@ describe("resumo-rh", () => {
           ],
         }),
         pessoa({ id: "inativo", ativo: false }),
-        pessoa({ id: "clt-sem", nome: "CLT Sem", tipo: "colaborador", funcao: "cozinha" }),
+        pessoa({
+          id: "clt-sem",
+          nome: "CLT Sem",
+          tipo: "colaborador",
+          funcao: "cozinha",
+          documentos: [
+            { id: "1", tipo: "contrato", rotulo: "C", presente: true },
+            { id: "2", tipo: "esocial", rotulo: "E", presente: true },
+            { id: "3", tipo: "rg", rotulo: "R", presente: true },
+            { id: "4", tipo: "aso", rotulo: "A", presente: true, validade: "2030-01-01" },
+          ],
+        }),
       ],
       pendencias_ponto: [
         { id: "pp1", status: "aguardando_aviso" },

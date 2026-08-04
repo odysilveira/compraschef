@@ -17,10 +17,12 @@ import {
   montarContratoArquivo,
 } from "@/lib/domain/contrato-pessoa";
 import {
+  alertaDocumentosPessoa,
   atualizarDocumentoNaLista,
   garantirChecklistDocumentos,
   hojeIsoLocal,
   resumirDocumentos,
+  rotuloCurtoAlertaDocumentos,
   rotuloStatusDocumento,
   sincronizarFlagsDocumentos,
   statusDocumento,
@@ -115,6 +117,10 @@ function RhPerfilConteudo() {
   const semanasPessoa = useMemo(() => montarGradeCalendario(diasJanela, 1), [diasJanela]);
   const cabecalhoSemana = useMemo(() => rotulosCabecalhoSemana(1), []);
   const hojeISO = diasJanela[0] ?? "";
+  const alertaDocs = useMemo(
+    () => (pessoa ? alertaDocumentosPessoa(pessoa) : null),
+    [pessoa]
+  );
 
   useEffect(() => {
     if (pessoa) {
@@ -421,16 +427,49 @@ function RhPerfilConteudo() {
         titulo={pessoa.nome}
         subtitulo={`${rotuloTipoPessoa(pessoa.tipo)} · ${rotuloFuncao(pessoa)}`}
         acao={
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Link href="/rh/escala" className="btn-secundario">
               Ver na escala
             </Link>
             <Badge cor={pessoa.ativo ? "verde" : "cinza"}>{pessoa.ativo ? "Ativo" : "Inativo"}</Badge>
             <Badge cor="azul">{rotuloTipoPessoa(pessoa.tipo)}</Badge>
+            {alertaDocs && (
+              <button
+                type="button"
+                className="inline-flex"
+                title={alertaDocs.rotulo}
+                onClick={() => irParaAba("documentos")}
+              >
+                <Badge
+                  cor={
+                    !alertaDocs.tem_alerta
+                      ? "verde"
+                      : alertaDocs.vencido > 0
+                        ? "laranja"
+                        : alertaDocs.a_vencer > 0
+                          ? "azul"
+                          : "cinza"
+                  }
+                >
+                  {rotuloCurtoAlertaDocumentos(alertaDocs)}
+                </Badge>
+              </button>
+            )}
           </div>
         }
       />
-
+      {alertaDocs?.tem_alerta && (
+        <p className="mb-4 text-sm text-amber-800">
+          {alertaDocs.rotulo}.{" "}
+          <button
+            type="button"
+            className="underline font-medium text-primaria-escura"
+            onClick={() => irParaAba("documentos")}
+          >
+            Abrir documentos
+          </button>
+        </p>
+      )}
       <div className="mb-4 flex flex-wrap gap-2">
         {(
           [

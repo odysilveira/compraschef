@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Check, Copy, GripVertical, Plus, RefreshCw } from "lucide-react";
@@ -60,11 +60,10 @@ import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
 import type { ConvocacaoIntermitente, EscalaSlot, PessoaRH, StatusConvocacao } from "@/lib/types";
 
-function filtrarIntermitentesPorSetor(
-  pessoas: PessoaRH[],
-  setor: Exclude<SetorConvocacaoEscala, "motoboy">
-): PessoaRH[] {
-  return pessoas.filter((p) => setorOperacionalDaPessoa(p) === setor);
+function setorArrastoIntermitente(pessoa: PessoaRH): Exclude<SetorConvocacaoEscala, "motoboy"> {
+  const setor = setorOperacionalDaPessoa(pessoa);
+  if (setor === "cozinha" || setor === "balcao" || setor === "salao") return setor;
+  return "salao";
 }
 
 function hojeISO(): string {
@@ -141,30 +140,49 @@ function BancoPessoas({
   onDragStart,
   onDragEnd,
   onGerarPadrao,
+  resolverSetor,
+  vazio,
 }: {
   titulo: string;
   pessoas: PessoaRH[];
+  /** Setor fixo do banco (ex.: clt, motoboy) — ignorado se `resolverSetor` existir. */
   setor: SetorArrastoEscala;
   arrasto: Arrasto | null;
   onDragStart: (pessoaId: string, setor: SetorArrastoEscala) => void;
   onDragEnd: () => void;
   /** Só para CLT: abre o gerador de padrão (ex.: 12x36). */
   onGerarPadrao?: (pessoaId: string) => void;
+  /** Intermitentes: setor vem da função de cada pessoa. */
+  resolverSetor?: (pessoa: PessoaRH) => SetorArrastoEscala;
+  /** Mensagem quando a lista está vazia (em vez de ocultar o bloco). */
+  vazio?: ReactNode;
 }) {
-  if (pessoas.length === 0) return null;
   const ehClt = setor === "clt";
+  if (pessoas.length === 0) {
+    if (!vazio) return null;
+    return (
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{titulo}</p>
+        <p className="text-xs text-slate-500">{vazio}</p>
+      </div>
+    );
+  }
   return (
     <div className="space-y-1.5">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{titulo}</p>
       <ul className="space-y-1">
         {pessoas.map((p) => {
+          const setorPessoa = resolverSetor ? resolverSetor(p) : setor;
           const gate = ehClt
             ? { ok: true, erros: [] as string[], avisos: [] as string[] }
             : validarPreRequisitosConvocacao(p);
-          const ativo = arrasto?.tipo === "pessoa" && arrasto.id === p.id && arrasto.setor === setor;
+          const ativo =
+            arrasto?.tipo === "pessoa" && arrasto.id === p.id && arrasto.setor === setorPessoa;
           const temAvisoDocs = gate.ok && gate.avisos.length > 0;
+          const rotuloSetor =
+            setorPessoa !== "clt" ? rotuloSetorConvocacao(setorPessoa as SetorConvocacaoEscala) : "";
           return (
-            <li key={`${setor}-${p.id}`} className="space-y-1">
+            <li key={`${setorPessoa}-${p.id}`} className="space-y-1">
               <button
                 type="button"
                 draggable
@@ -184,15 +202,15 @@ function BancoPessoas({
                     ? `Arraste ${p.nome} para um dia (CLT · sem convocação)`
                     : gate.ok
                       ? temAvisoDocs
-                        ? `${gate.avisos[0]} — arraste ${p.nome} como ${rotuloSetorConvocacao(setor as SetorConvocacaoEscala)}`
-                        : `Arraste ${p.nome} como ${rotuloSetorConvocacao(setor as SetorConvocacaoEscala)}`
+                        ? `${gate.avisos[0]} — arraste ${p.nome} como ${rotuloSetor}`
+                        : `Arraste ${p.nome} como ${rotuloSetor}`
                       : `Falta contrato/eSocial — ${gate.erros[0] ?? ""}`
                 }
                 onDragStart={(e) => {
-                  onDragStart(p.id, setor);
+                  onDragStart(p.id, setorPessoa);
                   e.dataTransfer.setData("text/escala-drag-tipo", "pessoa");
                   e.dataTransfer.setData("text/escala-pessoa-id", p.id);
-                  e.dataTransfer.setData("text/escala-setor", setor);
+                  e.dataTransfer.setData("text/escala-setor", setorPessoa);
                   e.dataTransfer.effectAllowed = "copy";
                 }}
                 onDragEnd={onDragEnd}
@@ -200,6 +218,11 @@ function BancoPessoas({
                 <GripVertical size={14} className="shrink-0 text-slate-400" />
                 <span className="min-w-0 flex-1 truncate font-medium">{p.nome.split(/\s+/)[0]}</span>
                 {ehClt && <span className="shrink-0 text-[10px] font-semibold text-sky-800">CLT</span>}
+                {!ehClt && setorPessoa !== "motoboy" && (
+                  <span className="shrink-0 text-[10px] font-semibold uppercase text-stone-600">
+                    {abrevSetorConvocacao(setorPessoa as SetorConvocacaoEscala)}
+                  </span>
+                )}
               </button>
               {ehClt && onGerarPadrao && (
                 <button
@@ -265,18 +288,6 @@ function RhEscalaConteudo() {
   const intermitentes = useMemo(
     () => pessoasAtivas.filter((p) => p.tipo === "intermitente"),
     [pessoasAtivas]
-  );
-  const intermitentesCozinha = useMemo(
-    () => filtrarIntermitentesPorSetor(intermitentes, "cozinha"),
-    [intermitentes]
-  );
-  const intermitentesBalcao = useMemo(
-    () => filtrarIntermitentesPorSetor(intermitentes, "balcao"),
-    [intermitentes]
-  );
-  const intermitentesSalao = useMemo(
-    () => filtrarIntermitentesPorSetor(intermitentes, "salao"),
-    [intermitentes]
   );
   const entregadores = useMemo(
     () => pessoasAtivas.filter((p) => p.tipo === "entregador"),
@@ -989,8 +1000,8 @@ function RhEscalaConteudo() {
             <div>
               <p className="text-sm font-bold text-slate-900">Quem entra na escala</p>
               <p className="text-xs text-slate-600">
-                CLT: solte num dia e o sistema preenche o resto em 12x36 (dia sim / dia não). Cozinha, balcão e salão
-                entram no saldo do dia como CLT coz / CLT balc / CLT salão.
+                CLT: solte num dia e o sistema preenche o 12x36. Intermitentes: arraste para o dia — gera
+                convocação em rascunho (WhatsApp). Motoboys entram na lista abaixo.
               </p>
             </div>
             <BancoPessoas
@@ -1004,39 +1015,28 @@ function RhEscalaConteudo() {
                 setDiaDestinoHover(null);
               }}
               onGerarPadrao={(pessoaId) => abrirPadrao(pessoaId)}
+              vazio="Nenhum CLT ativo — cadastre em Pessoas."
             />
             <BancoPessoas
-              titulo="Intermitentes — Cozinha"
-              pessoas={intermitentesCozinha}
-              setor="cozinha"
-              arrasto={arrasto}
-              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
-              onDragEnd={() => {
-                setArrasto(null);
-                setDiaDestinoHover(null);
-              }}
-            />
-            <BancoPessoas
-              titulo="Intermitentes — Balcão / Caixa"
-              pessoas={intermitentesBalcao}
-              setor="balcao"
-              arrasto={arrasto}
-              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
-              onDragEnd={() => {
-                setArrasto(null);
-                setDiaDestinoHover(null);
-              }}
-            />
-            <BancoPessoas
-              titulo="Intermitentes — Salão"
-              pessoas={intermitentesSalao}
+              titulo="Intermitentes"
+              pessoas={intermitentes}
               setor="salao"
+              resolverSetor={setorArrastoIntermitente}
               arrasto={arrasto}
               onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
               onDragEnd={() => {
                 setArrasto(null);
                 setDiaDestinoHover(null);
               }}
+              vazio={
+                <>
+                  Nenhum intermitente ativo — cadastre em{" "}
+                  <Link href="/rh" className="underline">
+                    Pessoas
+                  </Link>
+                  .
+                </>
+              }
             />
             <BancoPessoas
               titulo="Motoboys / entregadores"

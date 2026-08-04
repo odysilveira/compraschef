@@ -98,14 +98,20 @@ describe("resumo-rh", () => {
     expect(r.convocacoes_sem_resposta).toBe(1);
     expect(r.pagamentos_aguardando).toBe(1);
     expect(r.pagamentos_abertos).toBe(2);
+    expect(r.pagamentos_previstos).toBe(1);
+    expect(r.pagamentos_liberados).toBe(1);
     expect(r.consumos_pendentes).toBe(2);
   });
 
   it("monta hrefs e parseia filtros", () => {
     expect(parseFiltroPagamentosRh("aguardando")).toBe("aguardando");
+    expect(parseFiltroPagamentosRh("previsto")).toBe("previsto");
+    expect(parseFiltroPagamentosRh("liberado")).toBe("liberado");
     expect(parseFiltroPagamentosRh("x")).toBe("abertos");
     expect(hrefPagamentosRh()).toBe("/rh/pagamentos");
     expect(hrefPagamentosRh("aguardando")).toBe("/rh/pagamentos?filtro=aguardando");
+    expect(hrefPagamentosRh("previsto")).toBe("/rh/pagamentos?filtro=previsto");
+    expect(hrefPagamentosRh("liberado")).toBe("/rh/pagamentos?filtro=liberado");
     expect(hrefPagamentosRh({ filtro: "todos", pessoa: "pes-1" })).toBe(
       "/rh/pagamentos?filtro=todos&pessoa=pes-1"
     );

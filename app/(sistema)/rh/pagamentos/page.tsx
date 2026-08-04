@@ -184,6 +184,8 @@ function RhPagamentosConteudo() {
     const filtrados = todos.filter((p) => {
       if (filtro === "aguardando" && p.status !== "aguardando_conciliacao") return false;
       if (filtro === "pagos" && p.status !== "pago") return false;
+      if (filtro === "previsto" && p.status !== "previsto") return false;
+      if (filtro === "liberado" && p.status !== "liberado") return false;
       if (
         filtro === "abertos" &&
         p.status !== "previsto" &&
@@ -581,6 +583,8 @@ function RhPagamentosConteudo() {
         {(
           [
             ["abertos", "Abertos"],
+            ["previsto", "A liberar"],
+            ["liberado", "A informar"],
             ["aguardando", "Aguardando"],
             ["pagos", "Pagos"],
             ["todos", "Todos"],

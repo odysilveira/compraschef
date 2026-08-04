@@ -146,6 +146,7 @@ function BancoPessoas({
   resolverSetor,
   vazio,
   destaquePessoaId,
+  onFiltrarPessoa,
 }: {
   titulo: string;
   pessoas: PessoaRH[];
@@ -162,6 +163,8 @@ function BancoPessoas({
   vazio?: ReactNode;
   /** Deep link `?pessoa=` — destaca na lista lateral. */
   destaquePessoaId?: string;
+  /** Alterna filtro `?pessoa=` no calendário. */
+  onFiltrarPessoa?: (pessoaId: string) => void;
 }) {
   const ehClt = setor === "clt";
   const destaqueRef = useRef<HTMLLIElement | null>(null);

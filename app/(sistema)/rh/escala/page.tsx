@@ -41,6 +41,7 @@ import {
   type SetorConvocacaoEscala,
 } from "@/lib/domain/escala";
 import {
+  destaqueSlotFiltroConvocacao,
   hrefEscalaRh,
   parseFiltroConvocacaoEscalaRh,
   type FiltroConvocacaoEscalaRh,
@@ -727,7 +728,12 @@ function RhEscalaConteudo() {
       {filtroConvocacao === "enviada" && (
         <Card className="mb-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-base font-bold">Convocações enviadas (aguardando resposta)</h2>
+            <div>
+              <h2 className="text-base font-bold">Convocações enviadas (aguardando resposta)</h2>
+              <p className="text-sm text-slate-600">
+                No calendário, plantões enviados ficam em destaque âmbar; os demais ficam atenuados.
+              </p>
+            </div>
             <button
               type="button"
               className="btn-secundario text-sm"
@@ -745,7 +751,7 @@ function RhEscalaConteudo() {
                 return (
                   <li
                     key={conv.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2"
                   >
                     <div>
                       <p className="font-medium text-slate-900">{nomePessoa(conv.pessoa_id)}</p>
@@ -888,6 +894,9 @@ function RhEscalaConteudo() {
                           const lista = porDia.get(dia) ?? [];
                           const ehHoje = dia === hoje;
                           const ehDestino = Boolean(diaDestinoHover === dia && arrasto);
+                          const diaComEnviada =
+                            filtroConvocacao === "enviada" &&
+                            lista.some((s) => convocacaoDoSlot(db, s.id)?.status === "enviada");
                           const resumo = resumoSetoresDoDia(lista, db.pessoas ?? []);
                           const resumoPreview =
                             ehDestino && arrasto?.tipo === "pessoa"
@@ -927,11 +936,13 @@ function RhEscalaConteudo() {
                               className={`flex min-h-[7.5rem] flex-col rounded-lg border p-1.5 transition-colors ${
                                 ehDestino
                                   ? "border-primaria bg-primaria/10 ring-2 ring-primaria/30"
-                                  : ehHoje
-                                    ? "border-primaria bg-primaria/5"
-                                    : lista.length > 0
-                                      ? "border-stone-200 bg-white"
-                                      : "border-dashed border-stone-200 bg-stone-50"
+                                  : diaComEnviada
+                                    ? "border-amber-400 bg-amber-50/60 ring-1 ring-amber-300/60"
+                                    : ehHoje
+                                      ? "border-primaria bg-primaria/5"
+                                      : lista.length > 0
+                                        ? "border-stone-200 bg-white"
+                                        : "border-dashed border-stone-200 bg-stone-50"
                               }`}
                               onDragOver={(e) => {
                                 if (!arrasto) return;
@@ -976,15 +987,23 @@ function RhEscalaConteudo() {
                                     const pessoaSlot = db.pessoas.find((p) => p.id === slot.pessoa_id);
                                     const ehClt = pessoaSlot?.tipo === "colaborador";
                                     const setor = setorDoPlantao(slot, pessoaSlot);
+                                    const destaque = destaqueSlotFiltroConvocacao(
+                                      filtroConvocacao,
+                                      conv?.status
+                                    );
                                     return (
                                       <button
                                         key={slot.id}
                                         type="button"
                                         draggable
                                         className={`cursor-grab truncate rounded px-1 py-0.5 text-left text-[11px] font-medium active:cursor-grabbing ${
-                                          ehClt
-                                            ? "bg-sky-100 text-sky-950 hover:bg-sky-200/80"
-                                            : "bg-stone-100 text-slate-800 hover:bg-primaria/15"
+                                          destaque === "destaque"
+                                            ? "bg-amber-200 text-amber-950 ring-1 ring-amber-500 hover:bg-amber-300/90"
+                                            : destaque === "atenuado"
+                                              ? "bg-stone-100/70 text-slate-400 opacity-45 hover:opacity-70"
+                                              : ehClt
+                                                ? "bg-sky-100 text-sky-950 hover:bg-sky-200/80"
+                                                : "bg-stone-100 text-slate-800 hover:bg-primaria/15"
                                         } ${arrasto?.tipo === "slot" && arrasto.id === slot.id ? "opacity-50" : ""}`}
                                         title={`${nomePessoa(slot.pessoa_id)} · ${
                                           ehClt

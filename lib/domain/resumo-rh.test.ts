@@ -7,6 +7,7 @@ import {
   hrefPagamentosRh,
   hrefPessoasRh,
   hrefPontoRh,
+  destaqueSlotFiltroConvocacao,
   parseAbaPontoRh,
   parseFiltroConsumosRh,
   parseFiltroConvocacaoEscalaRh,
@@ -110,5 +111,9 @@ describe("resumo-rh", () => {
     expect(parseFiltroConvocacaoEscalaRh(null)).toBe("todas");
     expect(hrefEscalaRh()).toBe("/rh/escala");
     expect(hrefEscalaRh({ convocacao: "enviada" })).toBe("/rh/escala?convocacao=enviada");
+    expect(destaqueSlotFiltroConvocacao("todas", "enviada")).toBe("normal");
+    expect(destaqueSlotFiltroConvocacao("enviada", "enviada")).toBe("destaque");
+    expect(destaqueSlotFiltroConvocacao("enviada", "rascunho")).toBe("atenuado");
+    expect(destaqueSlotFiltroConvocacao("enviada", undefined)).toBe("atenuado");
   });
 });

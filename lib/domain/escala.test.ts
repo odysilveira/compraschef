@@ -12,6 +12,7 @@ import {
   janela28Dias,
   janelaCalendarioEscala,
   linkWhatsAppConvocacao,
+  listarCltSemPlantaoNaJanela,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
   montarTextoConvocacaoWhatsApp,
@@ -675,5 +676,29 @@ describe("escala domain", () => {
     expect(r.atualizadas).toBe(1);
     expect(db.convocacoes.find((c) => c.id === "conv-venc")?.status).toBe("silencio");
     expect(db.convocacoes.find((c) => c.id === "conv-fut")?.status).toBe("enviada");
+  });
+
+  it("lista CLT ativos sem plantão na janela", () => {
+    const db = dbBase();
+    db.pessoas.push(
+      pessoaInter({
+        id: "pes-clt-2",
+        nome: "Ana CLT",
+        tipo: "colaborador",
+        valor_hora: undefined,
+      })
+    );
+    db.escala_slots.push({
+      id: "esc-clt",
+      pessoa_id: "pes-clt",
+      data: "2026-08-05",
+      hora_inicio: "11:00",
+      hora_fim: "23:00",
+      intervalo_min: 60,
+      criado_em: "2026-08-01T12:00:00.000Z",
+      atualizado_em: "2026-08-01T12:00:00.000Z",
+    });
+    const sem = listarCltSemPlantaoNaJanela(db, ["2026-08-05", "2026-08-06"]);
+    expect(sem.map((p) => p.id)).toEqual(["pes-clt-2"]);
   });
 });

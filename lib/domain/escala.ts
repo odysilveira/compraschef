@@ -858,6 +858,24 @@ export function slotsDaPessoaNaJanela(db: DB, pessoaId: string, dias: string[]):
   return slotsNaJanela(db, dias).filter((s) => s.pessoa_id === pessoaId);
 }
 
+/**
+ * CLT ativos sem nenhum plantão nas datas da janela — precisam de padrão (ex.: 12x36)
+ * antes do ponto detectar faltas.
+ */
+export function listarCltSemPlantaoNaJanela(
+  db: Pick<DB, "pessoas" | "escala_slots">,
+  dias: string[]
+): PessoaRH[] {
+  const setDias = new Set(dias);
+  const comPlantao = new Set(
+    (db.escala_slots ?? []).filter((s) => setDias.has(s.data)).map((s) => s.pessoa_id)
+  );
+  return (db.pessoas ?? [])
+    .filter((p) => p.ativo && p.tipo === "colaborador" && !comPlantao.has(p.id))
+    .slice()
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+}
+
 /** Padrões de escala CLT (ciclo rolante ou calendário). */
 export type PadraoEscalaClt = "6x1" | "5x2" | "4x2" | "12x36" | "seg_sex";
 

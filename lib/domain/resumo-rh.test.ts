@@ -108,6 +108,10 @@ describe("resumo-rh", () => {
     expect(parseFiltroConsumosRh("descontados")).toBe("descontados");
     expect(hrefConsumosRh()).toBe("/rh/consumos");
     expect(hrefConsumosRh("todos")).toBe("/rh/consumos?filtro=todos");
+    expect(hrefConsumosRh({ filtro: "todos", pessoa: "pes-1" })).toBe(
+      "/rh/consumos?filtro=todos&pessoa=pes-1"
+    );
+    expect(hrefConsumosRh({ pessoa: "pes-1" })).toBe("/rh/consumos?pessoa=pes-1");
     expect(parseAbaPontoRh("espelho")).toBe("espelho");
     expect(parseAbaPontoRh(null)).toBe("pendencias");
     expect(hrefPontoRh()).toBe("/rh/ponto");

@@ -15,6 +15,7 @@ import {
 import {
   hrefConsumosRh,
   parseFiltroConsumosRh,
+  parsePessoaPontoRh,
   type FiltroConsumosRh,
 } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
@@ -51,17 +52,43 @@ function RhConsumosConteudo() {
   const [filtro, setFiltro] = useState<FiltroConsumosRh>(() =>
     parseFiltroConsumosRh(searchParams.get("filtro"))
   );
+  const [filtroPessoa, setFiltroPessoa] = useState<string>(() => {
+    const pessoa = parsePessoaPontoRh(searchParams.get("pessoa"));
+    return pessoa || "todos";
+  });
   const [form, setForm] = useState<FormNovo | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
 
   useEffect(() => {
     setFiltro(parseFiltroConsumosRh(searchParams.get("filtro")));
-  }, [searchParams]);
+    const pessoaUrl = parsePessoaPontoRh(searchParams.get("pessoa"));
+    if (!pessoaUrl) {
+      setFiltroPessoa("todos");
+      return;
+    }
+    const existe = (db.pessoas ?? []).some((p) => p.id === pessoaUrl);
+    setFiltroPessoa(existe ? pessoaUrl : "todos");
+  }, [db.pessoas, searchParams]);
+
+  function irParaFiltros(proximoFiltro: FiltroConsumosRh, proximaPessoa: string = filtroPessoa) {
+    setFiltro(proximoFiltro);
+    setFiltroPessoa(proximaPessoa);
+    router.replace(
+      hrefConsumosRh({
+        filtro: proximoFiltro,
+        pessoa: proximaPessoa !== "todos" ? proximaPessoa : undefined,
+      }),
+      { scroll: false }
+    );
+  }
 
   function irParaFiltro(proximo: FiltroConsumosRh) {
-    setFiltro(proximo);
-    router.replace(hrefConsumosRh(proximo), { scroll: false });
+    irParaFiltros(proximo);
+  }
+
+  function aoMudarFiltroPessoa(proximaPessoa: string) {
+    irParaFiltros(filtro, proximaPessoa);
   }
 
   const pessoasAtivas = useMemo(
@@ -74,12 +101,13 @@ function RhConsumosConteudo() {
   const lista = useMemo(() => {
     const todos = [...(db.consumos_pessoas ?? [])];
     const filtrados = todos.filter((c) => {
+      if (filtroPessoa !== "todos" && c.pessoa_id !== filtroPessoa) return false;
       if (filtro === "todos") return true;
       if (filtro === "descontados") return c.status === "descontado";
       return c.status === "pendente";
     });
     return filtrados.sort((a, b) => b.data.localeCompare(a.data) || b.criado_em.localeCompare(a.criado_em));
-  }, [db.consumos_pessoas, filtro]);
+  }, [db.consumos_pessoas, filtro, filtroPessoa]);
 
   const totais = useMemo(() => {
     const itens = db.consumos_pessoas ?? [];
@@ -156,7 +184,11 @@ function RhConsumosConteudo() {
             type="button"
             className="btn-primario"
             onClick={() => {
-              setForm(formVazio(pessoasAtivas[0]?.id ?? ""));
+              setForm(
+                formVazio(
+                  filtroPessoa !== "todos" ? filtroPessoa : pessoasAtivas[0]?.id ?? ""
+                )
+              );
               setErro(null);
             }}
           >
@@ -186,7 +218,7 @@ function RhConsumosConteudo() {
         </Card>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-end gap-2">
         {(
           [
             ["pendentes", "Pendentes"],
@@ -203,7 +235,22 @@ function RhConsumosConteudo() {
             {rotulo}
           </button>
         ))}
-        <Link href="/rh/pagamentos" className="btn-secundario ml-auto">
+        <label className="block min-w-[12rem] flex-1 sm:max-w-xs">
+          <span className="rotulo mb-1 block">Pessoa</span>
+          <select
+            className="input w-full"
+            value={filtroPessoa}
+            onChange={(e) => aoMudarFiltroPessoa(e.target.value)}
+          >
+            <option value="todos">Todas</option>
+            {pessoasAtivas.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Link href="/rh/pagamentos" className="btn-secundario sm:ml-auto">
           Ver pagamentos
         </Link>
       </div>

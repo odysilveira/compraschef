@@ -96,9 +96,19 @@ export function parseFiltroConsumosRh(
   return "pendentes";
 }
 
-export function hrefConsumosRh(filtro?: FiltroConsumosRh): string {
-  if (!filtro || filtro === "pendentes") return "/rh/consumos";
-  return `/rh/consumos?filtro=${filtro}`;
+export function hrefConsumosRh(
+  opts?: FiltroConsumosRh | { filtro?: FiltroConsumosRh; pessoa?: string }
+): string {
+  const normalizado =
+    typeof opts === "string" || opts === undefined ? { filtro: opts } : opts;
+  const params = new URLSearchParams();
+  if (normalizado.filtro && normalizado.filtro !== "pendentes") {
+    params.set("filtro", normalizado.filtro);
+  }
+  const pessoa = normalizado.pessoa?.trim();
+  if (pessoa) params.set("pessoa", pessoa);
+  const q = params.toString();
+  return q ? `/rh/consumos?${q}` : "/rh/consumos";
 }
 
 export type AbaPontoRh = "pendencias" | "espelho";

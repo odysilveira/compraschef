@@ -10,8 +10,11 @@ import type {
 } from "../types";
 import { aplicarDescontosNoPagamento } from "./consumos-pessoas";
 import {
+  diasRestantesValidade,
+  formatarDiasRestantesDocumento,
   garantirChecklistDocumentos,
   hojeIsoLocal,
+  rotuloTipoDocumento,
   statusDocumento,
 } from "./documentos-pessoa";
 import { antecedenciaMinimaDoDb } from "./normas-rh";
@@ -172,11 +175,17 @@ export function textoResumoSetores(resumo: ResumoDiaEscala): string {
 
 /**
  * Contrato escrito + eSocial antes da 1ª convocação (WhatsApp não substitui o contrato).
- * Também bloqueia ASO vencido e, para entregador, CNH ausente/vencida.
+ * Bloqueia ASO vencido e, para entregador, CNH ausente/vencida.
+ * Documentos a vencer geram avisos (não bloqueiam a convocação).
  */
-export function validarPreRequisitosConvocacao(pessoa: PessoaRH): { ok: boolean; erros: string[] } {
-  if (!pessoaPrecisaConvocacao(pessoa.tipo)) return { ok: true, erros: [] };
+export function validarPreRequisitosConvocacao(pessoa: PessoaRH): {
+  ok: boolean;
+  erros: string[];
+  avisos: string[];
+} {
+  if (!pessoaPrecisaConvocacao(pessoa.tipo)) return { ok: true, erros: [], avisos: [] };
   const erros: string[] = [];
+  const avisos: string[] = [];
   if (!pessoa.contrato_assinado) {
     erros.push(
       "Contrato intermitente ainda não marcado como assinado. O WhatsApp não substitui o contrato escrito (papel ou assinatura eletrônica)."
@@ -192,8 +201,16 @@ export function validarPreRequisitosConvocacao(pessoa: PessoaRH): { ok: boolean;
   const hoje = hojeIsoLocal();
   const docs = garantirChecklistDocumentos(pessoa);
   const aso = docs.find((d) => d.tipo === "aso");
-  if (aso && statusDocumento(aso, hoje) === "vencido") {
-    erros.push("ASO vencido. Renove o exame antes de convocar.");
+  if (aso) {
+    const statusAso = statusDocumento(aso, hoje);
+    if (statusAso === "vencido") {
+      erros.push("ASO vencido. Renove o exame antes de convocar.");
+    } else if (statusAso === "a_vencer") {
+      const extra = formatarDiasRestantesDocumento(diasRestantesValidade(aso.validade, hoje));
+      avisos.push(
+        `${rotuloTipoDocumento("aso")}${extra ? ` (${extra})` : " a vencer"}. Pode convocar, mas renove em breve.`
+      );
+    }
   }
   if (pessoa.tipo === "entregador") {
     const cnh = docs.find((d) => d.tipo === "cnh");
@@ -202,10 +219,15 @@ export function validarPreRequisitosConvocacao(pessoa: PessoaRH): { ok: boolean;
       erros.push("CNH ausente no checklist. Anexe/marque a CNH do entregador antes de convocar.");
     } else if (statusCnh === "vencido") {
       erros.push("CNH vencida. Renove antes de convocar.");
+    } else if (statusCnh === "a_vencer") {
+      const extra = formatarDiasRestantesDocumento(diasRestantesValidade(cnh?.validade, hoje));
+      avisos.push(
+        `${rotuloTipoDocumento("cnh")}${extra ? ` (${extra})` : " a vencer"}. Pode convocar, mas renove em breve.`
+      );
     }
   }
 
-  return { ok: erros.length === 0, erros };
+  return { ok: erros.length === 0, erros, avisos };
 }
 
 export function rotuloStatusConvocacao(status: StatusConvocacao): string {
@@ -618,22 +640,22 @@ export function criarConvocacaoParaSlot(
   if (!pessoa) return { sucesso: false, erros: ["Pessoa não encontrada."], avisos: [] };
 
   const gate = validarPreRequisitosConvocacao(pessoa);
-  if (!gate.ok) return { sucesso: false, erros: gate.erros, avisos: [] };
+  if (!gate.ok) return { sucesso: false, erros: gate.erros, avisos: gate.avisos };
 
   const horas = calcularHorasPagas(slot.hora_inicio, slot.hora_fim, slot.intervalo_min);
-  if ("erro" in horas) return { sucesso: false, erros: [horas.erro], avisos: [] };
+  if ("erro" in horas) return { sucesso: false, erros: [horas.erro], avisos: gate.avisos };
 
   const agora = opcoes.agora ?? new Date().toISOString();
   const valor_hora = opcoes.valorHora ?? pessoa.valor_hora ?? 0;
   // valor_hora já validado no gate; mantém checagem defensiva
   if (!valor_hora || valor_hora <= 0) {
-    return { sucesso: false, erros: ["Informe o valor-hora no cadastro da pessoa."], avisos: [] };
+    return { sucesso: false, erros: ["Informe o valor-hora no cadastro da pessoa."], avisos: gate.avisos };
   }
 
   const valor_estimado = Number((horas.horas_pagas * valor_hora).toFixed(2));
   const minimoDias = antecedenciaMinimaDoDb(db);
   const antecedencia_ok = antecedenciaMinimaOk(agora.slice(0, 10), slot.data, minimoDias);
-  const avisos: string[] = [];
+  const avisos: string[] = [...gate.avisos];
   if (!antecedencia_ok) {
     avisos.push(
       `Atenção: antecedência menor que ${minimoDias} dias corridos (exigência do contrato intermitente).`

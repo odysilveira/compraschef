@@ -153,8 +153,11 @@ function BancoPessoas({
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{titulo}</p>
       <ul className="space-y-1">
         {pessoas.map((p) => {
-          const gate = ehClt ? { ok: true, erros: [] as string[] } : validarPreRequisitosConvocacao(p);
+          const gate = ehClt
+            ? { ok: true, erros: [] as string[], avisos: [] as string[] }
+            : validarPreRequisitosConvocacao(p);
           const ativo = arrasto?.tipo === "pessoa" && arrasto.id === p.id && arrasto.setor === setor;
+          const temAvisoDocs = gate.ok && gate.avisos.length > 0;
           return (
             <li key={`${setor}-${p.id}`} className="space-y-1">
               <button
@@ -164,16 +167,20 @@ function BancoPessoas({
                   ativo
                     ? "border-primaria bg-primaria/10 opacity-60"
                     : gate.ok
-                      ? ehClt
-                        ? "border-sky-200 bg-sky-50 hover:border-sky-400"
-                        : "border-stone-200 bg-white hover:border-primaria/40"
+                      ? temAvisoDocs
+                        ? "border-amber-200 bg-amber-50/50 hover:border-amber-400"
+                        : ehClt
+                          ? "border-sky-200 bg-sky-50 hover:border-sky-400"
+                          : "border-stone-200 bg-white hover:border-primaria/40"
                       : "border-amber-200 bg-amber-50/80"
                 }`}
                 title={
                   ehClt
                     ? `Arraste ${p.nome} para um dia (CLT · sem convocação)`
                     : gate.ok
-                      ? `Arraste ${p.nome} como ${rotuloSetorConvocacao(setor as SetorConvocacaoEscala)}`
+                      ? temAvisoDocs
+                        ? `${gate.avisos[0]} — arraste ${p.nome} como ${rotuloSetorConvocacao(setor as SetorConvocacaoEscala)}`
+                        : `Arraste ${p.nome} como ${rotuloSetorConvocacao(setor as SetorConvocacaoEscala)}`
                       : `Falta contrato/eSocial — ${gate.erros[0] ?? ""}`
                 }
                 onDragStart={(e) => {
@@ -1137,6 +1144,19 @@ function RhEscalaConteudo() {
                         </ul>
                         <Link href={`/rh/${p.id}`} className="mt-2 inline-block text-primaria-escura underline">
                           Abrir perfil e marcar contrato / eSocial
+                        </Link>
+                      </div>
+                    )}
+                    {gate.ok && gate.avisos.length > 0 && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-amber-950">
+                        <p className="font-semibold">Documento a vencer</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-4">
+                          {gate.avisos.map((msg) => (
+                            <li key={msg}>{msg}</li>
+                          ))}
+                        </ul>
+                        <Link href={`/rh/${p.id}?aba=documentos`} className="mt-2 inline-block text-primaria-escura underline">
+                          Ver documentos no perfil
                         </Link>
                       </div>
                     )}

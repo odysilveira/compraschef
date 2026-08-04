@@ -59,10 +59,15 @@ export function rotuloStatusDocumento(status: StatusDocumentoPessoa): string {
       return "Ausente";
     case "vencido":
       return "Vencido";
+    case "a_vencer":
+      return "A vencer";
     default:
       return status;
   }
 }
+
+/** Janela padrão para avisar documentos próximos do vencimento. */
+export const DIAS_AVISO_DOCUMENTO_A_VENCER = 30;
 
 /** YYYY-MM-DD local. */
 export function hojeIsoLocal(data = new Date()): string {
@@ -72,12 +77,25 @@ export function hojeIsoLocal(data = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Soma dias a uma data YYYY-MM-DD (calendário local). */
+export function somarDiasIso(dataIso: string, dias: number): string {
+  const [y, m, d] = dataIso.split("-").map(Number);
+  const dt = new Date(y!, (m ?? 1) - 1, d ?? 1);
+  dt.setDate(dt.getDate() + dias);
+  return hojeIsoLocal(dt);
+}
+
 export function statusDocumento(
   doc: Pick<DocumentoPessoa, "presente" | "validade">,
-  hoje: string = hojeIsoLocal()
+  hoje: string = hojeIsoLocal(),
+  diasAviso: number = DIAS_AVISO_DOCUMENTO_A_VENCER
 ): StatusDocumentoPessoa {
   if (!doc.presente) return "ausente";
   if (doc.validade && doc.validade < hoje) return "vencido";
+  if (doc.validade) {
+    const limite = somarDiasIso(hoje, Math.max(0, diasAviso));
+    if (doc.validade <= limite) return "a_vencer";
+  }
   return "presente";
 }
 
@@ -176,15 +194,23 @@ export interface ResumoDocumentosPessoa {
   presente: number;
   ausente: number;
   vencido: number;
+  a_vencer: number;
 }
 
 export function resumirDocumentos(
   documentos: DocumentoPessoa[],
-  hoje: string = hojeIsoLocal()
+  hoje: string = hojeIsoLocal(),
+  diasAviso: number = DIAS_AVISO_DOCUMENTO_A_VENCER
 ): ResumoDocumentosPessoa {
-  const r: ResumoDocumentosPessoa = { total: documentos.length, presente: 0, ausente: 0, vencido: 0 };
+  const r: ResumoDocumentosPessoa = {
+    total: documentos.length,
+    presente: 0,
+    ausente: 0,
+    vencido: 0,
+    a_vencer: 0,
+  };
   for (const d of documentos) {
-    r[statusDocumento(d, hoje)] += 1;
+    r[statusDocumento(d, hoje, diasAviso)] += 1;
   }
   return r;
 }
@@ -193,34 +219,42 @@ export interface AlertaDocumentosPessoa {
   tem_alerta: boolean;
   ausente: number;
   vencido: number;
+  a_vencer: number;
   /** Ex.: "ASO vencido · CNH ausente" */
   rotulo: string;
 }
 
-/** Resumo curto para a lista de pessoas (ausente/vencido). */
+/** Resumo curto para a lista de pessoas (ausente/vencido/a vencer). */
 export function alertaDocumentosPessoa(
   pessoa: PessoaRH,
-  hoje: string = hojeIsoLocal()
+  hoje: string = hojeIsoLocal(),
+  diasAviso: number = DIAS_AVISO_DOCUMENTO_A_VENCER
 ): AlertaDocumentosPessoa {
   const docs = garantirChecklistDocumentos(pessoa);
-  const resumo = resumirDocumentos(docs, hoje);
+  const resumo = resumirDocumentos(docs, hoje, diasAviso);
   const partes: string[] = [];
   for (const d of docs) {
-    if (statusDocumento(d, hoje) === "vencido") {
+    if (statusDocumento(d, hoje, diasAviso) === "vencido") {
       partes.push(`${rotuloTipoDocumento(d.tipo)} vencido`);
     }
   }
   for (const d of docs) {
-    if (statusDocumento(d, hoje) === "ausente") {
+    if (statusDocumento(d, hoje, diasAviso) === "a_vencer") {
+      partes.push(`${rotuloTipoDocumento(d.tipo)} a vencer`);
+    }
+  }
+  for (const d of docs) {
+    if (statusDocumento(d, hoje, diasAviso) === "ausente") {
       partes.push(`${rotuloTipoDocumento(d.tipo)} ausente`);
     }
   }
   const extras = partes.length > 2 ? ` +${partes.length - 2}` : "";
   const rotulo = partes.length ? `${partes.slice(0, 2).join(" · ")}${extras}` : "Docs OK";
   return {
-    tem_alerta: resumo.ausente + resumo.vencido > 0,
+    tem_alerta: resumo.ausente + resumo.vencido + resumo.a_vencer > 0,
     ausente: resumo.ausente,
     vencido: resumo.vencido,
+    a_vencer: resumo.a_vencer,
     rotulo,
   };
 }

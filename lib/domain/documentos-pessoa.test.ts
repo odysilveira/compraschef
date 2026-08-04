@@ -33,10 +33,12 @@ describe("documentos-pessoa", () => {
     expect(catalogoDocumentosPorTipo("intermitente").some((c) => c.tipo === "cnh")).toBe(false);
   });
 
-  it("classifica status presente / ausente / vencido", () => {
+  it("classifica status presente / ausente / vencido / a vencer", () => {
     expect(statusDocumento({ presente: false }, "2026-08-03")).toBe("ausente");
     expect(statusDocumento({ presente: true }, "2026-08-03")).toBe("presente");
-    expect(statusDocumento({ presente: true, validade: "2026-08-03" }, "2026-08-03")).toBe("presente");
+    expect(statusDocumento({ presente: true, validade: "2026-08-03" }, "2026-08-03")).toBe("a_vencer");
+    expect(statusDocumento({ presente: true, validade: "2026-08-20" }, "2026-08-03")).toBe("a_vencer");
+    expect(statusDocumento({ presente: true, validade: "2026-09-15" }, "2026-08-03")).toBe("presente");
     expect(statusDocumento({ presente: true, validade: "2026-08-02" }, "2026-08-03")).toBe("vencido");
   });
 
@@ -119,5 +121,24 @@ describe("documentos-pessoa", () => {
     expect(alerta.vencido).toBe(1);
     expect(alerta.ausente).toBeGreaterThanOrEqual(1);
     expect(alerta.rotulo).toContain("ASO vencido");
+  });
+
+  it("alerta inclui documento a vencer nos próximos 30 dias", () => {
+    const alerta = alertaDocumentosPessoa(
+      pessoaBase({
+        contrato_assinado: true,
+        esocial_ok: true,
+        documentos: [
+          { id: "1", tipo: "contrato", rotulo: "C", presente: true },
+          { id: "2", tipo: "esocial", rotulo: "E", presente: true },
+          { id: "3", tipo: "rg", rotulo: "R", presente: true },
+          { id: "4", tipo: "aso", rotulo: "ASO", presente: true, validade: "2026-08-20" },
+        ],
+      }),
+      "2026-08-04"
+    );
+    expect(alerta.a_vencer).toBe(1);
+    expect(alerta.tem_alerta).toBe(true);
+    expect(alerta.rotulo).toContain("ASO a vencer");
   });
 });

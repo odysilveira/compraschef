@@ -719,18 +719,25 @@ function RhPerfilConteudo() {
                   <div className="flex flex-wrap gap-2 text-xs">
                     <Badge cor="verde">Presente ({resumo.presente})</Badge>
                     <Badge cor="cinza">Ausente ({resumo.ausente})</Badge>
+                    <Badge cor="azul">A vencer ({resumo.a_vencer})</Badge>
                     <Badge cor="laranja">Vencido ({resumo.vencido})</Badge>
                   </div>
                 </div>
                 <p className="text-sm text-slate-600">
                   Marque o que já tem em mão. Contrato e eSocial alimentam a convocação na escala.
-                  Validade (ASO/CNH) marca como vencido quando a data passa.
+                  Validade (ASO/CNH): avisa a vencer nos próximos 30 dias e marca vencido quando a data passa.
                 </p>
                 <ul className="space-y-3">
                   {docs.map((doc) => {
                     const status = statusDocumento(doc, hoje);
                     const corBadge =
-                      status === "presente" ? "verde" : status === "vencido" ? "laranja" : "cinza";
+                      status === "presente"
+                        ? "verde"
+                        : status === "vencido"
+                          ? "laranja"
+                          : status === "a_vencer"
+                            ? "azul"
+                            : "cinza";
                     return (
                       <li
                         key={doc.id}

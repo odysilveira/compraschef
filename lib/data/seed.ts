@@ -272,7 +272,7 @@ export const seedDB: DB = {
           tipo: "aso",
           rotulo: "ASO (exame admissional/periódico)",
           presente: true,
-          validade: soData(diasAFrente(90)),
+          validade: soData(diasAFrente(15)),
           atualizado_em: diasAtras(10),
         },
         {

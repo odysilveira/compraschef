@@ -19,6 +19,7 @@ import {
   janelaCalendarioEscala,
   linkWhatsAppConvocacao,
   listarCltSemPlantaoNaJanela,
+  listarConvocacoesRascunhoNaJanela,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
   moverSlotParaData,
@@ -310,6 +311,11 @@ function RhEscalaConteudo() {
         return convocacaoEnviadaSemRespostaVencida(c.status, slot?.data, hoje);
       }),
     [convocacoesEnviadasNaJanela, db.escala_slots, hoje]
+  );
+
+  const convocacoesRascunhoNaJanela = useMemo(
+    () => listarConvocacoesRascunhoNaJanela(db, dias),
+    [db, dias]
   );
 
   const porDia = useMemo(() => {
@@ -758,6 +764,15 @@ function RhEscalaConteudo() {
         </Link>
         <button
           type="button"
+          className={filtroConvocacao === "rascunho" ? "btn-primario" : "btn-secundario"}
+          onClick={() =>
+            irParaFiltroConvocacao(filtroConvocacao === "rascunho" ? "todas" : "rascunho")
+          }
+        >
+          A enviar ({convocacoesRascunhoNaJanela.length})
+        </button>
+        <button
+          type="button"
           className={filtroConvocacao === "enviada" ? "btn-primario" : "btn-secundario"}
           onClick={() =>
             irParaFiltroConvocacao(filtroConvocacao === "enviada" ? "todas" : "enviada")
@@ -771,7 +786,7 @@ function RhEscalaConteudo() {
         </button>
       </div>
 
-      {cltSemPlantao.length > 0 && filtroConvocacao !== "enviada" && (
+      {cltSemPlantao.length > 0 && filtroConvocacao === "todas" && (
         <Card className="mb-4 space-y-3 border-sky-200 bg-sky-50/60">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
@@ -804,6 +819,78 @@ function RhEscalaConteudo() {
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {filtroConvocacao === "rascunho" && (
+        <Card className="mb-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold">Convocações a enviar (rascunho)</h2>
+              <p className="text-sm text-slate-600">
+                Plantões já criados — falta copiar/abrir o WhatsApp e marcar como enviada. No calendário,
+                esses plantões ficam em destaque.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-secundario text-sm"
+              onClick={() => irParaFiltroConvocacao("todas")}
+            >
+              Limpar filtro
+            </button>
+          </div>
+          {convocacoesRascunhoNaJanela.length === 0 ? (
+            <Vazio mensagem="Nenhuma convocação em rascunho neste período." />
+          ) : (
+            <ul className="space-y-2">
+              {convocacoesRascunhoNaJanela.map((conv) => {
+                const slot = db.escala_slots.find((s) => s.id === conv.escala_slot_id);
+                const pessoa = db.pessoas.find((p) => p.id === conv.pessoa_id);
+                const linkWa = linkWhatsAppConvocacao(pessoa?.telefone, conv.texto_mensagem);
+                return (
+                  <li
+                    key={conv.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2"
+                  >
+                    <div>
+                      <p className="font-medium text-slate-900">{nomePessoa(conv.pessoa_id)}</p>
+                      <p className="text-sm text-slate-600">
+                        {slot
+                          ? `${formatDataBrLonga(slot.data)} · ${slot.hora_inicio}–${slot.hora_fim}`
+                          : "Plantão"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {linkWa && (
+                        <button
+                          type="button"
+                          className="btn-primario text-sm"
+                          onClick={() => abrirWhatsAppConvocacao(conv.id)}
+                        >
+                          WhatsApp
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-secundario text-sm"
+                        onClick={() => void copiarTexto(conv.texto_mensagem, conv.id)}
+                      >
+                        Copiar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secundario text-sm"
+                        onClick={() => setDetalheSlotId(conv.escala_slot_id)}
+                      >
+                        Abrir
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Card>
       )}
 
@@ -1013,6 +1100,9 @@ function RhEscalaConteudo() {
                           const diaComEnviada =
                             filtroConvocacao === "enviada" &&
                             lista.some((s) => convocacaoDoSlot(db, s.id)?.status === "enviada");
+                          const diaComRascunho =
+                            filtroConvocacao === "rascunho" &&
+                            lista.some((s) => convocacaoDoSlot(db, s.id)?.status === "rascunho");
                           const resumo = resumoSetoresDoDia(lista, db.pessoas ?? []);
                           const resumoPreview =
                             ehDestino && arrasto?.tipo === "pessoa"
@@ -1054,11 +1144,13 @@ function RhEscalaConteudo() {
                                   ? "border-primaria bg-primaria/10 ring-2 ring-primaria/30"
                                   : diaComEnviada
                                     ? "border-amber-400 bg-amber-50/60 ring-1 ring-amber-300/60"
-                                    : ehHoje
-                                      ? "border-primaria bg-primaria/5"
-                                      : lista.length > 0
-                                        ? "border-stone-200 bg-white"
-                                        : "border-dashed border-stone-200 bg-stone-50"
+                                    : diaComRascunho
+                                      ? "border-stone-400 bg-stone-100/80 ring-1 ring-stone-300/70"
+                                      : ehHoje
+                                        ? "border-primaria bg-primaria/5"
+                                        : lista.length > 0
+                                          ? "border-stone-200 bg-white"
+                                          : "border-dashed border-stone-200 bg-stone-50"
                               }`}
                               onDragOver={(e) => {
                                 if (!arrasto) return;
@@ -1114,7 +1206,9 @@ function RhEscalaConteudo() {
                                         draggable
                                         className={`cursor-grab truncate rounded px-1 py-0.5 text-left text-[11px] font-medium active:cursor-grabbing ${
                                           destaque === "destaque"
-                                            ? "bg-amber-200 text-amber-950 ring-1 ring-amber-500 hover:bg-amber-300/90"
+                                            ? filtroConvocacao === "rascunho"
+                                              ? "bg-stone-300 text-stone-950 ring-1 ring-stone-500 hover:bg-stone-400/90"
+                                              : "bg-amber-200 text-amber-950 ring-1 ring-amber-500 hover:bg-amber-300/90"
                                             : destaque === "atenuado"
                                               ? "bg-stone-100/70 text-slate-400 opacity-45 hover:opacity-70"
                                               : ehClt

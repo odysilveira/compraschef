@@ -876,6 +876,25 @@ export function listarCltSemPlantaoNaJanela(
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }
 
+/** Convocações em rascunho ligadas a plantões da janela (ainda não enviadas no WhatsApp). */
+export function listarConvocacoesRascunhoNaJanela(
+  db: Pick<DB, "convocacoes" | "escala_slots">,
+  dias: string[]
+): ConvocacaoIntermitente[] {
+  const setDias = new Set(dias);
+  const idsSlots = new Set(
+    (db.escala_slots ?? []).filter((s) => setDias.has(s.data)).map((s) => s.id)
+  );
+  return (db.convocacoes ?? [])
+    .filter((c) => c.status === "rascunho" && idsSlots.has(c.escala_slot_id))
+    .slice()
+    .sort((a, b) => {
+      const sa = (db.escala_slots ?? []).find((s) => s.id === a.escala_slot_id);
+      const sb = (db.escala_slots ?? []).find((s) => s.id === b.escala_slot_id);
+      return (sa?.data ?? "").localeCompare(sb?.data ?? "") || a.id.localeCompare(b.id);
+    });
+}
+
 /** Padrões de escala CLT (ciclo rolante ou calendário). */
 export type PadraoEscalaClt = "6x1" | "5x2" | "4x2" | "12x36" | "seg_sex";
 

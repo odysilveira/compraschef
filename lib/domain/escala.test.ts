@@ -13,6 +13,7 @@ import {
   janelaCalendarioEscala,
   linkWhatsAppConvocacao,
   listarCltSemPlantaoNaJanela,
+  listarConvocacoesRascunhoNaJanela,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
   montarTextoConvocacaoWhatsApp,
@@ -700,5 +701,25 @@ describe("escala domain", () => {
     });
     const sem = listarCltSemPlantaoNaJanela(db, ["2026-08-05", "2026-08-06"]);
     expect(sem.map((p) => p.id)).toEqual(["pes-clt-2"]);
+  });
+
+  it("lista convocações em rascunho na janela", () => {
+    const db = dbBase();
+    const r = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-10",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-rasc", convocacaoId: "conv-rasc", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    expect(r.sucesso).toBe(true);
+    expect(r.convocacao?.status).toBe("rascunho");
+    const lista = listarConvocacoesRascunhoNaJanela(db, ["2026-08-10", "2026-08-11"]);
+    expect(lista.map((c) => c.id)).toEqual(["conv-rasc"]);
+    expect(listarConvocacoesRascunhoNaJanela(db, ["2026-08-20"])).toHaveLength(0);
   });
 });

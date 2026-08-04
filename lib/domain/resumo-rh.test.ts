@@ -135,12 +135,16 @@ describe("resumo-rh", () => {
     expect(parsePessoaPontoRh(" pes-1 ")).toBe("pes-1");
     expect(parsePessoaPontoRh(null)).toBe("");
     expect(parseFiltroConvocacaoEscalaRh("enviada")).toBe("enviada");
+    expect(parseFiltroConvocacaoEscalaRh("rascunho")).toBe("rascunho");
     expect(parseFiltroConvocacaoEscalaRh(null)).toBe("todas");
     expect(hrefEscalaRh()).toBe("/rh/escala");
     expect(hrefEscalaRh({ convocacao: "enviada" })).toBe("/rh/escala?convocacao=enviada");
+    expect(hrefEscalaRh({ convocacao: "rascunho" })).toBe("/rh/escala?convocacao=rascunho");
     expect(destaqueSlotFiltroConvocacao("todas", "enviada")).toBe("normal");
     expect(destaqueSlotFiltroConvocacao("enviada", "enviada")).toBe("destaque");
     expect(destaqueSlotFiltroConvocacao("enviada", "rascunho")).toBe("atenuado");
     expect(destaqueSlotFiltroConvocacao("enviada", undefined)).toBe("atenuado");
+    expect(destaqueSlotFiltroConvocacao("rascunho", "rascunho")).toBe("destaque");
+    expect(destaqueSlotFiltroConvocacao("rascunho", "enviada")).toBe("atenuado");
   });
 });

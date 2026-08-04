@@ -853,6 +853,61 @@ export function slotsNaJanela(db: DB, dias: string[]): EscalaSlot[] {
     .sort((a, b) => a.data.localeCompare(b.data) || a.hora_inicio.localeCompare(b.hora_inicio));
 }
 
+function csvEscapeEscala(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+/**
+ * CSV dos plantões da janela (separador `;`, UTF-8 com BOM) para Excel/pt-BR.
+ */
+export function exportarEscalaCsv(
+  slots: EscalaSlot[],
+  opts: {
+    nomePorId: (pessoaId: string) => string;
+    tipoPorId?: (pessoaId: string) => string;
+    statusConvocacaoPorSlotId?: (slotId: string) => string;
+  }
+): string {
+  const cabecalho = [
+    "Data",
+    "Pessoa",
+    "Tipo vínculo",
+    "Função",
+    "Local",
+    "Início",
+    "Fim",
+    "Intervalo (min)",
+    "Status convocação",
+    "Observação",
+  ];
+  const ordenados = slots
+    .slice()
+    .sort(
+      (a, b) =>
+        a.data.localeCompare(b.data) ||
+        a.hora_inicio.localeCompare(b.hora_inicio) ||
+        opts.nomePorId(a.pessoa_id).localeCompare(opts.nomePorId(b.pessoa_id), "pt-BR")
+    );
+  const linhas = ordenados.map((s) =>
+    [
+      s.data,
+      opts.nomePorId(s.pessoa_id),
+      opts.tipoPorId?.(s.pessoa_id) ?? "",
+      s.funcao ?? "",
+      s.local ?? "",
+      s.hora_inicio,
+      s.hora_fim,
+      String(s.intervalo_min ?? ""),
+      opts.statusConvocacaoPorSlotId?.(s.id) ?? "",
+      s.observacao ?? "",
+    ]
+      .map((c) => csvEscapeEscala(String(c)))
+      .join(";")
+  );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}
+
 /** Plantões de uma pessoa dentro da janela (ex.: próximos 28 dias). */
 export function slotsDaPessoaNaJanela(db: DB, pessoaId: string, dias: string[]): EscalaSlot[] {
   return slotsNaJanela(db, dias).filter((s) => s.pessoa_id === pessoaId);

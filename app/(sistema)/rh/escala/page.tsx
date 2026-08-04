@@ -47,6 +47,7 @@ import {
 import {
   destaqueSlotFiltroConvocacao,
   hrefEscalaRh,
+  parseAlertaCltEscalaRh,
   parseFiltroConvocacaoEscalaRh,
   type FiltroConvocacaoEscalaRh,
 } from "@/lib/domain/resumo-rh";
@@ -237,14 +238,30 @@ function RhEscalaConteudo() {
   const [filtroConvocacao, setFiltroConvocacao] = useState<FiltroConvocacaoEscalaRh>(() =>
     parseFiltroConvocacaoEscalaRh(searchParams.get("convocacao"))
   );
+  const [destaqueCltSem, setDestaqueCltSem] = useState(() =>
+    parseAlertaCltEscalaRh(searchParams.get("clt"))
+  );
+  const cltSemRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setFiltroConvocacao(parseFiltroConvocacaoEscalaRh(searchParams.get("convocacao")));
+    setDestaqueCltSem(parseAlertaCltEscalaRh(searchParams.get("clt")));
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!destaqueCltSem || filtroConvocacao !== "todas") return;
+    cltSemRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [destaqueCltSem, filtroConvocacao]);
 
   function irParaFiltroConvocacao(proximo: FiltroConvocacaoEscalaRh) {
     setFiltroConvocacao(proximo);
+    setDestaqueCltSem(false);
     router.replace(hrefEscalaRh({ convocacao: proximo }), { scroll: false });
+  }
+
+  function limparDestaqueClt() {
+    setDestaqueCltSem(false);
+    router.replace(hrefEscalaRh({ convocacao: filtroConvocacao }), { scroll: false });
   }
 
   const dias = useMemo(() => janelaCalendarioEscala(hojeISO()), []);
@@ -787,7 +804,12 @@ function RhEscalaConteudo() {
       </div>
 
       {cltSemPlantao.length > 0 && filtroConvocacao === "todas" && (
-        <Card className="mb-4 space-y-3 border-sky-200 bg-sky-50/60">
+        <div
+          ref={cltSemRef}
+          id="clt-sem-plantao"
+          className={destaqueCltSem ? "mb-4 scroll-mt-4 rounded-xl ring-2 ring-sky-500 ring-offset-2" : "mb-4"}
+        >
+          <Card className="space-y-3 border-sky-200 bg-sky-50/60">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h2 className="text-base font-bold text-sky-950">
@@ -798,6 +820,11 @@ function RhEscalaConteudo() {
                 preencher a janela.
               </p>
             </div>
+            {destaqueCltSem && (
+              <button type="button" className="btn-secundario text-sm" onClick={limparDestaqueClt}>
+                Limpar destaque
+              </button>
+            )}
           </div>
           <ul className="space-y-2">
             {cltSemPlantao.map((p) => (
@@ -819,7 +846,8 @@ function RhEscalaConteudo() {
               </li>
             ))}
           </ul>
-        </Card>
+          </Card>
+        </div>
       )}
 
       {filtroConvocacao === "rascunho" && (

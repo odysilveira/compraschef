@@ -242,10 +242,24 @@ export function parseFiltroConvocacaoEscalaRh(
   return "todas";
 }
 
-export function hrefEscalaRh(opts?: { convocacao?: FiltroConvocacaoEscalaRh }): string {
-  if (opts?.convocacao === "enviada") return "/rh/escala?convocacao=enviada";
-  if (opts?.convocacao === "rascunho") return "/rh/escala?convocacao=rascunho";
-  return "/rh/escala";
+export function hrefEscalaRh(opts?: {
+  convocacao?: FiltroConvocacaoEscalaRh;
+  clt?: "sem";
+}): string {
+  const params = new URLSearchParams();
+  if (opts?.convocacao === "enviada" || opts?.convocacao === "rascunho") {
+    params.set("convocacao", opts.convocacao);
+  }
+  if (opts?.clt === "sem") {
+    params.set("clt", "sem");
+  }
+  const q = params.toString();
+  return q ? `/rh/escala?${q}` : "/rh/escala";
+}
+
+/** Deep link do hub: destacar CLT sem plantão na escala. */
+export function parseAlertaCltEscalaRh(valor: string | null | undefined): boolean {
+  return valor === "sem";
 }
 
 /**

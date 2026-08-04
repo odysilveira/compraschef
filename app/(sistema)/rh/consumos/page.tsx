@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, UtensilsCrossed } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
@@ -11,6 +12,11 @@ import {
   criarConsumoPessoa,
   rotuloStatusConsumo,
 } from "@/lib/domain/consumos-pessoas";
+import {
+  hrefConsumosRh,
+  parseFiltroConsumosRh,
+  type FiltroConsumosRh,
+} from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { ConsumoPessoa } from "@/lib/types";
@@ -37,13 +43,26 @@ function formVazio(pessoaId = ""): FormNovo {
   };
 }
 
-export default function RhConsumosPage() {
+function RhConsumosConteudo() {
   const db = useDB();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const podeRh = usePodeAcessarModulo("rh");
-  const [filtro, setFiltro] = useState<"pendentes" | "descontados" | "todos">("pendentes");
+  const [filtro, setFiltro] = useState<FiltroConsumosRh>(() =>
+    parseFiltroConsumosRh(searchParams.get("filtro"))
+  );
   const [form, setForm] = useState<FormNovo | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFiltro(parseFiltroConsumosRh(searchParams.get("filtro")));
+  }, [searchParams]);
+
+  function irParaFiltro(proximo: FiltroConsumosRh) {
+    setFiltro(proximo);
+    router.replace(hrefConsumosRh(proximo), { scroll: false });
+  }
 
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
@@ -175,7 +194,12 @@ export default function RhConsumosPage() {
             ["todos", "Todos"],
           ] as const
         ).map(([id, rotulo]) => (
-          <button key={id} type="button" className={filtro === id ? "btn-primario" : "btn-secundario"} onClick={() => setFiltro(id)}>
+          <button
+            key={id}
+            type="button"
+            className={filtro === id ? "btn-primario" : "btn-secundario"}
+            onClick={() => irParaFiltro(id)}
+          >
             {rotulo}
           </button>
         ))}
@@ -287,5 +311,20 @@ export default function RhConsumosPage() {
         )}
       </Modal>
     </div>
+  );
+}
+
+export default function RhConsumosPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="RH — Consumos" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando consumos…</p>
+        </div>
+      }
+    >
+      <RhConsumosConteudo />
+    </Suspense>
   );
 }

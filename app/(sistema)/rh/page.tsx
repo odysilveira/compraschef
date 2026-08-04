@@ -371,21 +371,39 @@ function RhPessoasConteudo() {
             }
           />
         </Link>
-        <Link href={hrefEscalaRh({ convocacao: "enviada" })} className="block">
+        <Link
+          href={hrefEscalaRh({
+            convocacao:
+              resumoOp.convocacoes_sem_resposta > 0
+                ? "enviada"
+                : resumoOp.convocacoes_rascunho > 0
+                  ? "rascunho"
+                  : "enviada",
+          })}
+          className="block"
+        >
           <StatCard
-            rotulo="Convocações enviadas"
-            valor={String(resumoOp.convocacoes_enviadas)}
+            rotulo="Convocações"
+            valor={String(
+              resumoOp.convocacoes_enviadas + resumoOp.convocacoes_rascunho
+            )}
             subtexto={
               resumoOp.convocacoes_sem_resposta > 0
                 ? `${resumoOp.convocacoes_sem_resposta} sem resposta · Abrir escala`
-                : "Abrir escala"
+                : resumoOp.convocacoes_rascunho > 0
+                  ? `${resumoOp.convocacoes_rascunho} a enviar · Abrir escala`
+                  : resumoOp.convocacoes_enviadas > 0
+                    ? `${resumoOp.convocacoes_enviadas} enviada(s) · Abrir escala`
+                    : "Abrir escala"
             }
             cor={
               resumoOp.convocacoes_sem_resposta > 0
                 ? "laranja"
-                : resumoOp.convocacoes_enviadas > 0
+                : resumoOp.convocacoes_rascunho > 0
                   ? "amarelo"
-                  : "cinza"
+                  : resumoOp.convocacoes_enviadas > 0
+                    ? "amarelo"
+                    : "cinza"
             }
           />
         </Link>

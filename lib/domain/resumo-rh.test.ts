@@ -69,6 +69,7 @@ describe("resumo-rh", () => {
             { id: "2", tipo: "esocial", rotulo: "E", presente: true },
             { id: "3", tipo: "rg", rotulo: "R", presente: true },
             { id: "4", tipo: "aso", rotulo: "A", presente: true, validade: "2030-01-01" },
+            { id: "5", tipo: "ctps", rotulo: "CTPS", presente: true },
           ],
         }),
       ],

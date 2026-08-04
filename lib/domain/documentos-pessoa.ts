@@ -99,6 +99,34 @@ export function statusDocumento(
   return "presente";
 }
 
+/** Diferença em dias (validade − hoje). Negativo = já vencido. */
+export function diasRestantesValidade(
+  validade: string | undefined,
+  hoje: string = hojeIsoLocal()
+): number | null {
+  if (!validade || !/^\d{4}-\d{2}-\d{2}$/.test(validade) || !/^\d{4}-\d{2}-\d{2}$/.test(hoje)) {
+    return null;
+  }
+  const [vy, vm, vd] = validade.split("-").map(Number);
+  const [hy, hm, hd] = hoje.split("-").map(Number);
+  const a = Date.UTC(vy!, (vm ?? 1) - 1, vd ?? 1);
+  const b = Date.UTC(hy!, (hm ?? 1) - 1, hd ?? 1);
+  return Math.round((a - b) / 86_400_000);
+}
+
+/** Ex.: "vence em 15 dias", "vence hoje", "venceu há 3 dias". */
+export function formatarDiasRestantesDocumento(dias: number | null | undefined): string {
+  if (dias == null || !Number.isFinite(dias)) return "";
+  const n = Math.trunc(dias);
+  if (n < 0) {
+    const abs = Math.abs(n);
+    return abs === 1 ? "venceu há 1 dia" : `venceu há ${abs} dias`;
+  }
+  if (n === 0) return "vence hoje";
+  if (n === 1) return "vence amanhã";
+  return `vence em ${n} dias`;
+}
+
 export function idDocumentoPadrao(pessoaId: string, tipo: TipoDocumentoPessoa): string {
   return `doc-${pessoaId}-${tipo}`;
 }
@@ -235,12 +263,24 @@ export function alertaDocumentosPessoa(
   const partes: string[] = [];
   for (const d of docs) {
     if (statusDocumento(d, hoje, diasAviso) === "vencido") {
-      partes.push(`${rotuloTipoDocumento(d.tipo)} vencido`);
+      const dias = diasRestantesValidade(d.validade, hoje);
+      const extra = formatarDiasRestantesDocumento(dias);
+      partes.push(
+        extra
+          ? `${rotuloTipoDocumento(d.tipo)} vencido (${extra})`
+          : `${rotuloTipoDocumento(d.tipo)} vencido`
+      );
     }
   }
   for (const d of docs) {
     if (statusDocumento(d, hoje, diasAviso) === "a_vencer") {
-      partes.push(`${rotuloTipoDocumento(d.tipo)} a vencer`);
+      const dias = diasRestantesValidade(d.validade, hoje);
+      const extra = formatarDiasRestantesDocumento(dias);
+      partes.push(
+        extra
+          ? `${rotuloTipoDocumento(d.tipo)} (${extra})`
+          : `${rotuloTipoDocumento(d.tipo)} a vencer`
+      );
     }
   }
   for (const d of docs) {

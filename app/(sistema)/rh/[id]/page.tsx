@@ -24,6 +24,8 @@ import {
   rotuloStatusDocumento,
   sincronizarFlagsDocumentos,
   statusDocumento,
+  diasRestantesValidade,
+  formatarDiasRestantesDocumento,
 } from "@/lib/domain/documentos-pessoa";
 import {
   convocacaoDoSlot,
@@ -730,6 +732,11 @@ function RhPerfilConteudo() {
                 <ul className="space-y-3">
                   {docs.map((doc) => {
                     const status = statusDocumento(doc, hoje);
+                    const dias = diasRestantesValidade(doc.validade, hoje);
+                    const detalheDias =
+                      status === "a_vencer" || status === "vencido"
+                        ? formatarDiasRestantesDocumento(dias)
+                        : "";
                     const corBadge =
                       status === "presente"
                         ? "verde"
@@ -747,6 +754,9 @@ function RhPerfilConteudo() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium text-slate-900">{doc.rotulo}</span>
                             <Badge cor={corBadge}>{rotuloStatusDocumento(status)}</Badge>
+                            {detalheDias && (
+                              <span className="text-xs text-slate-600">{detalheDias}</span>
+                            )}
                           </div>
                           <label className="flex items-center gap-2 text-sm">
                             <input

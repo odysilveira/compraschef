@@ -172,6 +172,33 @@ export function conciliarPagamentoPessoa(
   return { sucesso: true, pagamento, erros: [] };
 }
 
+/**
+ * Concilia vários títulos em `aguardando_conciliacao` de uma vez.
+ * Se `ids` for informado, só esses; senão, todos os aguardando do banco.
+ */
+export function conciliarPagamentosAguardando(
+  db: DB,
+  ids: string[] | undefined,
+  dados: DadosConciliarPagamentoPessoa,
+  opcoes: OpcoesPagamentoPessoa = {}
+): { sucesso: boolean; conciliados: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : (db.pagamentos_pessoas ?? [])
+          .filter((p) => p.status === "aguardando_conciliacao")
+          .map((p) => p.id);
+
+  let conciliados = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const r = conciliarPagamentoPessoa(db, id, dados, opcoes);
+    if (r.sucesso) conciliados += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, conciliados, erros };
+}
+
 export function registrarDivergenciaPagamentoPessoa(
   db: DB,
   pagamentoId: string,

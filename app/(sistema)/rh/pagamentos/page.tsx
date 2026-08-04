@@ -14,6 +14,7 @@ import {
   informarPagamentoPessoa,
   liberarPagamentoPessoa,
   liberarPagamentosPrevistos,
+  conciliarPagamentosAguardando,
   registrarDivergenciaPagamentoPessoa,
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
@@ -543,6 +544,32 @@ function RhPagamentosConteudo() {
     }
   }
 
+  function conciliarTodosAguardandoDaLista() {
+    const ids = lista
+      .filter((p) => p.status === "aguardando_conciliacao")
+      .map((p) => p.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhum pagamento aguardando conciliação neste filtro.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = conciliarPagamentosAguardando(
+      proximo,
+      ids,
+      { dataLiquidacao: hojeISO(), responsavel: "usuário local" }
+    );
+    mutate((atual) => Object.assign(atual, proximo));
+    if (r.conciliados > 0) {
+      setMensagem(`${r.conciliados} pagamento(s) conciliado(s) e marcado(s) como pago.`);
+      irParaFiltro("pagos");
+    }
+    if (r.erros.length) {
+      setMensagem(
+        (r.conciliados > 0 ? `${r.conciliados} conciliado(s). ` : "") + r.erros.join(" ")
+      );
+    }
+  }
+
   const pagamentoInformar = informarId ? db.pagamentos_pessoas.find((p) => p.id === informarId) : null;
   const pagamentoConciliar = conciliarId ? db.pagamentos_pessoas.find((p) => p.id === conciliarId) : null;
   const pagamentoDivergencia = divergenciaId ? db.pagamentos_pessoas.find((p) => p.id === divergenciaId) : null;
@@ -627,6 +654,18 @@ function RhPagamentosConteudo() {
             Liberar todos ({lista.filter((p) => p.status === "previsto").length})
           </button>
         )}
+        {filtro === "aguardando" &&
+          lista.some((p) => p.status === "aguardando_conciliacao") && (
+            <button
+              type="button"
+              className="btn-primario"
+              onClick={conciliarTodosAguardandoDaLista}
+              title="Marca todos como pagos com a data de hoje"
+            >
+              Conciliar todos (
+              {lista.filter((p) => p.status === "aguardando_conciliacao").length})
+            </button>
+          )}
         <Link href="/rh" className="btn-secundario ml-auto">
           Ver pessoas
         </Link>

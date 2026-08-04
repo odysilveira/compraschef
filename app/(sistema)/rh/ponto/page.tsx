@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Copy, Download, FileUp, Fingerprint, RefreshCw, Wifi } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
@@ -34,6 +35,7 @@ import {
   toleranciaAtrasoMinutosDoDb,
 } from "@/lib/domain/ponto-rh";
 import type { FiltroEspelhoPonto, StatusDiaEspelho } from "@/lib/domain/ponto-rh";
+import { hrefPontoRh, parseAbaPontoRh, type AbaPontoRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
@@ -60,14 +62,16 @@ function BadgeEspelho({ status }: { status: StatusDiaEspelho }) {
   return <Badge cor={cor}>{rotuloStatusDiaEspelho(status)}</Badge>;
 }
 
-export default function RhPontoPage() {
+function RhPontoConteudo() {
   const db = useDB();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { papel } = usePapel();
   const podeRh = usePodeAcessarModulo("rh");
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<"abertas" | "todas">("abertas");
-  const [aba, setAba] = useState<"pendencias" | "espelho">("pendencias");
+  const [aba, setAba] = useState<AbaPontoRh>(() => parseAbaPontoRh(searchParams.get("aba")));
   const [competenciaEspelho, setCompetenciaEspelho] = useState(() => competenciaDeData());
   const [pessoaEspelho, setPessoaEspelho] = useState<string>("");
   const [filtroEspelho, setFiltroEspelho] = useState<FiltroEspelhoPonto>("todos");
@@ -79,6 +83,15 @@ export default function RhPontoPage() {
   const [importandoAfd, setImportandoAfd] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const inputAfdRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setAba(parseAbaPontoRh(searchParams.get("aba")));
+  }, [searchParams]);
+
+  function irParaAba(proxima: AbaPontoRh) {
+    setAba(proxima);
+    router.replace(hrefPontoRh(proxima), { scroll: false });
+  }
 
   const horasAviso = avisoPontoHorasDoDb(db);
   const toleranciaEspelho = toleranciaAtrasoMinutosDoDb(db);
@@ -160,7 +173,7 @@ export default function RhPontoPage() {
   function irParaPendenciaDoDia(pessoaId: string, data: string) {
     const jaAberta = pendenciaAbertaNoDia(db.pendencias_ponto ?? [], pessoaId, data);
     if (jaAberta) {
-      setAba("pendencias");
+      irParaAba("pendencias");
       setFiltro("abertas");
       abrirDetalhe(jaAberta);
       setErro(null);
@@ -172,7 +185,7 @@ export default function RhPontoPage() {
       r.criadas.find((p) => p.pessoa_id === pessoaId && p.data === data) ??
       pendenciaAbertaNoDia(proximo.pendencias_ponto ?? [], pessoaId, data);
 
-    setAba("pendencias");
+    irParaAba("pendencias");
     setFiltro("abertas");
     if (criada) {
       abrirDetalhe(criada);
@@ -426,7 +439,7 @@ export default function RhPontoPage() {
     }
     mutate((atual) => Object.assign(atual, proximo));
     setDetalheId(null);
-    setAba("espelho");
+    irParaAba("espelho");
     setMensagem("Aprovado — batidas gravadas no espelho de ponto.");
     setErro(null);
   }
@@ -573,14 +586,14 @@ export default function RhPontoPage() {
         <button
           type="button"
           className={aba === "pendencias" ? "btn-primario" : "btn-secundario"}
-          onClick={() => setAba("pendencias")}
+          onClick={() => irParaAba("pendencias")}
         >
           Pendências ({abertas.length})
         </button>
         <button
           type="button"
           className={aba === "espelho" ? "btn-primario" : "btn-secundario"}
-          onClick={() => setAba("espelho")}
+          onClick={() => irParaAba("espelho")}
         >
           Espelho
         </button>
@@ -980,5 +993,20 @@ export default function RhPontoPage() {
         )}
       </Modal>
     </div>
+  );
+}
+
+export default function RhPontoPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="RH — Ponto" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando ponto…</p>
+        </div>
+      }
+    >
+      <RhPontoConteudo />
+    </Suspense>
   );
 }

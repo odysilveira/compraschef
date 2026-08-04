@@ -5,6 +5,8 @@ import {
   hrefConsumosRh,
   hrefPagamentosRh,
   hrefPessoasRh,
+  hrefPontoRh,
+  parseAbaPontoRh,
   parseFiltroConsumosRh,
   parseFiltroDocsRh,
   parseFiltroPagamentosRh,
@@ -97,5 +99,9 @@ describe("resumo-rh", () => {
     expect(parseFiltroConsumosRh("descontados")).toBe("descontados");
     expect(hrefConsumosRh()).toBe("/rh/consumos");
     expect(hrefConsumosRh("todos")).toBe("/rh/consumos?filtro=todos");
+    expect(parseAbaPontoRh("espelho")).toBe("espelho");
+    expect(parseAbaPontoRh(null)).toBe("pendencias");
+    expect(hrefPontoRh()).toBe("/rh/ponto");
+    expect(hrefPontoRh("espelho")).toBe("/rh/ponto?aba=espelho");
   });
 });

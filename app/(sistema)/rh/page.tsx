@@ -20,14 +20,7 @@ import {
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
 import { alertaDocumentosPessoa, garantirChecklistDocumentos } from "@/lib/domain/documentos-pessoa";
-import {
-  hrefConsumosRh,
-  hrefPagamentosRh,
-  hrefPessoasRh,
-  parseFiltroDocsRh,
-  resumirOperacionalRh,
-  type FiltroDocsRh,
-} from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -277,7 +270,7 @@ function RhPessoasConteudo() {
             cor={resumoOp.docs_alerta > 0 ? "laranja" : "verde"}
           />
         </button>
-        <Link href="/rh/ponto" className="block">
+        <Link href={hrefPontoRh("pendencias")} className="block">
           <StatCard
             rotulo="Pendências de ponto"
             valor={String(resumoOp.ponto_abertas)}

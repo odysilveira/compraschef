@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DB, PessoaRH } from "../types";
+import { hojeIsoLocal, somarDiasIso } from "./documentos-pessoa";
 import {
   antecedenciaMinimaOk,
   calcularHorasPagas,
@@ -577,5 +578,58 @@ describe("escala domain", () => {
     expect(r.sucesso).toBe(false);
     expect(r.erros.some((e) => e.includes("Contrato"))).toBe(true);
     expect(db.escala_slots.find((s) => s.id === "esc-block")).toBeUndefined();
+  });
+
+  it("avisa (não bloqueia) quando ASO ou CNH estão a vencer", () => {
+    const hoje = hojeIsoLocal();
+    const validadeProxima = somarDiasIso(hoje, 15);
+    const validadeLonge = somarDiasIso(hoje, 120);
+
+    const comAsoAVencer = pessoaInter({
+      id: "pes-aso-av",
+      documentos: [
+        { id: "d1", tipo: "contrato", rotulo: "Contrato", presente: true },
+        { id: "d2", tipo: "esocial", rotulo: "eSocial", presente: true },
+        { id: "d3", tipo: "rg", rotulo: "RG", presente: true },
+        { id: "d4", tipo: "aso", rotulo: "ASO", presente: true, validade: validadeProxima },
+      ],
+    });
+    const gateAso = validarPreRequisitosConvocacao(comAsoAVencer);
+    expect(gateAso.ok).toBe(true);
+    expect(gateAso.avisos.some((a) => /ASO/i.test(a))).toBe(true);
+
+    const entregCnhAVencer = pessoaInter({
+      id: "pes-cnh-av",
+      tipo: "entregador",
+      funcao: "entregador",
+      documentos: [
+        { id: "d1", tipo: "contrato", rotulo: "Contrato", presente: true },
+        { id: "d2", tipo: "esocial", rotulo: "eSocial", presente: true },
+        { id: "d3", tipo: "rg", rotulo: "RG", presente: true },
+        { id: "d4", tipo: "aso", rotulo: "ASO", presente: true, validade: validadeLonge },
+        { id: "d5", tipo: "cnh", rotulo: "CNH", presente: true, validade: validadeProxima },
+      ],
+    });
+    const gateCnh = validarPreRequisitosConvocacao(entregCnhAVencer);
+    expect(gateCnh.ok).toBe(true);
+    expect(gateCnh.avisos.some((a) => /CNH/i.test(a))).toBe(true);
+
+    const db = dbBase();
+    db.pessoas.push(comAsoAVencer);
+    const dataPlantao = somarDiasIso(hoje, 10);
+    const r = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-aso-av",
+        data: dataPlantao,
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-aviso", agora: `${hoje}T12:00:00.000Z` }
+    );
+    expect(r.sucesso).toBe(true);
+    expect(r.avisos.some((a) => /ASO/i.test(a))).toBe(true);
+    expect(db.escala_slots.find((s) => s.id === "esc-aviso")).toBeDefined();
   });
 });

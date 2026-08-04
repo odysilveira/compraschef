@@ -1,7 +1,7 @@
 import type { DB } from "../types";
 import { alertaDocumentosPessoa, hojeIsoLocal } from "./documentos-pessoa";
 import { convocacaoEnviadaSemRespostaVencida } from "./escala";
-import { pendenciasPontoAbertas } from "./ponto-rh";
+import { resumirPendenciasPontoAbertas } from "./ponto-rh";
 
 export interface ResumoOperacionalRh {
   pessoas_ativas: number;
@@ -9,6 +9,10 @@ export interface ResumoOperacionalRh {
   docs_vencido: number;
   docs_a_vencer: number;
   ponto_abertas: number;
+  /** Pendências aguardando aviso WhatsApp. */
+  ponto_a_avisar: number;
+  /** Propostas do funcionário para o gestor confirmar. */
+  ponto_propostas: number;
   convocacoes_enviadas: number;
   /** Enviadas com plantão já passado — triagem de silêncio na escala. */
   convocacoes_sem_resposta: number;
@@ -53,12 +57,15 @@ export function resumirOperacionalRh(
       convocacoes_sem_resposta += 1;
     }
   }
+  const ponto = resumirPendenciasPontoAbertas(db);
   return {
     pessoas_ativas: ativas.length,
     docs_alerta,
     docs_vencido,
     docs_a_vencer,
-    ponto_abertas: pendenciasPontoAbertas(db).length,
+    ponto_abertas: ponto.total,
+    ponto_a_avisar: ponto.aviso,
+    ponto_propostas: ponto.proposta,
     convocacoes_enviadas: enviadas.length,
     convocacoes_sem_resposta,
     pagamentos_aguardando: pags.filter((p) => p.status === "aguardando_conciliacao").length,
@@ -141,13 +148,37 @@ export function parsePessoaPontoRh(valor: string | null | undefined): string {
   return valor?.trim() || "";
 }
 
-export function hrefPontoRh(opts?: { aba?: AbaPontoRh; pessoa?: string } | AbaPontoRh): string {
+export type FiltroPendenciasPontoRh = "abertas" | "aviso" | "aguardando" | "proposta" | "todas";
+
+export function parseFiltroPendenciasPontoRh(
+  valor: string | null | undefined
+): FiltroPendenciasPontoRh {
+  if (
+    valor === "aviso" ||
+    valor === "aguardando" ||
+    valor === "proposta" ||
+    valor === "todas" ||
+    valor === "abertas"
+  ) {
+    return valor;
+  }
+  return "abertas";
+}
+
+export function hrefPontoRh(
+  opts?:
+    | { aba?: AbaPontoRh; pessoa?: string; filtro?: FiltroPendenciasPontoRh }
+    | AbaPontoRh
+): string {
   const normalizado =
     typeof opts === "string" || opts === undefined
       ? { aba: opts }
       : opts;
   const params = new URLSearchParams();
   if (normalizado.aba === "espelho") params.set("aba", "espelho");
+  else if (normalizado.filtro && normalizado.filtro !== "abertas") {
+    params.set("filtro", normalizado.filtro);
+  }
   const pessoa = normalizado.pessoa?.trim();
   if (pessoa) params.set("pessoa", pessoa);
   const q = params.toString();

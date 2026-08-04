@@ -324,12 +324,35 @@ function RhPessoasConteudo() {
             cor={resumoOp.docs_alerta > 0 ? "laranja" : "verde"}
           />
         </button>
-        <Link href={hrefPontoRh({ aba: "pendencias" })} className="block">
+        <Link
+          href={hrefPontoRh({
+            aba: "pendencias",
+            filtro:
+              resumoOp.ponto_propostas > 0
+                ? "proposta"
+                : resumoOp.ponto_a_avisar > 0
+                  ? "aviso"
+                  : "abertas",
+          })}
+          className="block"
+        >
           <StatCard
             rotulo="Pendências de ponto"
             valor={String(resumoOp.ponto_abertas)}
-            subtexto="Abrir ponto"
-            cor={resumoOp.ponto_abertas > 0 ? "amarelo" : "verde"}
+            subtexto={
+              resumoOp.ponto_propostas > 0
+                ? `${resumoOp.ponto_propostas} proposta(s) · Abrir`
+                : resumoOp.ponto_a_avisar > 0
+                  ? `${resumoOp.ponto_a_avisar} a avisar · Abrir`
+                  : "Abrir ponto"
+            }
+            cor={
+              resumoOp.ponto_propostas > 0
+                ? "laranja"
+                : resumoOp.ponto_abertas > 0
+                  ? "amarelo"
+                  : "verde"
+            }
           />
         </Link>
         <Link href={hrefEscalaRh({ convocacao: "enviada" })} className="block">

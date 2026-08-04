@@ -11,6 +11,8 @@ import {
   resumirEspelhoPonto,
   exportarEspelhoCsv,
   filtrarEspelhoPonto,
+  filtrarPendenciasPonto,
+  resumirPendenciasPontoAbertas,
   duracaoMinutosEntreHoras,
   formatarDuracaoHoras,
   formatarSaldoHoras,
@@ -297,5 +299,28 @@ describe("ponto-rh", () => {
     expect(filtrarEspelhoPonto(dias, "saldo_negativo")).toEqual([menos]);
     expect(filtrarEspelhoPonto(dias, "saldo_zero")).toEqual([zero]);
     expect(filtrarEspelhoPonto(dias, "ok").length).toBe(3);
+  });
+
+  it("filtra e resume pendências por ação", () => {
+    const pendencias = [
+      { id: "1", status: "aguardando_aviso" as const, data: "2026-08-03", pessoa_id: "p" },
+      { id: "2", status: "aguardando_funcionario" as const, data: "2026-08-02", pessoa_id: "p" },
+      { id: "3", status: "proposta" as const, data: "2026-08-01", pessoa_id: "p" },
+      { id: "4", status: "aprovada" as const, data: "2026-07-30", pessoa_id: "p" },
+    ];
+    expect(filtrarPendenciasPonto(pendencias as never, "aviso").map((p) => p.id)).toEqual(["1"]);
+    expect(filtrarPendenciasPonto(pendencias as never, "aguardando").map((p) => p.id)).toEqual(["2"]);
+    expect(filtrarPendenciasPonto(pendencias as never, "proposta").map((p) => p.id)).toEqual(["3"]);
+    expect(filtrarPendenciasPonto(pendencias as never, "abertas").map((p) => p.id)).toEqual([
+      "1",
+      "2",
+      "3",
+    ]);
+    expect(filtrarPendenciasPonto(pendencias as never, "todas")).toHaveLength(4);
+
+    const resumo = resumirPendenciasPontoAbertas({
+      pendencias_ponto: pendencias as never,
+    });
+    expect(resumo).toEqual({ total: 3, aviso: 1, aguardando: 1, proposta: 1 });
   });
 });

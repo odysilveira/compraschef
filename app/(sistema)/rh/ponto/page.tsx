@@ -21,6 +21,8 @@ import {
   montarTextoAvisoPontoWhatsApp,
   pendenciasPontoAbertas,
   pendenciaAbertaNoDia,
+  filtrarPendenciasPonto,
+  resumirPendenciasPontoAbertas,
   recusarPendenciaPonto,
   registrarPropostaPonto,
   resumirEspelhoPonto,
@@ -35,7 +37,14 @@ import {
   toleranciaAtrasoMinutosDoDb,
 } from "@/lib/domain/ponto-rh";
 import type { FiltroEspelhoPonto, StatusDiaEspelho } from "@/lib/domain/ponto-rh";
-import { hrefPontoRh, parseAbaPontoRh, parsePessoaPontoRh, type AbaPontoRh } from "@/lib/domain/resumo-rh";
+import {
+  hrefPontoRh,
+  parseAbaPontoRh,
+  parseFiltroPendenciasPontoRh,
+  parsePessoaPontoRh,
+  type AbaPontoRh,
+  type FiltroPendenciasPontoRh,
+} from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
@@ -70,7 +79,9 @@ function RhPontoConteudo() {
   const podeRh = usePodeAcessarModulo("rh");
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const [filtro, setFiltro] = useState<"abertas" | "todas">("abertas");
+  const [filtro, setFiltro] = useState<FiltroPendenciasPontoRh>(() =>
+    parseFiltroPendenciasPontoRh(searchParams.get("filtro"))
+  );
   const [aba, setAba] = useState<AbaPontoRh>(() => parseAbaPontoRh(searchParams.get("aba")));
   const [competenciaEspelho, setCompetenciaEspelho] = useState(() => competenciaDeData());
   const [pessoaEspelho, setPessoaEspelho] = useState<string>(() =>
@@ -87,7 +98,11 @@ function RhPontoConteudo() {
   const inputAfdRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setAba(parseAbaPontoRh(searchParams.get("aba")));
+    const proximaAba = parseAbaPontoRh(searchParams.get("aba"));
+    setAba(proximaAba);
+    if (proximaAba === "pendencias") {
+      setFiltro(parseFiltroPendenciasPontoRh(searchParams.get("filtro")));
+    }
     const pessoaUrl = parsePessoaPontoRh(searchParams.get("pessoa"));
     if (!pessoaUrl) {
       setPessoaEspelho("");
@@ -97,17 +112,30 @@ function RhPontoConteudo() {
     setPessoaEspelho(existe ? pessoaUrl : "");
   }, [db.pessoas, searchParams]);
 
-  function irParaPonto(proxima: AbaPontoRh, pessoaId: string = pessoaEspelho) {
+  function irParaPonto(
+    proxima: AbaPontoRh,
+    pessoaId: string = pessoaEspelho,
+    proximoFiltro: FiltroPendenciasPontoRh = filtro
+  ) {
     setAba(proxima);
     setPessoaEspelho(pessoaId);
+    if (proxima === "pendencias") setFiltro(proximoFiltro);
     router.replace(
-      hrefPontoRh({ aba: proxima, pessoa: pessoaId || undefined }),
+      hrefPontoRh({
+        aba: proxima,
+        pessoa: pessoaId || undefined,
+        filtro: proxima === "pendencias" ? proximoFiltro : undefined,
+      }),
       { scroll: false }
     );
   }
 
   function irParaAba(proxima: AbaPontoRh) {
     irParaPonto(proxima);
+  }
+
+  function irParaFiltroPendencias(proximo: FiltroPendenciasPontoRh) {
+    irParaPonto("pendencias", pessoaEspelho, proximo);
   }
 
   function aoMudarPessoaEspelho(pessoaId: string) {
@@ -122,11 +150,12 @@ function RhPontoConteudo() {
   const [loginCid, setLoginCid] = useState(controlId.login);
   const [senhaCid, setSenhaCid] = useState(controlId.password);
   const [mode671, setMode671] = useState(controlId.mode_671 !== false);
+  const resumoPendencias = useMemo(() => resumirPendenciasPontoAbertas(db), [db]);
   const abertas = useMemo(() => pendenciasPontoAbertas(db), [db]);
-  const lista = useMemo(() => {
-    const todas = [...(db.pendencias_ponto ?? [])].sort((a, b) => b.data.localeCompare(a.data));
-    return filtro === "abertas" ? todas.filter((p) => abertas.some((a) => a.id === p.id)) : todas;
-  }, [abertas, db.pendencias_ponto, filtro]);
+  const lista = useMemo(
+    () => filtrarPendenciasPonto(db.pendencias_ponto ?? [], filtro),
+    [db.pendencias_ponto, filtro]
+  );
 
   const espelho = useMemo(
     () =>
@@ -193,7 +222,7 @@ function RhPontoConteudo() {
         ? `Detecção: ${partes.join(" · ")}.`
         : "Nenhuma pendência nova. Escala CLT e batidas já estão alinhadas no prazo."
     );
-    setFiltro("abertas");
+    irParaFiltroPendencias("abertas");
     return { proximo, r };
   }
 
@@ -201,7 +230,7 @@ function RhPontoConteudo() {
     const jaAberta = pendenciaAbertaNoDia(db.pendencias_ponto ?? [], pessoaId, data);
     if (jaAberta) {
       irParaAba("pendencias");
-      setFiltro("abertas");
+      irParaFiltroPendencias("abertas");
       abrirDetalhe(jaAberta);
       setErro(null);
       return;
@@ -213,7 +242,7 @@ function RhPontoConteudo() {
       pendenciaAbertaNoDia(proximo.pendencias_ponto ?? [], pessoaId, data);
 
     irParaAba("pendencias");
-    setFiltro("abertas");
+    irParaFiltroPendencias("abertas");
     if (criada) {
       abrirDetalhe(criada);
       setMensagem(`Pendência pronta para ${nomePessoa(pessoaId)} em ${dataBR(data)}.`);
@@ -267,7 +296,7 @@ function RhPontoConteudo() {
           (imp.semPessoa ? `, ${imp.semPessoa} CPF sem cadastro` : "") +
           `. Detecção: ${det.criadas.length} pendência(s).${avisos}`
       );
-      setFiltro("abertas");
+      irParaFiltroPendencias("abertas");
     } catch {
       setErro("Não foi possível ler o arquivo AFD.");
     } finally {
@@ -359,7 +388,7 @@ function RhPontoConteudo() {
           (maior != null ? ` · NSR até ${maior}` : "") +
           `. Detecção: ${det.criadas.length} pendência(s).${avisos}`
       );
-      setFiltro("abertas");
+      irParaFiltroPendencias("abertas");
     } catch {
       setErro(
         "Não foi possível conectar. O Next.js precisa rodar na mesma rede do REP (não use só Vercel)."
@@ -629,28 +658,38 @@ function RhPontoConteudo() {
       {aba === "pendencias" && (
         <>
           <div className="mb-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={filtro === "abertas" ? "btn-primario" : "btn-secundario"}
-              onClick={() => setFiltro("abertas")}
-            >
-              Abertas ({abertas.length})
-            </button>
-            <button
-              type="button"
-              className={filtro === "todas" ? "btn-primario" : "btn-secundario"}
-              onClick={() => setFiltro("todas")}
-            >
-              Todas
-            </button>
+            {(
+              [
+                ["abertas", `Abertas (${resumoPendencias.total})`],
+                ["aviso", `A avisar (${resumoPendencias.aviso})`],
+                ["aguardando", `Aguardando (${resumoPendencias.aguardando})`],
+                ["proposta", `Propostas (${resumoPendencias.proposta})`],
+                ["todas", "Todas"],
+              ] as const
+            ).map(([id, rotulo]) => (
+              <button
+                key={id}
+                type="button"
+                className={filtro === id ? "btn-primario" : "btn-secundario"}
+                onClick={() => irParaFiltroPendencias(id)}
+              >
+                {rotulo}
+              </button>
+            ))}
           </div>
 
           {lista.length === 0 ? (
             <Vazio
               mensagem={
-                filtro === "abertas"
-                  ? "Nenhuma pendência aberta. Clique em Detectar faltas (há plantão do João sem digital na seed)."
-                  : "Nenhuma pendência registrada."
+                filtro === "todas"
+                  ? "Nenhuma pendência registrada."
+                  : filtro === "proposta"
+                    ? "Nenhuma proposta aguardando confirmação."
+                    : filtro === "aviso"
+                      ? "Nada a avisar agora."
+                      : filtro === "aguardando"
+                        ? "Nenhuma pendência aguardando o funcionário."
+                        : "Nenhuma pendência aberta. Clique em Detectar faltas (há plantão do João sem digital na seed)."
               }
             />
           ) : (

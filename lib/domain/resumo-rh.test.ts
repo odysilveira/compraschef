@@ -59,6 +59,7 @@ describe("resumo-rh", () => {
           ],
         }),
         pessoa({ id: "inativo", ativo: false }),
+        pessoa({ id: "clt-sem", nome: "CLT Sem", tipo: "colaborador", funcao: "cozinha" }),
       ],
       pendencias_ponto: [
         { id: "pp1", status: "aguardando_aviso" },
@@ -98,6 +99,7 @@ describe("resumo-rh", () => {
     expect(r.convocacoes_enviadas).toBe(2);
     expect(r.convocacoes_sem_resposta).toBe(1);
     expect(r.convocacoes_rascunho).toBe(1);
+    expect(r.clt_sem_plantao).toBe(1);
     expect(r.pagamentos_aguardando).toBe(1);
     expect(r.pagamentos_abertos).toBe(2);
     expect(r.pagamentos_previstos).toBe(1);

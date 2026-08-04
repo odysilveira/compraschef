@@ -407,6 +407,18 @@ function RhPessoasConteudo() {
             }
           />
         </Link>
+        <Link href={hrefEscalaRh()} className="block">
+          <StatCard
+            rotulo="CLT sem escala"
+            valor={String(resumoOp.clt_sem_plantao)}
+            subtexto={
+              resumoOp.clt_sem_plantao > 0
+                ? "Sem plantão na janela · Abrir escala"
+                : "Todos com plantão na janela"
+            }
+            cor={resumoOp.clt_sem_plantao > 0 ? "amarelo" : "verde"}
+          />
+        </Link>
         <Link href={hrefPagamentosRh("aguardando")} className="block">
           <StatCard
             rotulo="Aguardando conciliação"

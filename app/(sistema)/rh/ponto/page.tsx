@@ -17,6 +17,7 @@ import {
   importarBatidasPonto,
   linkWhatsAppPonto,
   marcarAvisoPontoEnviado,
+  marcarAvisosPontoEnviados,
   montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
   pendenciasPontoAbertas,
@@ -457,6 +458,29 @@ function RhPontoConteudo() {
     setErro(null);
   }
 
+  function marcarTodosAvisosDaLista() {
+    const ids = lista.filter((p) => p.status === "aguardando_aviso").map((p) => p.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhuma pendência a avisar neste filtro.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = marcarAvisosPontoEnviados(proximo, ids);
+    mutate((atual) => Object.assign(atual, proximo));
+    if (r.atualizadas > 0) {
+      setMensagem(
+        `${r.atualizadas} aviso(s) marcado(s) como enviado(s). Agora aguardam o funcionário.`
+      );
+      irParaFiltroPendencias("aguardando");
+    }
+    if (r.erros.length) {
+      setMensagem(
+        (r.atualizadas > 0 ? `${r.atualizadas} atualizada(s). ` : "") + r.erros.join(" ")
+      );
+    }
+    setErro(null);
+  }
+
   function abrirDetalhe(pendencia: PendenciaPonto) {
     setDetalheId(pendencia.id);
     setPropostaEntrada(pendencia.proposta_entrada ?? pendencia.horario_previsto_entrada ?? "");
@@ -657,7 +681,7 @@ function RhPontoConteudo() {
 
       {aba === "pendencias" && (
         <>
-          <div className="mb-3 flex flex-wrap gap-2">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             {(
               [
                 ["abertas", `Abertas (${resumoPendencias.total})`],
@@ -676,6 +700,18 @@ function RhPontoConteudo() {
                 {rotulo}
               </button>
             ))}
+            {filtro === "aviso" &&
+              lista.some((p) => p.status === "aguardando_aviso") && (
+                <button
+                  type="button"
+                  className="btn-primario"
+                  onClick={marcarTodosAvisosDaLista}
+                  title="Marca todos como avisados (depois de enviar os WhatsApps)"
+                >
+                  Marcar avisados (
+                  {lista.filter((p) => p.status === "aguardando_aviso").length})
+                </button>
+              )}
           </div>
 
           {lista.length === 0 ? (

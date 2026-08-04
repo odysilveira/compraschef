@@ -290,6 +290,32 @@ export function marcarAvisoPontoEnviado(
   return { sucesso: true, pendencia, erros: [] };
 }
 
+/**
+ * Marca aviso enviado em várias pendências `aguardando_aviso` (fila “A avisar”).
+ * Se `ids` for informado, só esses; senão, todas as aguardando_aviso do banco.
+ */
+export function marcarAvisosPontoEnviados(
+  db: DB,
+  ids?: string[],
+  opcoes: { agora?: string } = {}
+): { sucesso: boolean; atualizadas: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : (db.pendencias_ponto ?? [])
+          .filter((p) => p.status === "aguardando_aviso")
+          .map((p) => p.id);
+
+  let atualizadas = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const r = marcarAvisoPontoEnviado(db, id, { agora: opcoes.agora });
+    if (r.sucesso) atualizadas += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, atualizadas, erros };
+}
+
 /** Registra o horário informado pelo funcionário (ainda precisa de aprovação). */
 export function registrarPropostaPonto(
   db: DB,

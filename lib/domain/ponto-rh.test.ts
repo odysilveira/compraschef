@@ -5,6 +5,7 @@ import {
   detectarPendenciasPonto,
   importarBatidasPonto,
   marcarAvisoPontoEnviado,
+  marcarAvisosPontoEnviados,
   montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
   registrarPropostaPonto,
@@ -138,6 +139,34 @@ describe("ponto-rh", () => {
     expect(db.pendencias_ponto![0]!.status).toBe("aprovada");
     expect(db.batidas_ponto).toHaveLength(2);
     expect(db.batidas_ponto!.every((b) => b.origem === "aprovacao")).toBe(true);
+  });
+
+  it("marca vários avisos de ponto em lote", () => {
+    const db = dbBase();
+    db.escala_slots.push({
+      id: "esc-2",
+      pessoa_id: "pes-lider",
+      data: "2026-07-31",
+      hora_inicio: "11:00",
+      hora_fim: "23:00",
+      intervalo_min: 60,
+      criado_em: "2026-07-01T00:00:00.000Z",
+      atualizado_em: "2026-07-01T00:00:00.000Z",
+    });
+    let n = 0;
+    detectarPendenciasPonto(db, {
+      agora: "2026-08-03T15:00:00.000Z",
+      idFactory: () => `p-${++n}`,
+    });
+    const aAvisar = (db.pendencias_ponto ?? []).filter((p) => p.status === "aguardando_aviso");
+    expect(aAvisar.length).toBeGreaterThanOrEqual(2);
+    const ids = aAvisar.map((p) => p.id);
+    const r = marcarAvisosPontoEnviados(db, ids, { agora: "2026-08-03T16:00:00.000Z" });
+    expect(r.atualizadas).toBe(ids.length);
+    expect(r.sucesso).toBe(true);
+    for (const id of ids) {
+      expect(db.pendencias_ponto!.find((p) => p.id === id)!.status).toBe("aguardando_funcionario");
+    }
   });
 
   it("detecta só falta de saída", () => {

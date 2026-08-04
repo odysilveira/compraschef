@@ -5,6 +5,7 @@ import type {
   TipoDocumentoPessoa,
   TipoPessoaRH,
 } from "../types";
+import { rotuloTipoPessoa } from "./rh";
 
 export interface ItemCatalogoDocumento {
   tipo: TipoDocumentoPessoa;
@@ -305,4 +306,56 @@ export function rotuloCurtoAlertaDocumentos(alerta: AlertaDocumentosPessoa): str
   if (alerta.vencido > 0) return "Doc. vencido";
   if (alerta.a_vencer > 0) return "Doc. a vencer";
   return "Doc. pendente";
+}
+
+function csvEscape(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+/**
+ * CSV do checklist (separador `;`, UTF-8 com BOM) — uma linha por documento.
+ * Ideal para filtrar no Excel quem está ausente / a vencer / vencido.
+ */
+export function exportarDocumentosPessoasCsv(
+  pessoas: PessoaRH[],
+  hoje: string = hojeIsoLocal(),
+  diasAviso: number = DIAS_AVISO_DOCUMENTO_A_VENCER
+): string {
+  const cabecalho = [
+    "Pessoa",
+    "Tipo vínculo",
+    "Documento",
+    "Status",
+    "Em mãos",
+    "Validade",
+    "Dias restantes",
+    "Detalhe dias",
+  ];
+  const linhas: string[] = [];
+  const ordenadas = pessoas
+    .slice()
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  for (const pessoa of ordenadas) {
+    const docs = garantirChecklistDocumentos(pessoa);
+    for (const doc of docs) {
+      const status = statusDocumento(doc, hoje, diasAviso);
+      const dias = diasRestantesValidade(doc.validade, hoje);
+      linhas.push(
+        [
+          pessoa.nome,
+          rotuloTipoPessoa(pessoa.tipo),
+          doc.rotulo || rotuloTipoDocumento(doc.tipo),
+          rotuloStatusDocumento(status),
+          doc.presente ? "sim" : "não",
+          doc.validade ?? "",
+          dias == null ? "" : String(dias),
+          formatarDiasRestantesDocumento(dias),
+        ]
+          .map((c) => csvEscape(c))
+          .join(";")
+      );
+    }
+  }
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
 }

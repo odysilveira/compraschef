@@ -11,6 +11,7 @@ import {
   diasRestantesValidade,
   formatarDiasRestantesDocumento,
   rotuloCurtoAlertaDocumentos,
+  exportarDocumentosPessoasCsv,
 } from "./documentos-pessoa";
 import { permissoesVazias } from "./rh";
 
@@ -183,5 +184,36 @@ describe("documentos-pessoa", () => {
         rotulo: "ASO (vence em 15 dias)",
       })
     ).toBe("Doc. a vencer");
+  });
+
+  it("exporta CSV do checklist com BOM e status", () => {
+    const csv = exportarDocumentosPessoasCsv(
+      [
+        pessoaBase({
+          id: "pes-a",
+          nome: "Ana",
+          contrato_assinado: true,
+          esocial_ok: true,
+          documentos: [
+            { id: "1", tipo: "contrato", rotulo: "Contrato assinado", presente: true },
+            { id: "2", tipo: "esocial", rotulo: "eSocial OK", presente: true },
+            { id: "3", tipo: "rg", rotulo: "RG / identidade", presente: false },
+            {
+              id: "4",
+              tipo: "aso",
+              rotulo: "ASO (exame admissional/periódico)",
+              presente: true,
+              validade: "2026-08-20",
+            },
+          ],
+        }),
+      ],
+      "2026-08-04"
+    );
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Pessoa;Tipo vínculo;Documento;Status");
+    expect(csv).toContain("Ana");
+    expect(csv).toContain("A vencer");
+    expect(csv).toContain("Ausente");
   });
 });

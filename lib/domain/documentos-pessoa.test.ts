@@ -8,6 +8,8 @@ import {
   resumirDocumentos,
   catalogoDocumentosPorTipo,
   alertaDocumentosPessoa,
+  diasRestantesValidade,
+  formatarDiasRestantesDocumento,
 } from "./documentos-pessoa";
 import { permissoesVazias } from "./rh";
 
@@ -139,6 +141,16 @@ describe("documentos-pessoa", () => {
     );
     expect(alerta.a_vencer).toBe(1);
     expect(alerta.tem_alerta).toBe(true);
-    expect(alerta.rotulo).toContain("ASO a vencer");
+    expect(alerta.rotulo).toContain("vence em 16 dias");
+  });
+
+  it("formata dias restantes da validade", () => {
+    expect(diasRestantesValidade("2026-08-20", "2026-08-04")).toBe(16);
+    expect(diasRestantesValidade("2026-08-04", "2026-08-04")).toBe(0);
+    expect(diasRestantesValidade("2026-08-01", "2026-08-04")).toBe(-3);
+    expect(formatarDiasRestantesDocumento(16)).toBe("vence em 16 dias");
+    expect(formatarDiasRestantesDocumento(1)).toBe("vence amanhã");
+    expect(formatarDiasRestantesDocumento(0)).toBe("vence hoje");
+    expect(formatarDiasRestantesDocumento(-3)).toBe("venceu há 3 dias");
   });
 });

@@ -4,6 +4,7 @@ import {
   aplicarDescontosNoPagamento,
   calcularLinhaConsumo,
   criarConsumoPessoa,
+  exportarConsumosPessoasCsv,
   previewFechamentoIntermitente,
   previewFechamentoSalario,
   totalAdiantamentoNaCompetencia,
@@ -160,5 +161,34 @@ describe("fechamento salário e intermitente", () => {
     expect(db.pagamentos_pessoas[0].desconto_consumo).toBe(40);
     expect(db.consumos_pessoas[0].status).toBe("descontado");
     expect(db.consumos_pessoas[0].pagamento_id).toBe("pag-sal");
+  });
+
+  it("exporta CSV dos consumos com BOM e status", () => {
+    const csv = exportarConsumosPessoasCsv(
+      [
+        {
+          id: "cons-1",
+          pessoa_id: "pes-1",
+          data: "2026-08-04",
+          competencia: "2026-08",
+          descricao: "Almoço",
+          quantidade: 1,
+          preco_unitario: 50,
+          desconto_percentual: 20,
+          valor_bruto: 50,
+          valor_liquido: 40,
+          status: "pendente",
+          criado_em: "2026-08-04T12:00:00.000Z",
+          atualizado_em: "2026-08-04T12:00:00.000Z",
+        },
+      ],
+      () => "Márcia"
+    );
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Pessoa;Data;Competência;Descrição;Quantidade");
+    expect(csv).toContain("Márcia");
+    expect(csv).toContain("Almoço");
+    expect(csv).toContain("Pendente");
+    expect(csv).toContain("40,00");
   });
 });

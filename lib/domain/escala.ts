@@ -9,6 +9,11 @@ import type {
   TipoPessoaRH,
 } from "../types";
 import { aplicarDescontosNoPagamento } from "./consumos-pessoas";
+import {
+  garantirChecklistDocumentos,
+  hojeIsoLocal,
+  statusDocumento,
+} from "./documentos-pessoa";
 import { antecedenciaMinimaDoDb } from "./normas-rh";
 import { rotuloFuncao } from "./rh";
 
@@ -167,7 +172,7 @@ export function textoResumoSetores(resumo: ResumoDiaEscala): string {
 
 /**
  * Contrato escrito + eSocial antes da 1ª convocação (WhatsApp não substitui o contrato).
- * Retorna erros bloqueantes para quem precisa de convocação.
+ * Também bloqueia ASO vencido e, para entregador, CNH ausente/vencida.
  */
 export function validarPreRequisitosConvocacao(pessoa: PessoaRH): { ok: boolean; erros: string[] } {
   if (!pessoaPrecisaConvocacao(pessoa.tipo)) return { ok: true, erros: [] };
@@ -183,6 +188,23 @@ export function validarPreRequisitosConvocacao(pessoa: PessoaRH): { ok: boolean;
   if (!pessoa.valor_hora || pessoa.valor_hora <= 0) {
     erros.push("Informe o valor-hora no cadastro da pessoa.");
   }
+
+  const hoje = hojeIsoLocal();
+  const docs = garantirChecklistDocumentos(pessoa);
+  const aso = docs.find((d) => d.tipo === "aso");
+  if (aso && statusDocumento(aso, hoje) === "vencido") {
+    erros.push("ASO vencido. Renove o exame antes de convocar.");
+  }
+  if (pessoa.tipo === "entregador") {
+    const cnh = docs.find((d) => d.tipo === "cnh");
+    const statusCnh = cnh ? statusDocumento(cnh, hoje) : "ausente";
+    if (statusCnh === "ausente") {
+      erros.push("CNH ausente no checklist. Anexe/marque a CNH do entregador antes de convocar.");
+    } else if (statusCnh === "vencido") {
+      erros.push("CNH vencida. Renove antes de convocar.");
+    }
+  }
+
   return { ok: erros.length === 0, erros };
 }
 

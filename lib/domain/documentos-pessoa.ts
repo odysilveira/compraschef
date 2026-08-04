@@ -188,3 +188,39 @@ export function resumirDocumentos(
   }
   return r;
 }
+
+export interface AlertaDocumentosPessoa {
+  tem_alerta: boolean;
+  ausente: number;
+  vencido: number;
+  /** Ex.: "ASO vencido · CNH ausente" */
+  rotulo: string;
+}
+
+/** Resumo curto para a lista de pessoas (ausente/vencido). */
+export function alertaDocumentosPessoa(
+  pessoa: PessoaRH,
+  hoje: string = hojeIsoLocal()
+): AlertaDocumentosPessoa {
+  const docs = garantirChecklistDocumentos(pessoa);
+  const resumo = resumirDocumentos(docs, hoje);
+  const partes: string[] = [];
+  for (const d of docs) {
+    if (statusDocumento(d, hoje) === "vencido") {
+      partes.push(`${rotuloTipoDocumento(d.tipo)} vencido`);
+    }
+  }
+  for (const d of docs) {
+    if (statusDocumento(d, hoje) === "ausente") {
+      partes.push(`${rotuloTipoDocumento(d.tipo)} ausente`);
+    }
+  }
+  const extras = partes.length > 2 ? ` +${partes.length - 2}` : "";
+  const rotulo = partes.length ? `${partes.slice(0, 2).join(" · ")}${extras}` : "Docs OK";
+  return {
+    tem_alerta: resumo.ausente + resumo.vencido > 0,
+    ausente: resumo.ausente,
+    vencido: resumo.vencido,
+    rotulo,
+  };
+}

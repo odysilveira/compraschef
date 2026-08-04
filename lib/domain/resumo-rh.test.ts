@@ -97,6 +97,10 @@ describe("resumo-rh", () => {
     expect(parseFiltroPagamentosRh("x")).toBe("abertos");
     expect(hrefPagamentosRh()).toBe("/rh/pagamentos");
     expect(hrefPagamentosRh("aguardando")).toBe("/rh/pagamentos?filtro=aguardando");
+    expect(hrefPagamentosRh({ filtro: "todos", pessoa: "pes-1" })).toBe(
+      "/rh/pagamentos?filtro=todos&pessoa=pes-1"
+    );
+    expect(hrefPagamentosRh({ pessoa: "pes-1" })).toBe("/rh/pagamentos?pessoa=pes-1");
     expect(parseFiltroDocsRh("alerta")).toBe("alerta");
     expect(parseFiltroDocsRh(null)).toBe("todos");
     expect(hrefPessoasRh({ docs: "alerta" })).toBe("/rh?docs=alerta");

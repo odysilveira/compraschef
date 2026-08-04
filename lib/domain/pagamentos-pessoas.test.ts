@@ -3,6 +3,7 @@ import type { DB, PagamentoPessoa } from "../types";
 import { seedDB } from "../data/seed";
 import {
   conciliarPagamentoPessoa,
+  exportarPagamentosPessoasCsv,
   informarPagamentoPessoa,
   liberarPagamentoPessoa,
   registrarDivergenciaPagamentoPessoa,
@@ -85,5 +86,26 @@ describe("pagamentos de pessoas", () => {
     expect(r.sucesso).toBe(true);
     expect(db.pagamentos_pessoas[0].status).toBe("aguardando_conciliacao");
     expect(db.pagamentos_pessoas[0].conciliacao_divergente).toBe(true);
+  });
+
+  it("exporta CSV dos pagamentos com BOM e status", () => {
+    const csv = exportarPagamentosPessoasCsv(
+      [
+        baseLiberado({
+          descricao: "Salário agosto",
+          competencia: "2026-08",
+          valor: 1500.5,
+          valor_bruto: 1600,
+          desconto_consumo: 99.5,
+        }),
+      ],
+      () => "Maria Silva"
+    );
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Pessoa;Tipo;Descrição;Competência;Vencimento;Valor");
+    expect(csv).toContain("Maria Silva");
+    expect(csv).toContain("Salário");
+    expect(csv).toContain("Liberado");
+    expect(csv).toContain("1500,50");
   });
 });

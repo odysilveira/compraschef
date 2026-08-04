@@ -44,6 +44,7 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
+import { hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -430,6 +431,12 @@ function RhPerfilConteudo() {
           <div className="flex flex-wrap items-center gap-2">
             <Link href="/rh/escala" className="btn-secundario">
               Ver na escala
+            </Link>
+            <Link
+              href={hrefPontoRh({ aba: "espelho", pessoa: pessoa.id })}
+              className="btn-secundario"
+            >
+              Ver ponto
             </Link>
             <Badge cor={pessoa.ativo ? "verde" : "cinza"}>{pessoa.ativo ? "Ativo" : "Inativo"}</Badge>
             <Badge cor="azul">{rotuloTipoPessoa(pessoa.tipo)}</Badge>
@@ -995,6 +1002,14 @@ function RhPerfilConteudo() {
             <Link href="/rh/escala" className="btn-secundario text-sm">
               Ver calendário da equipe
             </Link>
+            {pessoa.tipo === "colaborador" && (
+              <Link
+                href={hrefPontoRh({ aba: "espelho", pessoa: pessoa.id })}
+                className="btn-secundario text-sm"
+              >
+                Abrir espelho de ponto
+              </Link>
+            )}
           </div>
 
           {pessoaPrecisaConvocacao(pessoa.tipo) && (

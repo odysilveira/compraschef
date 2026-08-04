@@ -13,6 +13,7 @@ import {
   parseFiltroConvocacaoEscalaRh,
   parseFiltroDocsRh,
   parseFiltroPagamentosRh,
+  parsePessoaPontoRh,
   resumirOperacionalRh,
 } from "./resumo-rh";
 
@@ -107,6 +108,13 @@ describe("resumo-rh", () => {
     expect(parseAbaPontoRh(null)).toBe("pendencias");
     expect(hrefPontoRh()).toBe("/rh/ponto");
     expect(hrefPontoRh("espelho")).toBe("/rh/ponto?aba=espelho");
+    expect(hrefPontoRh({ aba: "espelho" })).toBe("/rh/ponto?aba=espelho");
+    expect(hrefPontoRh({ aba: "espelho", pessoa: "pes-1" })).toBe(
+      "/rh/ponto?aba=espelho&pessoa=pes-1"
+    );
+    expect(hrefPontoRh({ pessoa: "pes-1" })).toBe("/rh/ponto?pessoa=pes-1");
+    expect(parsePessoaPontoRh(" pes-1 ")).toBe("pes-1");
+    expect(parsePessoaPontoRh(null)).toBe("");
     expect(parseFiltroConvocacaoEscalaRh("enviada")).toBe("enviada");
     expect(parseFiltroConvocacaoEscalaRh(null)).toBe("todas");
     expect(hrefEscalaRh()).toBe("/rh/escala");

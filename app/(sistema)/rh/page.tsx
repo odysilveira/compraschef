@@ -324,7 +324,7 @@ function RhPessoasConteudo() {
             cor={resumoOp.docs_alerta > 0 ? "laranja" : "verde"}
           />
         </button>
-        <Link href={hrefPontoRh("pendencias")} className="block">
+        <Link href={hrefPontoRh({ aba: "pendencias" })} className="block">
           <StatCard
             rotulo="Pendências de ponto"
             valor={String(resumoOp.ponto_abertas)}

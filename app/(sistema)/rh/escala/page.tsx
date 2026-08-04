@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, Check, Copy, Download, GripVertical, Plus, RefreshCw } from "lucide-react";
+import { CalendarDays, Check, Copy, Download, Filter, GripVertical, Plus, RefreshCw } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
@@ -254,6 +254,23 @@ function BancoPessoas({
                   </span>
                 )}
               </button>
+              {onFiltrarPessoa && (
+                <button
+                  type="button"
+                  className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] font-medium underline-offset-2 hover:underline ${
+                    emDestaque ? "text-sky-900" : "text-slate-600"
+                  }`}
+                  title={
+                    emDestaque
+                      ? "Limpar filtro desta pessoa"
+                      : `Ver só plantões de ${p.nome} no calendário`
+                  }
+                  onClick={() => onFiltrarPessoa(p.id)}
+                >
+                  <Filter size={12} className="shrink-0" />
+                  {emDestaque ? "Limpar filtro" : "Só este no calendário"}
+                </button>
+              )}
               {ehClt && onGerarPadrao && (
                 <button
                   type="button"
@@ -338,6 +355,22 @@ function RhEscalaConteudo() {
       hrefEscalaRh({
         convocacao: filtroConvocacao,
         clt: destaqueCltSem ? "sem" : undefined,
+      }),
+      { scroll: false }
+    );
+  }
+
+  function alternarFiltroPessoa(pessoaId: string) {
+    if (filtroPessoa === pessoaId) {
+      limparFiltroPessoa();
+      return;
+    }
+    setFiltroPessoa(pessoaId);
+    router.replace(
+      hrefEscalaRh({
+        convocacao: filtroConvocacao,
+        clt: destaqueCltSem ? "sem" : undefined,
+        pessoa: pessoaId,
       }),
       { scroll: false }
     );
@@ -1168,6 +1201,7 @@ function RhEscalaConteudo() {
               onGerarPadrao={(pessoaId) => abrirPadrao(pessoaId)}
               vazio="Nenhum CLT ativo — cadastre em Pessoas."
               destaquePessoaId={filtroPessoa || undefined}
+              onFiltrarPessoa={alternarFiltroPessoa}
             />
             <BancoPessoas
               titulo="Intermitentes"
@@ -1190,6 +1224,7 @@ function RhEscalaConteudo() {
                 </>
               }
               destaquePessoaId={filtroPessoa || undefined}
+              onFiltrarPessoa={alternarFiltroPessoa}
             />
             <BancoPessoas
               titulo="Motoboys / entregadores"
@@ -1202,6 +1237,7 @@ function RhEscalaConteudo() {
                 setDiaDestinoHover(null);
               }}
               destaquePessoaId={filtroPessoa || undefined}
+              onFiltrarPessoa={alternarFiltroPessoa}
             />
             {colaboradores.length === 0 && intermitentes.length === 0 && entregadores.length === 0 && (
               <p className="text-xs text-slate-500">

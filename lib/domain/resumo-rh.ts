@@ -1,6 +1,10 @@
 import type { DB } from "../types";
 import { alertaDocumentosPessoa, hojeIsoLocal } from "./documentos-pessoa";
-import { convocacaoEnviadaSemRespostaVencida } from "./escala";
+import {
+  convocacaoEnviadaSemRespostaVencida,
+  janelaCalendarioEscala,
+  listarCltSemPlantaoNaJanela,
+} from "./escala";
 import { resumirPendenciasPontoAbertas } from "./ponto-rh";
 
 export interface ResumoOperacionalRh {
@@ -18,6 +22,8 @@ export interface ResumoOperacionalRh {
   convocacoes_sem_resposta: number;
   /** Rascunhos ainda não enviados no WhatsApp. */
   convocacoes_rascunho: number;
+  /** CLT ativos sem nenhum plantão na janela do calendário da escala. */
+  clt_sem_plantao: number;
   /** Títulos informados, aguardando conciliação bancária. */
   pagamentos_aguardando: number;
   /** Previstos + liberados (ainda não pagos / fora de aguardando). */
@@ -66,6 +72,7 @@ export function resumirOperacionalRh(
     }
   }
   const ponto = resumirPendenciasPontoAbertas(db);
+  const clt_sem_plantao = listarCltSemPlantaoNaJanela(db, janelaCalendarioEscala(hoje)).length;
   return {
     pessoas_ativas: ativas.length,
     docs_alerta,
@@ -77,6 +84,7 @@ export function resumirOperacionalRh(
     convocacoes_enviadas: enviadas.length,
     convocacoes_sem_resposta,
     convocacoes_rascunho,
+    clt_sem_plantao,
     pagamentos_aguardando: pags.filter((p) => p.status === "aguardando_conciliacao").length,
     pagamentos_abertos: pags.filter(
       (p) => p.status === "previsto" || p.status === "liberado"

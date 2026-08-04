@@ -59,6 +59,19 @@ describe("resumo-rh", () => {
           ],
         }),
         pessoa({ id: "inativo", ativo: false }),
+        pessoa({
+          id: "clt-sem",
+          nome: "CLT Sem",
+          tipo: "colaborador",
+          funcao: "cozinha",
+          documentos: [
+            { id: "1", tipo: "contrato", rotulo: "C", presente: true },
+            { id: "2", tipo: "esocial", rotulo: "E", presente: true },
+            { id: "3", tipo: "rg", rotulo: "R", presente: true },
+            { id: "4", tipo: "aso", rotulo: "A", presente: true, validade: "2030-01-01" },
+            { id: "5", tipo: "ctps", rotulo: "CTPS", presente: true },
+          ],
+        }),
       ],
       pendencias_ponto: [
         { id: "pp1", status: "aguardando_aviso" },
@@ -88,7 +101,7 @@ describe("resumo-rh", () => {
     } as unknown as DB;
 
     const r = resumirOperacionalRh(db, "2026-08-04");
-    expect(r.pessoas_ativas).toBe(2);
+    expect(r.pessoas_ativas).toBe(3);
     expect(r.docs_alerta).toBe(1);
     expect(r.docs_vencido).toBe(1);
     expect(r.docs_a_vencer).toBe(0);
@@ -98,6 +111,7 @@ describe("resumo-rh", () => {
     expect(r.convocacoes_enviadas).toBe(2);
     expect(r.convocacoes_sem_resposta).toBe(1);
     expect(r.convocacoes_rascunho).toBe(1);
+    expect(r.clt_sem_plantao).toBe(1);
     expect(r.pagamentos_aguardando).toBe(1);
     expect(r.pagamentos_abertos).toBe(2);
     expect(r.pagamentos_previstos).toBe(1);

@@ -3,7 +3,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Plus, Users } from "lucide-react";
-import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
+import { Badge, Campo, Card, Modal, StatCard, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
   FUNCOES_OPERACIONAIS,
@@ -17,7 +17,8 @@ import {
   validarCpf,
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
-import { alertaDocumentosPessoa } from "@/lib/domain/documentos-pessoa";
+import { alertaDocumentosPessoa, garantirChecklistDocumentos } from "@/lib/domain/documentos-pessoa";
+import { resumirOperacionalRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -88,6 +89,8 @@ export default function RhPage() {
   const contagemAlertaDocs = useMemo(() => {
     return (db.pessoas ?? []).filter((p) => p.ativo && alertaDocumentosPessoa(p).tem_alerta).length;
   }, [db.pessoas]);
+
+  const resumoOp = useMemo(() => resumirOperacionalRh(db), [db]);
 
   const lista = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -189,6 +192,7 @@ export default function RhPage() {
         contrato_assinado: form.tipo === "colaborador" ? true : form.contrato_assinado,
         esocial_ok: form.tipo === "colaborador" ? true : form.esocial_ok,
       };
+      pessoa.documentos = garantirChecklistDocumentos(pessoa, agora);
 
       if (form.tem_acesso_sistema) {
         const perfilId = uid("perfil");
@@ -219,6 +223,55 @@ export default function RhPage() {
           </button>
         }
       />
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <button
+          type="button"
+          className="text-left"
+          onClick={() => {
+            setFiltroDocs("todos");
+            setFiltroTipo("todos");
+            setBusca("");
+          }}
+        >
+          <StatCard rotulo="Pessoas ativas" valor={String(resumoOp.pessoas_ativas)} cor="cinza" />
+        </button>
+        <button
+          type="button"
+          className="text-left"
+          onClick={() => {
+            setFiltroDocs("alerta");
+            setBusca("");
+          }}
+        >
+          <StatCard
+            rotulo="Docs com alerta"
+            valor={String(resumoOp.docs_alerta)}
+            subtexto={
+              resumoOp.docs_vencido > 0
+                ? `${resumoOp.docs_vencido} com documento vencido`
+                : "Clique para filtrar"
+            }
+            cor={resumoOp.docs_alerta > 0 ? "laranja" : "verde"}
+          />
+        </button>
+        <Link href="/rh/ponto" className="block">
+          <StatCard
+            rotulo="Pendências de ponto"
+            valor={String(resumoOp.ponto_abertas)}
+            subtexto="Abrir ponto"
+            cor={resumoOp.ponto_abertas > 0 ? "amarelo" : "verde"}
+          />
+        </Link>
+        <Link href="/rh/escala" className="block">
+          <StatCard
+            rotulo="Convocações enviadas"
+            valor={String(resumoOp.convocacoes_enviadas)}
+            subtexto="Abrir escala"
+            cor={resumoOp.convocacoes_enviadas > 0 ? "amarelo" : "cinza"}
+          />
+        </Link>
+      </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <label className="block min-w-[220px] flex-1">

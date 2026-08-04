@@ -3,6 +3,7 @@ import type { DB, PagamentoPessoa } from "../types";
 import { seedDB } from "../data/seed";
 import {
   conciliarPagamentoPessoa,
+  conciliarPagamentosAguardando,
   exportarPagamentosPessoasCsv,
   informarPagamentoPessoa,
   liberarPagamentoPessoa,
@@ -83,6 +84,33 @@ describe("pagamentos de pessoas", () => {
     expect(r.sucesso).toBe(true);
     expect(db.pagamentos_pessoas[0].status).toBe("pago");
     expect(db.pagamentos_pessoas[0].conciliacao_divergente).toBe(false);
+  });
+
+  it("concilia vários aguardando em lote", () => {
+    const db = structuredClone(seedDB) as DB;
+    db.pagamentos_pessoas = [
+      baseLiberado({
+        id: "c1",
+        status: "aguardando_conciliacao",
+        pagamento_data: "2026-08-08",
+        pagamento_valor: 1000,
+      }),
+      baseLiberado({
+        id: "c2",
+        status: "aguardando_conciliacao",
+        pagamento_data: "2026-08-08",
+        pagamento_valor: 500,
+      }),
+      baseLiberado({ id: "c3", status: "liberado" }),
+    ];
+    const r = conciliarPagamentosAguardando(db, ["c1", "c2", "c3"], {
+      dataLiquidacao: "2026-08-09",
+      responsavel: "Ody",
+    });
+    expect(r.conciliados).toBe(2);
+    expect(db.pagamentos_pessoas.find((p) => p.id === "c1")?.status).toBe("pago");
+    expect(db.pagamentos_pessoas.find((p) => p.id === "c2")?.status).toBe("pago");
+    expect(db.pagamentos_pessoas.find((p) => p.id === "c3")?.status).toBe("liberado");
   });
 
   it("registra divergencia sem pagar", () => {

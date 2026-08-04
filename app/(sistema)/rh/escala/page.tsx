@@ -18,6 +18,7 @@ import {
   gerarEscalaPadraoClt,
   janelaCalendarioEscala,
   linkWhatsAppConvocacao,
+  listarCltSemPlantaoNaJanela,
   marcarConvocacaoEnviada,
   montarGradeCalendario,
   moverSlotParaData,
@@ -255,6 +256,10 @@ function RhEscalaConteudo() {
   const colaboradores = useMemo(
     () => pessoasAtivas.filter((p) => p.tipo === "colaborador"),
     [pessoasAtivas]
+  );
+  const cltSemPlantao = useMemo(
+    () => listarCltSemPlantaoNaJanela(db, dias),
+    [db, dias]
   );
   const intermitentes = useMemo(
     () => pessoasAtivas.filter((p) => p.tipo === "intermitente"),
@@ -765,6 +770,42 @@ function RhEscalaConteudo() {
           )
         </button>
       </div>
+
+      {cltSemPlantao.length > 0 && filtroConvocacao !== "enviada" && (
+        <Card className="mb-4 space-y-3 border-sky-200 bg-sky-50/60">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold text-sky-950">
+                CLT sem plantão neste período ({cltSemPlantao.length})
+              </h2>
+              <p className="text-sm text-sky-900/80">
+                Sem escala no calendário, o ponto não detecta faltas. Gere o padrão 12x36 (ou outro) para
+                preencher a janela.
+              </p>
+            </div>
+          </div>
+          <ul className="space-y-2">
+            {cltSemPlantao.map((p) => (
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-white px-3 py-2"
+              >
+                <div>
+                  <p className="font-medium text-slate-900">{p.nome}</p>
+                  <p className="text-sm text-slate-600">{rotuloFuncao(p)}</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn-primario text-sm"
+                  onClick={() => abrirPadrao(p.id)}
+                >
+                  Gerar 12x36…
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {filtroConvocacao === "enviada" && (
         <Card className="mb-4 space-y-3">

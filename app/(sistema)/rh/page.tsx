@@ -407,7 +407,12 @@ function RhPessoasConteudo() {
             }
           />
         </Link>
-        <Link href={hrefEscalaRh()} className="block">
+        <Link
+          href={
+            resumoOp.clt_sem_plantao > 0 ? hrefEscalaRh({ clt: "sem" }) : hrefEscalaRh()
+          }
+          className="block"
+        >
           <StatCard
             rotulo="CLT sem escala"
             valor={String(resumoOp.clt_sem_plantao)}

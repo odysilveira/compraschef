@@ -9,6 +9,7 @@ import {
   hrefPontoRh,
   destaqueSlotFiltroConvocacao,
   parseAbaPontoRh,
+  parseAlertaCltEscalaRh,
   parseFiltroConsumosRh,
   parseFiltroConvocacaoEscalaRh,
   parseFiltroDocsRh,
@@ -195,6 +196,12 @@ describe("resumo-rh", () => {
     expect(hrefEscalaRh()).toBe("/rh/escala");
     expect(hrefEscalaRh({ convocacao: "enviada" })).toBe("/rh/escala?convocacao=enviada");
     expect(hrefEscalaRh({ convocacao: "rascunho" })).toBe("/rh/escala?convocacao=rascunho");
+    expect(hrefEscalaRh({ clt: "sem" })).toBe("/rh/escala?clt=sem");
+    expect(hrefEscalaRh({ convocacao: "enviada", clt: "sem" })).toBe(
+      "/rh/escala?convocacao=enviada&clt=sem"
+    );
+    expect(parseAlertaCltEscalaRh("sem")).toBe(true);
+    expect(parseAlertaCltEscalaRh(null)).toBe(false);
     expect(destaqueSlotFiltroConvocacao("todas", "enviada")).toBe("normal");
     expect(destaqueSlotFiltroConvocacao("enviada", "enviada")).toBe("destaque");
     expect(destaqueSlotFiltroConvocacao("enviada", "rascunho")).toBe("atenuado");

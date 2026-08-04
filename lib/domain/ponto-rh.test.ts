@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DB, PessoaRH } from "../types";
 import {
   aprovarPendenciaPonto,
+  aprovarPendenciasPonto,
   detectarPendenciasPonto,
   importarBatidasPonto,
   marcarAvisoPontoEnviado,
@@ -166,6 +167,51 @@ describe("ponto-rh", () => {
     expect(r.sucesso).toBe(true);
     for (const id of ids) {
       expect(db.pendencias_ponto!.find((p) => p.id === id)!.status).toBe("aguardando_funcionario");
+    }
+  });
+
+  it("aprova várias propostas de ponto em lote", () => {
+    const db = dbBase();
+    db.escala_slots.push({
+      id: "esc-2",
+      pessoa_id: "pes-lider",
+      data: "2026-07-31",
+      hora_inicio: "11:00",
+      hora_fim: "23:00",
+      intervalo_min: 60,
+      criado_em: "2026-07-01T00:00:00.000Z",
+      atualizado_em: "2026-07-01T00:00:00.000Z",
+    });
+    let n = 0;
+    detectarPendenciasPonto(db, {
+      agora: "2026-08-03T15:00:00.000Z",
+      idFactory: () => `p-${++n}`,
+    });
+    const ids = (db.pendencias_ponto ?? [])
+      .filter((p) => p.status === "aguardando_aviso")
+      .map((p) => p.id);
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    marcarAvisosPontoEnviados(db, ids, { agora: "2026-08-03T16:00:00.000Z" });
+    for (const id of ids) {
+      const prop = registrarPropostaPonto(
+        db,
+        id,
+        { entrada: "11:10", saida: "23:05", motivo: "Esqueci" },
+        { agora: "2026-08-03T17:00:00.000Z" }
+      );
+      expect(prop.sucesso).toBe(true);
+    }
+    let bat = 0;
+    const r = aprovarPendenciasPonto(db, ids, {
+      agora: "2026-08-03T18:00:00.000Z",
+      revisado_por: "dono",
+      idFactory: () => `bat-${++bat}`,
+    });
+    expect(r.aprovadas).toBe(ids.length);
+    expect(r.sucesso).toBe(true);
+    expect(r.batidas).toBeGreaterThanOrEqual(ids.length * 2);
+    for (const id of ids) {
+      expect(db.pendencias_ponto!.find((p) => p.id === id)!.status).toBe("aprovada");
     }
   });
 

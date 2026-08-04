@@ -422,6 +422,47 @@ export function aprovarPendenciaPonto(
   return { sucesso: true, pendencia, batidas, erros: [] };
 }
 
+/**
+ * Aprova várias pendências em `proposta` de uma vez (grava batidas no espelho).
+ * Se `ids` for informado, só esses; senão, todas as propostas do banco.
+ */
+export function aprovarPendenciasPonto(
+  db: DB,
+  ids?: string[],
+  opcoes: { agora?: string; revisado_por?: string; idFactory?: () => string } = {}
+): { sucesso: boolean; aprovadas: number; batidas: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : (db.pendencias_ponto ?? []).filter((p) => p.status === "proposta").map((p) => p.id);
+
+  let aprovadas = 0;
+  let batidas = 0;
+  const erros: string[] = [];
+  let seq = 0;
+  const idFactory =
+    opcoes.idFactory ??
+    (() => {
+      seq += 1;
+      return `bat-lote-${Date.now()}-${seq}`;
+    });
+
+  for (const id of alvoIds) {
+    const r = aprovarPendenciaPonto(db, id, {
+      agora: opcoes.agora,
+      revisado_por: opcoes.revisado_por,
+      idFactory,
+    });
+    if (r.sucesso) {
+      aprovadas += 1;
+      batidas += r.batidas?.length ?? 0;
+    } else {
+      erros.push(...r.erros.map((e) => `${id}: ${e}`));
+    }
+  }
+  return { sucesso: erros.length === 0, aprovadas, batidas, erros };
+}
+
 export function recusarPendenciaPonto(
   db: DB,
   pendenciaId: string,

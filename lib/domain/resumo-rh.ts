@@ -185,27 +185,34 @@ export function hrefPontoRh(
   return q ? `/rh/ponto?${q}` : "/rh/ponto";
 }
 
-export type FiltroConvocacaoEscalaRh = "todas" | "enviada";
+export type FiltroConvocacaoEscalaRh = "todas" | "enviada" | "rascunho";
 
 export function parseFiltroConvocacaoEscalaRh(
   valor: string | null | undefined
 ): FiltroConvocacaoEscalaRh {
-  return valor === "enviada" ? "enviada" : "todas";
+  if (valor === "enviada" || valor === "rascunho") return valor;
+  return "todas";
 }
 
 export function hrefEscalaRh(opts?: { convocacao?: FiltroConvocacaoEscalaRh }): string {
   if (opts?.convocacao === "enviada") return "/rh/escala?convocacao=enviada";
+  if (opts?.convocacao === "rascunho") return "/rh/escala?convocacao=rascunho";
   return "/rh/escala";
 }
 
 /**
- * Com filtro `enviada` ativo, destaca plantões aguardando resposta e atenua os demais.
+ * Com filtro `enviada`/`rascunho` ativo, destaca plantões daquele status e atenua os demais.
  * Sem filtro, todos ficam `normal`.
  */
 export function destaqueSlotFiltroConvocacao(
   filtro: FiltroConvocacaoEscalaRh,
   statusConvocacao: string | undefined
 ): "destaque" | "atenuado" | "normal" {
-  if (filtro !== "enviada") return "normal";
-  return statusConvocacao === "enviada" ? "destaque" : "atenuado";
+  if (filtro === "enviada") {
+    return statusConvocacao === "enviada" ? "destaque" : "atenuado";
+  }
+  if (filtro === "rascunho") {
+    return statusConvocacao === "rascunho" ? "destaque" : "atenuado";
+  }
+  return "normal";
 }

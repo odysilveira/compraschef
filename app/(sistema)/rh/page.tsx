@@ -401,12 +401,33 @@ function RhPessoasConteudo() {
             cor={resumoOp.pagamentos_aguardando > 0 ? "laranja" : "verde"}
           />
         </Link>
-        <Link href={hrefPagamentosRh("abertos")} className="block">
+        <Link
+          href={hrefPagamentosRh(
+            resumoOp.pagamentos_liberados > 0
+              ? "liberado"
+              : resumoOp.pagamentos_previstos > 0
+                ? "previsto"
+                : "abertos"
+          )}
+          className="block"
+        >
           <StatCard
             rotulo="Pagamentos abertos"
             valor={String(resumoOp.pagamentos_abertos)}
-            subtexto="Previstos + liberados"
-            cor={resumoOp.pagamentos_abertos > 0 ? "amarelo" : "cinza"}
+            subtexto={
+              resumoOp.pagamentos_liberados > 0
+                ? `${resumoOp.pagamentos_liberados} a informar · Abrir`
+                : resumoOp.pagamentos_previstos > 0
+                  ? `${resumoOp.pagamentos_previstos} a liberar · Abrir`
+                  : "Previstos + liberados"
+            }
+            cor={
+              resumoOp.pagamentos_liberados > 0
+                ? "laranja"
+                : resumoOp.pagamentos_abertos > 0
+                  ? "amarelo"
+                  : "cinza"
+            }
           />
         </Link>
         <Link href={hrefConsumosRh("pendentes")} className="block">

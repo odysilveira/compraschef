@@ -18,8 +18,12 @@ export interface ResumoOperacionalRh {
   convocacoes_sem_resposta: number;
   /** Títulos informados, aguardando conciliação bancária. */
   pagamentos_aguardando: number;
-  /** Previstos + liberados (ainda não pagos). */
+  /** Previstos + liberados (ainda não pagos / fora de aguardando). */
   pagamentos_abertos: number;
+  /** Ainda precisam ser liberados para pagamento. */
+  pagamentos_previstos: number;
+  /** Liberados — prontos para informar pagamento. */
+  pagamentos_liberados: number;
   /** Consumos ainda não descontados em pagamento. */
   consumos_pendentes: number;
 }
@@ -72,16 +76,31 @@ export function resumirOperacionalRh(
     pagamentos_abertos: pags.filter(
       (p) => p.status === "previsto" || p.status === "liberado"
     ).length,
+    pagamentos_previstos: pags.filter((p) => p.status === "previsto").length,
+    pagamentos_liberados: pags.filter((p) => p.status === "liberado").length,
     consumos_pendentes: (db.consumos_pessoas ?? []).filter((c) => c.status === "pendente").length,
   };
 }
 
-export type FiltroPagamentosRh = "abertos" | "aguardando" | "pagos" | "todos";
+export type FiltroPagamentosRh =
+  | "abertos"
+  | "previsto"
+  | "liberado"
+  | "aguardando"
+  | "pagos"
+  | "todos";
 
 export function parseFiltroPagamentosRh(
   valor: string | null | undefined
 ): FiltroPagamentosRh {
-  if (valor === "abertos" || valor === "aguardando" || valor === "pagos" || valor === "todos") {
+  if (
+    valor === "abertos" ||
+    valor === "previsto" ||
+    valor === "liberado" ||
+    valor === "aguardando" ||
+    valor === "pagos" ||
+    valor === "todos"
+  ) {
     return valor;
   }
   return "abertos";

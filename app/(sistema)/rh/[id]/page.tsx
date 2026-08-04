@@ -44,7 +44,7 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
-import { hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -1150,7 +1150,10 @@ function RhPerfilConteudo() {
         <Card className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-bold">Consumos no restaurante</h2>
-            <Link href="/rh/consumos" className="btn-secundario text-sm">
+            <Link
+              href={hrefConsumosRh({ filtro: "todos", pessoa: pessoa.id })}
+              className="btn-secundario text-sm"
+            >
               Lançar consumo
             </Link>
           </div>

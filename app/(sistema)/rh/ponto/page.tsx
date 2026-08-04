@@ -607,6 +607,35 @@ function RhPontoConteudo() {
     setErro(null);
   }
 
+  function aprovarPendenciaDaLista(id: string) {
+    const proximo = structuredClone(db);
+    const r = aprovarPendenciaPonto(proximo, id, {
+      revisado_por: papel,
+      idFactory: () => uid("bat"),
+    });
+    if (!r.sucesso) {
+      setErro(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    if (detalheId === id) setDetalheId(null);
+    setMensagem("Aprovado — batidas gravadas no espelho de ponto.");
+    setErro(null);
+  }
+
+  function recusarPendenciaDaLista(id: string) {
+    const proximo = structuredClone(db);
+    const r = recusarPendenciaPonto(proximo, id, { revisado_por: papel });
+    if (!r.sucesso) {
+      setErro(r.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    if (detalheId === id) setDetalheId(null);
+    setMensagem("Pendência recusada.");
+    setErro(null);
+  }
+
   return (
     <div>
       <TituloPagina
@@ -860,6 +889,24 @@ function RhPontoConteudo() {
                     <button type="button" className="btn-secundario" onClick={() => abrirDetalhe(p)}>
                       Abrir
                     </button>
+                    {p.status === "proposta" && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn-primario"
+                          onClick={() => aprovarPendenciaDaLista(p.id)}
+                        >
+                          Aprovar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() => recusarPendenciaDaLista(p.id)}
+                        >
+                          Recusar
+                        </button>
+                      </>
+                    )}
                     {(p.status === "aguardando_aviso" || p.status === "aguardando_funcionario") && (
                       <>
                         <button type="button" className="btn-primario" onClick={() => abrirWhatsApp(p)}>

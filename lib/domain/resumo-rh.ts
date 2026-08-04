@@ -86,3 +86,14 @@ export function hrefConsumosRh(filtro?: FiltroConsumosRh): string {
   if (!filtro || filtro === "pendentes") return "/rh/consumos";
   return `/rh/consumos?filtro=${filtro}`;
 }
+
+export type AbaPontoRh = "pendencias" | "espelho";
+
+export function parseAbaPontoRh(valor: string | null | undefined): AbaPontoRh {
+  return valor === "espelho" ? "espelho" : "pendencias";
+}
+
+export function hrefPontoRh(aba?: AbaPontoRh): string {
+  if (!aba || aba === "pendencias") return "/rh/ponto";
+  return `/rh/ponto?aba=${aba}`;
+}

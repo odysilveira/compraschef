@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CircleCheckBig, Copy, FileUp, Plus, TriangleAlert, WalletCards } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
@@ -35,6 +36,11 @@ import {
 import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
+import {
+  hrefPagamentosRh,
+  parseFiltroPagamentosRh,
+  type FiltroPagamentosRh,
+} from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { PagamentoPessoa, TipoPagamentoPessoa } from "@/lib/types";
@@ -91,10 +97,14 @@ function BadgeStatusPagamento({ pagamento }: { pagamento: PagamentoPessoa }) {
   return <Badge cor={cor}>{rotuloStatusPagamentoPessoa(pagamento.status)}</Badge>;
 }
 
-export default function RhPagamentosPage() {
+function RhPagamentosConteudo() {
   const db = useDB();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const podeRh = usePodeAcessarModulo("rh");
-  const [filtro, setFiltro] = useState<"abertos" | "aguardando" | "pagos" | "todos">("abertos");
+  const [filtro, setFiltro] = useState<FiltroPagamentosRh>(() =>
+    parseFiltroPagamentosRh(searchParams.get("filtro"))
+  );
   const [filtroPessoa, setFiltroPessoa] = useState<string>("todos");
   const [filtroTipo, setFiltroTipo] = useState<TipoPagamentoPessoa | "todos">("todos");
   const [filtroCompetencia, setFiltroCompetencia] = useState<string>("");
@@ -127,6 +137,14 @@ export default function RhPagamentosPage() {
   const [erroImport, setErroImport] = useState<string | null>(null);
   const [vencimentoImport, setVencimentoImport] = useState(hojeISO());
 
+  useEffect(() => {
+    setFiltro(parseFiltroPagamentosRh(searchParams.get("filtro")));
+  }, [searchParams]);
+
+  function irParaFiltro(proximo: FiltroPagamentosRh) {
+    setFiltro(proximo);
+    router.replace(hrefPagamentosRh(proximo), { scroll: false });
+  }
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
     [db.pessoas]
@@ -510,7 +528,12 @@ export default function RhPagamentosPage() {
             ["todos", "Todos"],
           ] as const
         ).map(([id, rotulo]) => (
-          <button key={id} type="button" className={filtro === id ? "btn-primario" : "btn-secundario"} onClick={() => setFiltro(id)}>
+          <button
+            key={id}
+            type="button"
+            className={filtro === id ? "btn-primario" : "btn-secundario"}
+            onClick={() => irParaFiltro(id)}
+          >
             {rotulo}
           </button>
         ))}
@@ -1034,5 +1057,20 @@ export default function RhPagamentosPage() {
         )}
       </Modal>
     </div>
+  );
+}
+
+export default function RhPagamentosPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="RH — Pagamentos" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando pagamentos…</p>
+        </div>
+      }
+    >
+      <RhPagamentosConteudo />
+    </Suspense>
   );
 }

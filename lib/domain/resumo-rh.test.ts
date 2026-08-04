@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DB, PessoaRH } from "../types";
 import { permissoesVazias } from "./rh";
-import { resumirOperacionalRh } from "./resumo-rh";
+import { hrefPagamentosRh, parseFiltroPagamentosRh, resumirOperacionalRh } from "./resumo-rh";
 
 function pessoa(overrides: Partial<PessoaRH> = {}): PessoaRH {
   return {
@@ -53,6 +53,12 @@ describe("resumo-rh", () => {
         { id: "c2", status: "aceita" },
         { id: "c3", status: "enviada" },
       ],
+      pagamentos_pessoas: [
+        { id: "pg1", status: "aguardando_conciliacao" },
+        { id: "pg2", status: "liberado" },
+        { id: "pg3", status: "previsto" },
+        { id: "pg4", status: "pago" },
+      ],
     } as unknown as DB;
 
     const r = resumirOperacionalRh(db);
@@ -61,5 +67,14 @@ describe("resumo-rh", () => {
     expect(r.docs_vencido).toBe(1);
     expect(r.ponto_abertas).toBe(1);
     expect(r.convocacoes_enviadas).toBe(2);
+    expect(r.pagamentos_aguardando).toBe(1);
+    expect(r.pagamentos_abertos).toBe(2);
+  });
+
+  it("monta href e parseia filtro de pagamentos", () => {
+    expect(parseFiltroPagamentosRh("aguardando")).toBe("aguardando");
+    expect(parseFiltroPagamentosRh("x")).toBe("abertos");
+    expect(hrefPagamentosRh()).toBe("/rh/pagamentos");
+    expect(hrefPagamentosRh("aguardando")).toBe("/rh/pagamentos?filtro=aguardando");
   });
 });

@@ -19,7 +19,7 @@ import {
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
 import { alertaDocumentosPessoa, garantirChecklistDocumentos } from "@/lib/domain/documentos-pessoa";
-import { resumirOperacionalRh } from "@/lib/domain/resumo-rh";
+import { hrefPagamentosRh, resumirOperacionalRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -225,7 +225,7 @@ export default function RhPage() {
         }
       />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <button
           type="button"
           className="text-left"
@@ -270,6 +270,26 @@ export default function RhPage() {
             valor={String(resumoOp.convocacoes_enviadas)}
             subtexto="Abrir escala"
             cor={resumoOp.convocacoes_enviadas > 0 ? "amarelo" : "cinza"}
+          />
+        </Link>
+        <Link href={hrefPagamentosRh("aguardando")} className="block">
+          <StatCard
+            rotulo="Aguardando conciliação"
+            valor={String(resumoOp.pagamentos_aguardando)}
+            subtexto={
+              resumoOp.pagamentos_abertos > 0
+                ? `${resumoOp.pagamentos_abertos} ainda a pagar`
+                : "Pagamentos RH"
+            }
+            cor={resumoOp.pagamentos_aguardando > 0 ? "laranja" : "verde"}
+          />
+        </Link>
+        <Link href={hrefPagamentosRh("abertos")} className="block">
+          <StatCard
+            rotulo="Pagamentos abertos"
+            valor={String(resumoOp.pagamentos_abertos)}
+            subtexto="Previstos + liberados"
+            cor={resumoOp.pagamentos_abertos > 0 ? "amarelo" : "cinza"}
           />
         </Link>
       </div>

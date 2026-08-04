@@ -8,6 +8,7 @@ import { mutate, uid, useDB } from "@/lib/data";
 import {
   FUNCOES_OPERACIONAIS,
   TIPOS_PESSOA_RH,
+  hrefPerfilRh,
   permissoesPorPapel,
   permissoesVazias,
   rotuloFuncao,
@@ -318,7 +319,11 @@ export default function RhPage() {
           {lista.map((pessoa) => {
             const alertaDocs = alertaDocumentosPessoa(pessoa);
             return (
-            <Link key={pessoa.id} href={`/rh/${pessoa.id}`} className="block">
+            <Link
+              key={pessoa.id}
+              href={hrefPerfilRh(pessoa.id, { temAlertaDocs: alertaDocs.tem_alerta })}
+              className="block"
+            >
               <Card className="transition-colors hover:border-primaria/40 hover:bg-amber-50/40">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>

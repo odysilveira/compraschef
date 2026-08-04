@@ -166,3 +166,33 @@ export function pessoaParaSeedDePerfil(input: {
     atualizado_em: input.agora,
   };
 }
+
+export const ABAS_PERFIL_RH = [
+  "dados",
+  "documentos",
+  "acesso",
+  "escala",
+  "pagamentos",
+  "consumos",
+] as const;
+
+export type AbaPerfilRh = (typeof ABAS_PERFIL_RH)[number];
+
+export function parseAbaPerfilRh(valor: string | null | undefined): AbaPerfilRh {
+  if (valor && (ABAS_PERFIL_RH as readonly string[]).includes(valor)) {
+    return valor as AbaPerfilRh;
+  }
+  return "dados";
+}
+
+/** Link do perfil; com alerta de docs abre direto na aba Documentos. */
+export function hrefPerfilRh(
+  pessoaId: string,
+  opts?: { aba?: AbaPerfilRh; temAlertaDocs?: boolean }
+): string {
+  const aba =
+    opts?.aba ??
+    (opts?.temAlertaDocs ? ("documentos" as const) : ("dados" as const));
+  if (aba === "dados") return `/rh/${pessoaId}`;
+  return `/rh/${pessoaId}?aba=${aba}`;
+}

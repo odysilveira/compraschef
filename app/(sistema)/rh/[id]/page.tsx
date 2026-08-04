@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, FileUp, Save, Trash2, Users } from "lucide-react";
 import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, useDB } from "@/lib/data";
@@ -44,6 +44,7 @@ import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
   TIPOS_PESSOA_RH,
+  parseAbaPerfilRh,
   permissoesPorPapel,
   permissoesVazias,
   rotuloFuncao,
@@ -51,6 +52,7 @@ import {
   somenteDigitosCpf,
   somenteDigitosTelefone,
   validarCpf,
+  type AbaPerfilRh,
 } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
@@ -63,14 +65,13 @@ import type {
   TipoPessoaRH,
 } from "@/lib/types";
 
-type AbaPerfil = "dados" | "documentos" | "acesso" | "escala" | "pagamentos" | "consumos";
-
-export default function RhPerfilPage() {
+function RhPerfilConteudo() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const db = useDB();
   const podeRh = usePodeAcessarModulo("rh");
-  const [aba, setAba] = useState<AbaPerfil>("dados");
+  const [aba, setAba] = useState<AbaPerfilRh>(() => parseAbaPerfilRh(searchParams.get("aba")));
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [form, setForm] = useState<PessoaRH | null>(null);
@@ -123,6 +124,16 @@ export default function RhPerfilPage() {
       });
     } else setForm(null);
   }, [pessoa]);
+
+  useEffect(() => {
+    setAba(parseAbaPerfilRh(searchParams.get("aba")));
+  }, [searchParams]);
+
+  function irParaAba(proxima: AbaPerfilRh) {
+    setAba(proxima);
+    const base = `/rh/${params.id}`;
+    router.replace(proxima === "dados" ? base : `${base}?aba=${proxima}`, { scroll: false });
+  }
 
   if (!podeRh) {
     return (
@@ -427,13 +438,13 @@ export default function RhPerfilPage() {
             ["escala", "Escala"],
             ["pagamentos", "Pagamentos"],
             ["consumos", "Consumos"],
-          ] as const
+          ] as const satisfies ReadonlyArray<readonly [AbaPerfilRh, string]>
         ).map(([id, rotulo]) => (
           <button
             key={id}
             type="button"
             className={aba === id ? "btn-primario" : "btn-secundario"}
-            onClick={() => setAba(id)}
+            onClick={() => irParaAba(id)}
           >
             {rotulo}
           </button>
@@ -1095,5 +1106,20 @@ export default function RhPerfilPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+export default function RhPerfilPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="Perfil" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando perfil…</p>
+        </div>
+      }
+    >
+      <RhPerfilConteudo />
+    </Suspense>
   );
 }

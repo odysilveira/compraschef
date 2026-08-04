@@ -7,6 +7,8 @@ import {
   somenteDigitosCpf,
   somenteDigitosTelefone,
   validarCpf,
+  hrefPerfilRh,
+  parseAbaPerfilRh,
 } from "./rh";
 
 describe("rh helpers", () => {
@@ -54,5 +56,13 @@ describe("rh helpers", () => {
     expect(validarCpf("12345678900").valido).toBe(false);
     expect(validarCpf("123").mensagem).toContain("incompleto");
     expect(validarCpf("").valido).toBe(true);
+  });
+
+  it("parseia aba do perfil e monta href com deep link de documentos", () => {
+    expect(parseAbaPerfilRh("documentos")).toBe("documentos");
+    expect(parseAbaPerfilRh("xyz")).toBe("dados");
+    expect(hrefPerfilRh("pes-1")).toBe("/rh/pes-1");
+    expect(hrefPerfilRh("pes-1", { temAlertaDocs: true })).toBe("/rh/pes-1?aba=documentos");
+    expect(hrefPerfilRh("pes-1", { aba: "escala" })).toBe("/rh/pes-1?aba=escala");
   });
 });

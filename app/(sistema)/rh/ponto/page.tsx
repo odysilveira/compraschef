@@ -29,6 +29,7 @@ import {
   registrarPropostaPonto,
   resumirEspelhoPonto,
   exportarEspelhoCsv,
+  exportarPendenciasPontoCsv,
   filtrarEspelhoPonto,
   formatarDuracaoHoras,
   formatarSaldoHoras,
@@ -418,6 +419,23 @@ function RhPontoConteudo() {
     setErro(null);
   }
 
+  function baixarPendenciasCsv() {
+    if (lista.length === 0) {
+      setMensagem("Nenhuma pendência neste filtro para exportar.");
+      return;
+    }
+    const csv = exportarPendenciasPontoCsv(lista, nomePessoa);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rh-ponto-pendencias-${filtro}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagem(`CSV baixado (${lista.length} pendência(s)).`);
+    setErro(null);
+  }
+
   function textoAviso(pendencia: PendenciaPonto) {
     const pessoa = db.pessoas.find((p) => p.id === pendencia.pessoa_id);
     if (!pessoa) return pendencia.texto_aviso ?? "";
@@ -752,6 +770,19 @@ function RhPontoConteudo() {
                   {lista.filter((p) => p.status === "proposta").length})
                 </button>
               )}
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={baixarPendenciasCsv}
+              disabled={lista.length === 0}
+              title={
+                lista.length === 0
+                  ? "Nenhuma pendência neste filtro"
+                  : "Exportar pendências do filtro atual (CSV)"
+              }
+            >
+              <Download size={16} /> Exportar CSV
+            </button>
           </div>
 
           {lista.length === 0 ? (

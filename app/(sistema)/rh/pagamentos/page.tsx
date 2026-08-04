@@ -13,6 +13,7 @@ import {
   gerarFolhaCltMes,
   informarPagamentoPessoa,
   liberarPagamentoPessoa,
+  liberarPagamentosPrevistos,
   registrarDivergenciaPagamentoPessoa,
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
@@ -520,6 +521,28 @@ function RhPagamentosConteudo() {
     setMensagem(`CSV baixado (${lista.length} pagamento(s)).`);
   }
 
+  function liberarTodosPrevistosDaLista() {
+    const ids = lista.filter((p) => p.status === "previsto").map((p) => p.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhum pagamento previsto neste filtro.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = liberarPagamentosPrevistos(proximo, ids);
+    mutate((atual) => Object.assign(atual, proximo));
+    if (r.liberados > 0) {
+      setMensagem(
+        `${r.liberados} pagamento(s) liberado(s). Agora dá para informar o pagamento.`
+      );
+      irParaFiltro("liberado");
+    }
+    if (r.erros.length) {
+      setMensagem(
+        (r.liberados > 0 ? `${r.liberados} liberado(s). ` : "") + r.erros.join(" ")
+      );
+    }
+  }
+
   const pagamentoInformar = informarId ? db.pagamentos_pessoas.find((p) => p.id === informarId) : null;
   const pagamentoConciliar = conciliarId ? db.pagamentos_pessoas.find((p) => p.id === conciliarId) : null;
   const pagamentoDivergencia = divergenciaId ? db.pagamentos_pessoas.find((p) => p.id === divergenciaId) : null;
@@ -599,6 +622,11 @@ function RhPagamentosConteudo() {
             {rotulo}
           </button>
         ))}
+        {filtro === "previsto" && lista.some((p) => p.status === "previsto") && (
+          <button type="button" className="btn-primario" onClick={liberarTodosPrevistosDaLista}>
+            Liberar todos ({lista.filter((p) => p.status === "previsto").length})
+          </button>
+        )}
         <Link href="/rh" className="btn-secundario ml-auto">
           Ver pessoas
         </Link>

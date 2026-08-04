@@ -77,6 +77,29 @@ export function liberarPagamentoPessoa(db: DB, pagamentoId: string): ResultadoPa
   return { sucesso: true, pagamento, erros: [] };
 }
 
+/**
+ * Libera vários títulos previstos de uma vez (ex.: após gerar folha).
+ * Se `ids` for informado, só esses; senão, todos os previstos do banco.
+ */
+export function liberarPagamentosPrevistos(
+  db: DB,
+  ids?: string[]
+): { sucesso: boolean; liberados: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : (db.pagamentos_pessoas ?? []).filter((p) => p.status === "previsto").map((p) => p.id);
+
+  let liberados = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const r = liberarPagamentoPessoa(db, id);
+    if (r.sucesso) liberados += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, liberados, erros };
+}
+
 export function informarPagamentoPessoa(
   db: DB,
   pagamentoId: string,

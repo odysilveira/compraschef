@@ -12,6 +12,7 @@ import {
   registrarPropostaPonto,
   resumirEspelhoPonto,
   exportarEspelhoCsv,
+  exportarPendenciasPontoCsv,
   filtrarEspelhoPonto,
   filtrarPendenciasPonto,
   resumirPendenciasPontoAbertas,
@@ -290,6 +291,16 @@ describe("ponto-rh", () => {
     expect(csv).toContain("Saldo (h)");
     expect(csv).toContain("João");
     expect(csv).toContain("Sem digital");
+  });
+
+  it("exporta CSV das pendências de ponto", () => {
+    const db = dbBase();
+    detectarPendenciasPonto(db, { agora: "2026-08-03T15:00:00.000Z", idFactory: () => "p-csv" });
+    const csv = exportarPendenciasPontoCsv(db.pendencias_ponto ?? [], () => "João");
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Pessoa;Data;Tipo falta;Status");
+    expect(csv).toContain("João");
+    expect(csv).toContain("Aguardando aviso");
   });
 
   it("calcula duração e formata horas (inclui virada de noite)", () => {

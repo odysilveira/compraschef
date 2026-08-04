@@ -962,3 +962,54 @@ export function exportarEspelhoCsv(
   });
   return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
 }
+
+/**
+ * CSV das pendências de ponto (separador `;`, UTF-8 com BOM) para Excel/pt-BR.
+ */
+export function exportarPendenciasPontoCsv(
+  pendencias: PendenciaPonto[],
+  nomePorId: (pessoaId: string) => string
+): string {
+  const cabecalho = [
+    "Pessoa",
+    "Data",
+    "Tipo falta",
+    "Status",
+    "Previsto entrada",
+    "Previsto saída",
+    "Proposta entrada",
+    "Proposta saída",
+    "Motivo proposta",
+    "Aviso em",
+    "Proposta em",
+    "Revisado em",
+    "Revisado por",
+  ];
+  const ordenados = pendencias
+    .slice()
+    .sort(
+      (a, b) =>
+        b.data.localeCompare(a.data) ||
+        nomePorId(a.pessoa_id).localeCompare(nomePorId(b.pessoa_id), "pt-BR")
+    );
+  const linhas = ordenados.map((p) =>
+    [
+      nomePorId(p.pessoa_id),
+      p.data,
+      rotuloTipoFaltaPonto(p.tipo_falta),
+      rotuloStatusPendenciaPonto(p.status),
+      p.horario_previsto_entrada ?? "",
+      p.horario_previsto_saida ?? "",
+      p.proposta_entrada ?? "",
+      p.proposta_saida ?? "",
+      p.proposta_motivo ?? "",
+      p.aviso_em ?? "",
+      p.proposta_em ?? "",
+      p.revisado_em ?? "",
+      p.revisado_por ?? "",
+    ]
+      .map((c) => csvEscape(String(c)))
+      .join(";")
+  );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}

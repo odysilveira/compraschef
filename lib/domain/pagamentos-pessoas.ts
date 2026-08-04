@@ -264,3 +264,72 @@ export function gerarFolhaCltMes(
 
   return { sucesso: true, criados, pulados, pagamentos, erros: [], avisos };
 }
+
+function csvEscape(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+function formatarValorCsv(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  return n.toFixed(2).replace(".", ",");
+}
+
+/**
+ * CSV dos pagamentos filtrados (separador `;`, UTF-8 com BOM) para Excel/pt-BR.
+ */
+export function exportarPagamentosPessoasCsv(
+  pagamentos: PagamentoPessoa[],
+  nomePorId: (pessoaId: string) => string
+): string {
+  const cabecalho = [
+    "Pessoa",
+    "Tipo",
+    "Descrição",
+    "Competência",
+    "Vencimento",
+    "Valor",
+    "Valor bruto",
+    "Desconto consumo",
+    "Desconto adiantamento",
+    "Status",
+    "Data pagamento",
+    "Valor pago",
+    "Banco/conta",
+    "Responsável",
+    "Observação",
+    "Divergente",
+    "Motivo divergência",
+  ];
+  const ordenados = pagamentos
+    .slice()
+    .sort(
+      (a, b) =>
+        a.vencimento.localeCompare(b.vencimento) ||
+        nomePorId(a.pessoa_id).localeCompare(nomePorId(b.pessoa_id), "pt-BR")
+    );
+  const linhas = ordenados.map((p) =>
+    [
+      nomePorId(p.pessoa_id),
+      rotuloTipoPagamentoPessoa(p.tipo),
+      p.descricao ?? "",
+      p.competencia ?? "",
+      p.vencimento,
+      formatarValorCsv(p.valor),
+      formatarValorCsv(p.valor_bruto),
+      formatarValorCsv(p.desconto_consumo),
+      formatarValorCsv(p.desconto_adiantamento),
+      rotuloStatusPagamentoPessoa(p.status),
+      p.pagamento_data ?? "",
+      formatarValorCsv(p.pagamento_valor),
+      p.pagamento_banco_conta ?? "",
+      p.pagamento_responsavel ?? "",
+      p.pagamento_observacao ?? "",
+      p.conciliacao_divergente ? "sim" : "não",
+      p.conciliacao_divergencia_motivo ?? "",
+    ]
+      .map((c) => csvEscape(c))
+      .join(";")
+  );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}

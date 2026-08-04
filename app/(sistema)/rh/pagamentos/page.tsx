@@ -3,12 +3,13 @@
 import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CircleCheckBig, Copy, FileUp, Plus, TriangleAlert, WalletCards } from "lucide-react";
+import { CircleCheckBig, Copy, Download, FileUp, Plus, TriangleAlert, WalletCards } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
   TIPOS_PAGAMENTO_PESSOA,
   conciliarPagamentoPessoa,
+  exportarPagamentosPessoasCsv,
   gerarFolhaCltMes,
   informarPagamentoPessoa,
   liberarPagamentoPessoa,
@@ -500,6 +501,23 @@ function RhPagamentosConteudo() {
     );
   }
 
+  function baixarPagamentosCsv() {
+    if (lista.length === 0) {
+      setMensagem("Nenhum pagamento neste filtro para exportar.");
+      return;
+    }
+    const csv = exportarPagamentosPessoasCsv(lista, nomePessoa);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const sufixoPessoa = filtroPessoa !== "todos" ? `-${filtroPessoa}` : "";
+    a.download = `rh-pagamentos-${filtro}${sufixoPessoa}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagem(`CSV baixado (${lista.length} pagamento(s)).`);
+  }
+
   const pagamentoInformar = informarId ? db.pagamentos_pessoas.find((p) => p.id === informarId) : null;
   const pagamentoConciliar = conciliarId ? db.pagamentos_pessoas.find((p) => p.id === conciliarId) : null;
   const pagamentoDivergencia = divergenciaId ? db.pagamentos_pessoas.find((p) => p.id === divergenciaId) : null;
@@ -511,6 +529,20 @@ function RhPagamentosConteudo() {
         subtitulo="Informar pagamento ≠ pago. A baixa definitiva depende da conciliação bancária."
         acao={
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secundario"
+              disabled={lista.length === 0}
+              onClick={baixarPagamentosCsv}
+              title={
+                lista.length === 0
+                  ? "Nada para exportar neste filtro"
+                  : "Exportar pagamentos do filtro atual (CSV)"
+              }
+            >
+              <Download size={16} /> Exportar CSV
+              {lista.length > 0 ? ` (${lista.length})` : ""}
+            </button>
             <button type="button" className="btn-secundario" onClick={gerarFolhaMes}>
               Gerar folha do mês
             </button>

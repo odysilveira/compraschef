@@ -8,7 +8,9 @@ import { mutate, uid, useDB } from "@/lib/data";
 import {
   antecedenciaMinimaDoDb,
   confirmarNorma,
+  confirmarNormasPendentes,
   ignorarNorma,
+  ignorarNormasPendentes,
   normasPendentes,
   rotuloParametroNorma,
   rotuloStatusNorma,
@@ -96,6 +98,48 @@ export default function RhNormasPage() {
     setMensagem("Norma ignorada — configuração do sistema não mudou.");
   }
 
+  function confirmarTodasPendentes() {
+    const ids = pendentes.map((n) => n.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhuma norma pendente para confirmar.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = confirmarNormasPendentes(proximo, ids, {
+      revisado_por: papel ?? "usuario",
+    });
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(r.erros.length ? r.erros.join(" ") : null);
+    setMensagem(
+      r.confirmadas > 0
+        ? `${r.confirmadas} norma(s) confirmada(s)${
+            r.erros.length ? ` · ${r.erros.length} com erro` : ""
+          }. Antecedência vigente: ${antecedenciaMinimaDoDb(proximo)} dia(s).`
+        : r.erros.join(" ") || "Nenhuma norma confirmada."
+    );
+    setFiltro("pendente");
+  }
+
+  function ignorarTodasPendentes() {
+    const ids = pendentes.map((n) => n.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhuma norma pendente para ignorar.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = ignorarNormasPendentes(proximo, ids, {
+      revisado_por: papel ?? "usuario",
+    });
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(r.erros.length ? r.erros.join(" ") : null);
+    setMensagem(
+      r.ignoradas > 0
+        ? `${r.ignoradas} norma(s) ignorada(s) — configuração não mudou.`
+        : r.erros.join(" ") || "Nenhuma norma ignorada."
+    );
+    setFiltro("pendente");
+  }
+
   return (
     <div>
       <TituloPagina
@@ -144,7 +188,7 @@ export default function RhNormasPage() {
         </p>
       )}
 
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           className={filtro === "pendente" ? "btn-primario" : "btn-secundario"}
@@ -159,6 +203,26 @@ export default function RhNormasPage() {
         >
           Todas
         </button>
+        {filtro === "pendente" && pendentes.length > 0 && (
+          <>
+            <button
+              type="button"
+              className="btn-primario"
+              onClick={confirmarTodasPendentes}
+              title="Confirma todas as pendentes e aplica parâmetros mapeados"
+            >
+              Confirmar todas ({pendentes.length})
+            </button>
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={ignorarTodasPendentes}
+              title="Ignora todas sem alterar a configuração"
+            >
+              Ignorar todas ({pendentes.length})
+            </button>
+          </>
+        )}
       </div>
 
       {lista.length === 0 ? (

@@ -4,7 +4,9 @@ import {
   CATALOGO_PUBLICACOES_RH,
   antecedenciaMinimaDoDb,
   confirmarNorma,
+  confirmarNormasPendentes,
   ignorarNorma,
+  ignorarNormasPendentes,
   normasPendentes,
   verificarAtualizacoesNormas,
 } from "./normas-rh";
@@ -131,5 +133,50 @@ describe("normas-rh", () => {
     expect(r.sucesso).toBe(true);
     expect(antecedenciaMinimaDoDb(db)).toBe(3);
     expect(db.normas_rh![0]!.status).toBe("ignorada");
+  });
+
+  it("confirma e ignora várias normas pendentes em lote", () => {
+    const db = dbVazio();
+    verificarAtualizacoesNormas(db, {
+      catalogo: [
+        {
+          chave_fonte: "lote-a",
+          titulo: "A",
+          resumo: "a",
+          fonte: "demo",
+          publicado_em: "2026-08-01",
+          relevancia: "baixa",
+        },
+        {
+          chave_fonte: "lote-b",
+          titulo: "B",
+          resumo: "b",
+          fonte: "demo",
+          publicado_em: "2026-08-01",
+          relevancia: "baixa",
+        },
+        {
+          chave_fonte: "lote-c",
+          titulo: "C",
+          resumo: "c",
+          fonte: "demo",
+          publicado_em: "2026-08-01",
+          relevancia: "baixa",
+          parametro: "antecedencia_minima_dias",
+          valor_proposto: 5,
+        },
+      ],
+      idFactory: () => `n-${db.normas_rh!.length}`,
+    });
+    const ids = normasPendentes(db).map((n) => n.id);
+    expect(ids).toHaveLength(3);
+    const conf = confirmarNormasPendentes(db, [ids[0]!, ids[2]!], {
+      revisado_por: "dono",
+    });
+    expect(conf.confirmadas).toBe(2);
+    expect(antecedenciaMinimaDoDb(db)).toBe(5);
+    const ign = ignorarNormasPendentes(db, [ids[1]!], { revisado_por: "dono" });
+    expect(ign.ignoradas).toBe(1);
+    expect(normasPendentes(db)).toHaveLength(0);
   });
 });

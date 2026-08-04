@@ -44,7 +44,7 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
-import { hrefPontoRh } from "@/lib/domain/resumo-rh";
+import { hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -1101,7 +1101,10 @@ function RhPerfilConteudo() {
         <Card className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-bold">Pagamentos desta pessoa</h2>
-            <Link href="/rh/pagamentos" className="btn-secundario text-sm">
+            <Link
+              href={hrefPagamentosRh({ filtro: "todos", pessoa: pessoa.id })}
+              className="btn-secundario text-sm"
+            >
               Abrir pagamentos
             </Link>
           </div>

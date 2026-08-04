@@ -61,9 +61,19 @@ export function parseFiltroPagamentosRh(
   return "abertos";
 }
 
-export function hrefPagamentosRh(filtro?: FiltroPagamentosRh): string {
-  if (!filtro || filtro === "abertos") return "/rh/pagamentos";
-  return `/rh/pagamentos?filtro=${filtro}`;
+export function hrefPagamentosRh(
+  opts?: FiltroPagamentosRh | { filtro?: FiltroPagamentosRh; pessoa?: string }
+): string {
+  const normalizado =
+    typeof opts === "string" || opts === undefined ? { filtro: opts } : opts;
+  const params = new URLSearchParams();
+  if (normalizado.filtro && normalizado.filtro !== "abertos") {
+    params.set("filtro", normalizado.filtro);
+  }
+  const pessoa = normalizado.pessoa?.trim();
+  if (pessoa) params.set("pessoa", pessoa);
+  const q = params.toString();
+  return q ? `/rh/pagamentos?${q}` : "/rh/pagamentos";
 }
 
 export type FiltroDocsRh = "todos" | "alerta";

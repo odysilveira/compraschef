@@ -39,6 +39,7 @@ import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import {
   hrefPagamentosRh,
   parseFiltroPagamentosRh,
+  parsePessoaPontoRh,
   type FiltroPagamentosRh,
 } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
@@ -105,7 +106,10 @@ function RhPagamentosConteudo() {
   const [filtro, setFiltro] = useState<FiltroPagamentosRh>(() =>
     parseFiltroPagamentosRh(searchParams.get("filtro"))
   );
-  const [filtroPessoa, setFiltroPessoa] = useState<string>("todos");
+  const [filtroPessoa, setFiltroPessoa] = useState<string>(() => {
+    const pessoa = parsePessoaPontoRh(searchParams.get("pessoa"));
+    return pessoa || "todos";
+  });
   const [filtroTipo, setFiltroTipo] = useState<TipoPagamentoPessoa | "todos">("todos");
   const [filtroCompetencia, setFiltroCompetencia] = useState<string>("");
   const [formNovo, setFormNovo] = useState<FormNovo | null>(null);
@@ -139,11 +143,33 @@ function RhPagamentosConteudo() {
 
   useEffect(() => {
     setFiltro(parseFiltroPagamentosRh(searchParams.get("filtro")));
-  }, [searchParams]);
+    const pessoaUrl = parsePessoaPontoRh(searchParams.get("pessoa"));
+    if (!pessoaUrl) {
+      setFiltroPessoa("todos");
+      return;
+    }
+    const existe = (db.pessoas ?? []).some((p) => p.id === pessoaUrl);
+    setFiltroPessoa(existe ? pessoaUrl : "todos");
+  }, [db.pessoas, searchParams]);
+
+  function irParaFiltros(proximoFiltro: FiltroPagamentosRh, proximaPessoa: string = filtroPessoa) {
+    setFiltro(proximoFiltro);
+    setFiltroPessoa(proximaPessoa);
+    router.replace(
+      hrefPagamentosRh({
+        filtro: proximoFiltro,
+        pessoa: proximaPessoa !== "todos" ? proximaPessoa : undefined,
+      }),
+      { scroll: false }
+    );
+  }
 
   function irParaFiltro(proximo: FiltroPagamentosRh) {
-    setFiltro(proximo);
-    router.replace(hrefPagamentosRh(proximo), { scroll: false });
+    irParaFiltros(proximo);
+  }
+
+  function aoMudarFiltroPessoa(proximaPessoa: string) {
+    irParaFiltros(filtro, proximaPessoa);
   }
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
@@ -548,7 +574,11 @@ function RhPagamentosConteudo() {
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <label className="block">
           <span className="rotulo mb-1 block">Pessoa</span>
-          <select className="input w-full" value={filtroPessoa} onChange={(e) => setFiltroPessoa(e.target.value)}>
+          <select
+            className="input w-full"
+            value={filtroPessoa}
+            onChange={(e) => aoMudarFiltroPessoa(e.target.value)}
+          >
             <option value="todos">Todas</option>
             {pessoasAtivas.map((p) => (
               <option key={p.id} value={p.id}>

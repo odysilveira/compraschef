@@ -13,6 +13,7 @@ import {
   parseFiltroConvocacaoEscalaRh,
   parseFiltroDocsRh,
   parseFiltroPagamentosRh,
+  parseFiltroPendenciasPontoRh,
   parsePessoaPontoRh,
   resumirOperacionalRh,
 } from "./resumo-rh";
@@ -90,6 +91,8 @@ describe("resumo-rh", () => {
     expect(r.docs_vencido).toBe(1);
     expect(r.docs_a_vencer).toBe(0);
     expect(r.ponto_abertas).toBe(1);
+    expect(r.ponto_a_avisar).toBe(1);
+    expect(r.ponto_propostas).toBe(0);
     expect(r.convocacoes_enviadas).toBe(2);
     expect(r.convocacoes_sem_resposta).toBe(1);
     expect(r.pagamentos_aguardando).toBe(1);
@@ -126,6 +129,9 @@ describe("resumo-rh", () => {
       "/rh/ponto?aba=espelho&pessoa=pes-1"
     );
     expect(hrefPontoRh({ pessoa: "pes-1" })).toBe("/rh/ponto?pessoa=pes-1");
+    expect(hrefPontoRh({ filtro: "proposta" })).toBe("/rh/ponto?filtro=proposta");
+    expect(parseFiltroPendenciasPontoRh("proposta")).toBe("proposta");
+    expect(parseFiltroPendenciasPontoRh(null)).toBe("abertas");
     expect(parsePessoaPontoRh(" pes-1 ")).toBe("pes-1");
     expect(parsePessoaPontoRh(null)).toBe("");
     expect(parseFiltroConvocacaoEscalaRh("enviada")).toBe("enviada");

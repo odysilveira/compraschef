@@ -459,6 +459,59 @@ export function pendenciasPontoAbertas(db: Pick<DB, "pendencias_ponto">): Penden
   return (db.pendencias_ponto ?? []).filter((p) => STATUS_ABERTOS.includes(p.status));
 }
 
+/** Filtros da fila de pendências (ação do gestor). */
+export type FiltroPendenciasPonto = "abertas" | "aviso" | "aguardando" | "proposta" | "todas";
+
+export function parseFiltroPendenciasPonto(
+  valor: string | null | undefined
+): FiltroPendenciasPonto {
+  if (
+    valor === "aviso" ||
+    valor === "aguardando" ||
+    valor === "proposta" ||
+    valor === "todas" ||
+    valor === "abertas"
+  ) {
+    return valor;
+  }
+  return "abertas";
+}
+
+export function filtrarPendenciasPonto(
+  pendencias: PendenciaPonto[],
+  filtro: FiltroPendenciasPonto
+): PendenciaPonto[] {
+  const lista = [...pendencias].sort((a, b) => b.data.localeCompare(a.data) || a.id.localeCompare(b.id));
+  switch (filtro) {
+    case "aviso":
+      return lista.filter((p) => p.status === "aguardando_aviso");
+    case "aguardando":
+      return lista.filter((p) => p.status === "aguardando_funcionario");
+    case "proposta":
+      return lista.filter((p) => p.status === "proposta");
+    case "todas":
+      return lista;
+    case "abertas":
+    default:
+      return lista.filter((p) => STATUS_ABERTOS.includes(p.status));
+  }
+}
+
+export function resumirPendenciasPontoAbertas(db: Pick<DB, "pendencias_ponto">): {
+  total: number;
+  aviso: number;
+  aguardando: number;
+  proposta: number;
+} {
+  const abertas = pendenciasPontoAbertas(db);
+  return {
+    total: abertas.length,
+    aviso: abertas.filter((p) => p.status === "aguardando_aviso").length,
+    aguardando: abertas.filter((p) => p.status === "aguardando_funcionario").length,
+    proposta: abertas.filter((p) => p.status === "proposta").length,
+  };
+}
+
 export function rotuloTipoBatidaPonto(tipo: TipoBatidaPonto): string {
   switch (tipo) {
     case "entrada":

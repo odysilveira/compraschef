@@ -26,6 +26,8 @@ import {
   pagamentoDaConvocacao,
   pessoaPrecisaConvocacao,
   registrarRespostaConvocacao,
+  registrarSilencioConvocacoesVencidas,
+  convocacaoEnviadaSemRespostaVencida,
   resumoSetoresDoDia,
   rotuloPeriodoJanela,
   rotuloSetorConvocacao,
@@ -244,6 +246,7 @@ function RhEscalaConteudo() {
   }
 
   const dias = useMemo(() => janelaCalendarioEscala(hojeISO()), []);
+  const hoje = hojeISO();
   const periodoRotulo = useMemo(() => rotuloPeriodoJanela(dias), [dias]);
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
@@ -275,16 +278,34 @@ function RhEscalaConteudo() {
   );
   const slots = useMemo(() => slotsNaJanela(db, dias), [db, dias]);
   const convocacoesEnviadasNaJanela = useMemo(() => {
-    const idsSlots = new Set(slots.map((s) => s.id));
+    const idsSlotsJanela = new Set(slots.map((s) => s.id));
     return (db.convocacoes ?? [])
-      .filter((c) => c.status === "enviada" && idsSlots.has(c.escala_slot_id))
+      .filter((c) => {
+        if (c.status !== "enviada") return false;
+        const slot = db.escala_slots.find((s) => s.id === c.escala_slot_id);
+        if (!slot) return false;
+        // Inclui enviadas da janela e também plantões já passados (fora do calendário).
+        return idsSlotsJanela.has(slot.id) || slot.data < hoje;
+      })
       .slice()
       .sort((a, b) => {
         const sa = db.escala_slots.find((s) => s.id === a.escala_slot_id);
         const sb = db.escala_slots.find((s) => s.id === b.escala_slot_id);
+        const va = convocacaoEnviadaSemRespostaVencida(a.status, sa?.data, hoje) ? 0 : 1;
+        const vb = convocacaoEnviadaSemRespostaVencida(b.status, sb?.data, hoje) ? 0 : 1;
+        if (va !== vb) return va - vb;
         return (sa?.data ?? "").localeCompare(sb?.data ?? "") || a.id.localeCompare(b.id);
       });
-  }, [db.convocacoes, db.escala_slots, slots]);
+  }, [db.convocacoes, db.escala_slots, hoje, slots]);
+
+  const convocacoesEnviadasVencidas = useMemo(
+    () =>
+      convocacoesEnviadasNaJanela.filter((c) => {
+        const slot = db.escala_slots.find((s) => s.id === c.escala_slot_id);
+        return convocacaoEnviadaSemRespostaVencida(c.status, slot?.data, hoje);
+      }),
+    [convocacoesEnviadasNaJanela, db.escala_slots, hoje]
+  );
 
   const porDia = useMemo(() => {
     const map = new Map<string, EscalaSlot[]>();
@@ -298,7 +319,6 @@ function RhEscalaConteudo() {
 
   const semanas = useMemo(() => montarGradeCalendario(dias, 1), [dias]);
   const cabecalhoSemana = useMemo(() => rotulosCabecalhoSemana(1), []);
-  const hoje = hojeISO();
 
   const nomePessoa = (id: string) => db.pessoas.find((p) => p.id === id)?.nome ?? "—";
   const primeiroNome = (id: string) => {
@@ -524,6 +544,23 @@ function RhEscalaConteudo() {
     }
   }
 
+  function registrarSilencioVencidas() {
+    const proximo = structuredClone(db);
+    const r = registrarSilencioConvocacoesVencidas(proximo, hoje);
+    if (!r.sucesso) {
+      setErro(r.erros.join(" ") || "Não foi possível registrar o silêncio.");
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(null);
+    setMensagem(
+      r.atualizadas === 0
+        ? "Nenhuma convocação vencida para registrar silêncio."
+        : `${r.atualizadas} convocação(ões) marcada(s) como silêncio (plantão já passou).`
+    );
+    if (r.avisos.length) setAviso(r.avisos.join(" "));
+  }
+
   function soltarPlantaoNoDia(slotId: string, novaData: string) {
     const proximo = structuredClone(db);
     const r = moverSlotParaData(proximo, slotId, novaData);
@@ -721,7 +758,11 @@ function RhEscalaConteudo() {
             irParaFiltroConvocacao(filtroConvocacao === "enviada" ? "todas" : "enviada")
           }
         >
-          Enviadas ({convocacoesEnviadasNaJanela.length})
+          Enviadas ({convocacoesEnviadasNaJanela.length}
+          {convocacoesEnviadasVencidas.length > 0
+            ? ` · ${convocacoesEnviadasVencidas.length} sem resposta`
+            : ""}
+          )
         </button>
       </div>
 
@@ -732,15 +773,29 @@ function RhEscalaConteudo() {
               <h2 className="text-base font-bold">Convocações enviadas (aguardando resposta)</h2>
               <p className="text-sm text-slate-600">
                 No calendário, plantões enviados ficam em destaque âmbar; os demais ficam atenuados.
+                {convocacoesEnviadasVencidas.length > 0
+                  ? ` ${convocacoesEnviadasVencidas.length} com plantão já passado — registre silêncio para limpar a fila.`
+                  : ""}
               </p>
             </div>
-            <button
-              type="button"
-              className="btn-secundario text-sm"
-              onClick={() => irParaFiltroConvocacao("todas")}
-            >
-              Limpar filtro
-            </button>
+            <div className="flex flex-wrap gap-2">
+              {convocacoesEnviadasVencidas.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-secundario text-sm"
+                  onClick={registrarSilencioVencidas}
+                >
+                  Silêncio nos vencidos ({convocacoesEnviadasVencidas.length})
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-secundario text-sm"
+                onClick={() => irParaFiltroConvocacao("todas")}
+              >
+                Limpar filtro
+              </button>
+            </div>
           </div>
           {convocacoesEnviadasNaJanela.length === 0 ? (
             <Vazio mensagem="Nenhuma convocação enviada neste período." />
@@ -748,26 +803,46 @@ function RhEscalaConteudo() {
             <ul className="space-y-2">
               {convocacoesEnviadasNaJanela.map((conv) => {
                 const slot = db.escala_slots.find((s) => s.id === conv.escala_slot_id);
+                const vencida = convocacaoEnviadaSemRespostaVencida(conv.status, slot?.data, hoje);
                 return (
                   <li
                     key={conv.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2"
+                    className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                      vencida
+                        ? "border-orange-400 bg-orange-50"
+                        : "border-amber-300 bg-amber-50"
+                    }`}
                   >
                     <div>
-                      <p className="font-medium text-slate-900">{nomePessoa(conv.pessoa_id)}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-slate-900">{nomePessoa(conv.pessoa_id)}</p>
+                        {vencida && <Badge cor="laranja">Sem resposta</Badge>}
+                      </div>
                       <p className="text-sm text-slate-600">
                         {slot
                           ? `${formatDataBrLonga(slot.data)} · ${slot.hora_inicio}–${slot.hora_fim}`
                           : "Plantão"}
+                        {vencida ? " · plantão já passou" : ""}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="btn-primario text-sm"
-                      onClick={() => setDetalheSlotId(conv.escala_slot_id)}
-                    >
-                      Abrir
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      {vencida && (
+                        <button
+                          type="button"
+                          className="btn-secundario text-sm"
+                          onClick={() => responder(conv.id, "silencio")}
+                        >
+                          Registrar silêncio
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-primario text-sm"
+                        onClick={() => setDetalheSlotId(conv.escala_slot_id)}
+                      >
+                        Abrir
+                      </button>
+                    </div>
                   </li>
                 );
               })}

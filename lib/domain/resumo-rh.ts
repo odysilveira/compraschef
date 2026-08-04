@@ -101,3 +101,16 @@ export function hrefPontoRh(aba?: AbaPontoRh): string {
   if (!aba || aba === "pendencias") return "/rh/ponto";
   return `/rh/ponto?aba=${aba}`;
 }
+
+export type FiltroConvocacaoEscalaRh = "todas" | "enviada";
+
+export function parseFiltroConvocacaoEscalaRh(
+  valor: string | null | undefined
+): FiltroConvocacaoEscalaRh {
+  return valor === "enviada" ? "enviada" : "todas";
+}
+
+export function hrefEscalaRh(opts?: { convocacao?: FiltroConvocacaoEscalaRh }): string {
+  if (opts?.convocacao === "enviada") return "/rh/escala?convocacao=enviada";
+  return "/rh/escala";
+}

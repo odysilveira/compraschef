@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Check, Copy, GripVertical, Plus, RefreshCw } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
@@ -39,6 +40,11 @@ import {
   type SetorArrastoEscala,
   type SetorConvocacaoEscala,
 } from "@/lib/domain/escala";
+import {
+  hrefEscalaRh,
+  parseFiltroConvocacaoEscalaRh,
+  type FiltroConvocacaoEscalaRh,
+} from "@/lib/domain/resumo-rh";
 import { rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
 import {
   montarTextoConfirmacaoRecebimento,
@@ -200,8 +206,10 @@ function BancoPessoas({
   );
 }
 
-export default function RhEscalaPage() {
+function RhEscalaConteudo() {
   const db = useDB();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const podeRh = usePodeAcessarModulo("rh");
   const [form, setForm] = useState<FormPlantao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -214,6 +222,18 @@ export default function RhEscalaPage() {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const [diaDestinoHover, setDiaDestinoHover] = useState<string | null>(null);
   const arrastouRef = useRef(false);
+  const [filtroConvocacao, setFiltroConvocacao] = useState<FiltroConvocacaoEscalaRh>(() =>
+    parseFiltroConvocacaoEscalaRh(searchParams.get("convocacao"))
+  );
+
+  useEffect(() => {
+    setFiltroConvocacao(parseFiltroConvocacaoEscalaRh(searchParams.get("convocacao")));
+  }, [searchParams]);
+
+  function irParaFiltroConvocacao(proximo: FiltroConvocacaoEscalaRh) {
+    setFiltroConvocacao(proximo);
+    router.replace(hrefEscalaRh({ convocacao: proximo }), { scroll: false });
+  }
 
   const dias = useMemo(() => janelaCalendarioEscala(hojeISO()), []);
   const periodoRotulo = useMemo(() => rotuloPeriodoJanela(dias), [dias]);
@@ -246,6 +266,17 @@ export default function RhEscalaPage() {
     [pessoasAtivas]
   );
   const slots = useMemo(() => slotsNaJanela(db, dias), [db, dias]);
+  const convocacoesEnviadasNaJanela = useMemo(() => {
+    const idsSlots = new Set(slots.map((s) => s.id));
+    return (db.convocacoes ?? [])
+      .filter((c) => c.status === "enviada" && idsSlots.has(c.escala_slot_id))
+      .slice()
+      .sort((a, b) => {
+        const sa = db.escala_slots.find((s) => s.id === a.escala_slot_id);
+        const sb = db.escala_slots.find((s) => s.id === b.escala_slot_id);
+        return (sa?.data ?? "").localeCompare(sb?.data ?? "") || a.id.localeCompare(b.id);
+      });
+  }, [db.convocacoes, db.escala_slots, slots]);
 
   const porDia = useMemo(() => {
     const map = new Map<string, EscalaSlot[]>();
@@ -675,7 +706,62 @@ export default function RhEscalaPage() {
         <Link href="/rh/pagamentos" className="btn-secundario">
           Pagamentos
         </Link>
+        <button
+          type="button"
+          className={filtroConvocacao === "enviada" ? "btn-primario" : "btn-secundario"}
+          onClick={() =>
+            irParaFiltroConvocacao(filtroConvocacao === "enviada" ? "todas" : "enviada")
+          }
+        >
+          Enviadas ({convocacoesEnviadasNaJanela.length})
+        </button>
       </div>
+
+      {filtroConvocacao === "enviada" && (
+        <Card className="mb-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-bold">Convocações enviadas (aguardando resposta)</h2>
+            <button
+              type="button"
+              className="btn-secundario text-sm"
+              onClick={() => irParaFiltroConvocacao("todas")}
+            >
+              Limpar filtro
+            </button>
+          </div>
+          {convocacoesEnviadasNaJanela.length === 0 ? (
+            <Vazio mensagem="Nenhuma convocação enviada neste período." />
+          ) : (
+            <ul className="space-y-2">
+              {convocacoesEnviadasNaJanela.map((conv) => {
+                const slot = db.escala_slots.find((s) => s.id === conv.escala_slot_id);
+                return (
+                  <li
+                    key={conv.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                  >
+                    <div>
+                      <p className="font-medium text-slate-900">{nomePessoa(conv.pessoa_id)}</p>
+                      <p className="text-sm text-slate-600">
+                        {slot
+                          ? `${formatDataBrLonga(slot.data)} · ${slot.hora_inicio}–${slot.hora_fim}`
+                          : "Plantão"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-primario text-sm"
+                      onClick={() => setDetalheSlotId(conv.escala_slot_id)}
+                    >
+                      Abrir
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      )}
 
       {slots.length === 0 ? (
         <Vazio mensagem="Nenhum plantão no período. Arraste alguém da lista ao lado ou clique num dia." />
@@ -1352,5 +1438,20 @@ export default function RhEscalaPage() {
         )}
       </Modal>
     </div>
+  );
+}
+
+export default function RhEscalaPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="Escala" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando escala…</p>
+        </div>
+      }
+    >
+      <RhEscalaConteudo />
+    </Suspense>
   );
 }

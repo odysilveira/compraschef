@@ -20,7 +20,7 @@ import {
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
 import { alertaDocumentosPessoa, garantirChecklistDocumentos, rotuloCurtoAlertaDocumentos } from "@/lib/domain/documentos-pessoa";
-import { hrefConsumosRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -282,7 +282,7 @@ function RhPessoasConteudo() {
             cor={resumoOp.ponto_abertas > 0 ? "amarelo" : "verde"}
           />
         </Link>
-        <Link href="/rh/escala" className="block">
+        <Link href={hrefEscalaRh({ convocacao: "enviada" })} className="block">
           <StatCard
             rotulo="Convocações enviadas"
             valor={String(resumoOp.convocacoes_enviadas)}

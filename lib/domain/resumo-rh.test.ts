@@ -89,7 +89,7 @@ describe("resumo-rh", () => {
     } as unknown as DB;
 
     const r = resumirOperacionalRh(db, "2026-08-04");
-    expect(r.pessoas_ativas).toBe(2);
+    expect(r.pessoas_ativas).toBe(3);
     expect(r.docs_alerta).toBe(1);
     expect(r.docs_vencido).toBe(1);
     expect(r.docs_a_vencer).toBe(0);

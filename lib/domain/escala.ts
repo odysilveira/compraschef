@@ -702,6 +702,45 @@ export function marcarConvocacaoEnviada(db: DB, convocacaoId: string, agora = ne
   return { sucesso: true, convocacao, erros: [], avisos: [] };
 }
 
+/** Convocação enviada cujo plantão já passou — ainda aguarda triagem (aceite/recusa/silêncio). */
+export function convocacaoEnviadaSemRespostaVencida(
+  status: StatusConvocacao,
+  dataPlantao: string | undefined,
+  hoje: string
+): boolean {
+  return status === "enviada" && Boolean(dataPlantao && /^\d{4}-\d{2}-\d{2}$/.test(dataPlantao) && dataPlantao < hoje);
+}
+
+/**
+ * Marca como silêncio todas as convocações enviadas cujo plantão já passou.
+ * Limpa a fila operacional sem abrir cada plantão.
+ */
+export function registrarSilencioConvocacoesVencidas(
+  db: DB,
+  hoje: string,
+  agora = new Date().toISOString()
+): { sucesso: boolean; atualizadas: number; erros: string[]; avisos: string[] } {
+  const erros: string[] = [];
+  const avisos: string[] = [];
+  let atualizadas = 0;
+  const ids = (db.convocacoes ?? [])
+    .filter((c) => {
+      if (c.status !== "enviada") return false;
+      const slot = db.escala_slots.find((s) => s.id === c.escala_slot_id);
+      return convocacaoEnviadaSemRespostaVencida(c.status, slot?.data, hoje);
+    })
+    .map((c) => c.id);
+
+  for (const id of ids) {
+    const r = registrarRespostaConvocacao(db, id, "silencio", agora);
+    if (r.sucesso) atualizadas += 1;
+    else erros.push(...r.erros);
+    if (r.avisos.length) avisos.push(...r.avisos);
+  }
+
+  return { sucesso: erros.length === 0, atualizadas, erros, avisos };
+}
+
 export function registrarRespostaConvocacao(
   db: DB,
   convocacaoId: string,

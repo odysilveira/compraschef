@@ -4,6 +4,7 @@ import { hojeIsoLocal, somarDiasIso } from "./documentos-pessoa";
 import {
   antecedenciaMinimaOk,
   calcularHorasPagas,
+  convocacaoEnviadaSemRespostaVencida,
   criarSlot,
   datasTrabalhoPadraoClt,
   excluirSlot,
@@ -16,6 +17,7 @@ import {
   montarTextoConvocacaoWhatsApp,
   moverSlotParaData,
   registrarRespostaConvocacao,
+  registrarSilencioConvocacoesVencidas,
   resumoSetoresDoDia,
   rotuloPeriodoJanela,
   rotulosCabecalhoSemana,
@@ -631,5 +633,47 @@ describe("escala domain", () => {
     expect(r.sucesso).toBe(true);
     expect(r.avisos.some((a) => /ASO/i.test(a))).toBe(true);
     expect(db.escala_slots.find((s) => s.id === "esc-aviso")).toBeDefined();
+  });
+
+  it("detecta e registra silêncio em convocações enviadas com plantão vencido", () => {
+    expect(convocacaoEnviadaSemRespostaVencida("enviada", "2026-08-01", "2026-08-04")).toBe(true);
+    expect(convocacaoEnviadaSemRespostaVencida("enviada", "2026-08-04", "2026-08-04")).toBe(false);
+    expect(convocacaoEnviadaSemRespostaVencida("enviada", "2026-08-10", "2026-08-04")).toBe(false);
+    expect(convocacaoEnviadaSemRespostaVencida("aceita", "2026-08-01", "2026-08-04")).toBe(false);
+
+    const db = dbBase();
+    const vencida = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-01",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-venc", convocacaoId: "conv-venc", agora: "2026-07-28T12:00:00.000Z" }
+    );
+    expect(vencida.sucesso).toBe(true);
+    marcarConvocacaoEnviada(db, "conv-venc", "2026-07-28T13:00:00.000Z");
+
+    const futura = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-10",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-fut", convocacaoId: "conv-fut", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    expect(futura.sucesso).toBe(true);
+    marcarConvocacaoEnviada(db, "conv-fut", "2026-08-01T13:00:00.000Z");
+
+    const r = registrarSilencioConvocacoesVencidas(db, "2026-08-04", "2026-08-04T15:00:00.000Z");
+    expect(r.sucesso).toBe(true);
+    expect(r.atualizadas).toBe(1);
+    expect(db.convocacoes.find((c) => c.id === "conv-venc")?.status).toBe("silencio");
+    expect(db.convocacoes.find((c) => c.id === "conv-fut")?.status).toBe("enviada");
   });
 });

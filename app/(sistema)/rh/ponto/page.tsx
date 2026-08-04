@@ -35,7 +35,7 @@ import {
   toleranciaAtrasoMinutosDoDb,
 } from "@/lib/domain/ponto-rh";
 import type { FiltroEspelhoPonto, StatusDiaEspelho } from "@/lib/domain/ponto-rh";
-import { hrefPontoRh, parseAbaPontoRh, type AbaPontoRh } from "@/lib/domain/resumo-rh";
+import { hrefPontoRh, parseAbaPontoRh, parsePessoaPontoRh, type AbaPontoRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
@@ -73,7 +73,9 @@ function RhPontoConteudo() {
   const [filtro, setFiltro] = useState<"abertas" | "todas">("abertas");
   const [aba, setAba] = useState<AbaPontoRh>(() => parseAbaPontoRh(searchParams.get("aba")));
   const [competenciaEspelho, setCompetenciaEspelho] = useState(() => competenciaDeData());
-  const [pessoaEspelho, setPessoaEspelho] = useState<string>("");
+  const [pessoaEspelho, setPessoaEspelho] = useState<string>(() =>
+    parsePessoaPontoRh(searchParams.get("pessoa"))
+  );
   const [filtroEspelho, setFiltroEspelho] = useState<FiltroEspelhoPonto>("todos");
   const [detalheId, setDetalheId] = useState<string | null>(null);
   const [propostaEntrada, setPropostaEntrada] = useState("");
@@ -86,11 +88,30 @@ function RhPontoConteudo() {
 
   useEffect(() => {
     setAba(parseAbaPontoRh(searchParams.get("aba")));
-  }, [searchParams]);
+    const pessoaUrl = parsePessoaPontoRh(searchParams.get("pessoa"));
+    if (!pessoaUrl) {
+      setPessoaEspelho("");
+      return;
+    }
+    const existe = (db.pessoas ?? []).some((p) => p.id === pessoaUrl);
+    setPessoaEspelho(existe ? pessoaUrl : "");
+  }, [db.pessoas, searchParams]);
+
+  function irParaPonto(proxima: AbaPontoRh, pessoaId: string = pessoaEspelho) {
+    setAba(proxima);
+    setPessoaEspelho(pessoaId);
+    router.replace(
+      hrefPontoRh({ aba: proxima, pessoa: pessoaId || undefined }),
+      { scroll: false }
+    );
+  }
 
   function irParaAba(proxima: AbaPontoRh) {
-    setAba(proxima);
-    router.replace(hrefPontoRh(proxima), { scroll: false });
+    irParaPonto(proxima);
+  }
+
+  function aoMudarPessoaEspelho(pessoaId: string) {
+    irParaPonto(aba === "pendencias" ? "espelho" : aba, pessoaId);
   }
 
   const horasAviso = avisoPontoHorasDoDb(db);
@@ -132,6 +153,12 @@ function RhPontoConteudo() {
         .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
     [db.pessoas]
   );
+
+  const pessoaEspelhoExtra = useMemo(() => {
+    if (!pessoaEspelho) return null;
+    if (colaboradoresEspelho.some((p) => p.id === pessoaEspelho)) return null;
+    return (db.pessoas ?? []).find((p) => p.id === pessoaEspelho) ?? null;
+  }, [colaboradoresEspelho, db.pessoas, pessoaEspelho]);
 
   const detalhe = detalheId ? db.pendencias_ponto?.find((p) => p.id === detalheId) : undefined;
   const detalhePessoa = detalhe ? db.pessoas.find((p) => p.id === detalhe.pessoa_id) : undefined;
@@ -712,9 +739,12 @@ function RhPontoConteudo() {
                 <select
                   className="input"
                   value={pessoaEspelho}
-                  onChange={(e) => setPessoaEspelho(e.target.value)}
+                  onChange={(e) => aoMudarPessoaEspelho(e.target.value)}
                 >
                   <option value="">Todas</option>
+                  {pessoaEspelhoExtra && (
+                    <option value={pessoaEspelhoExtra.id}>{pessoaEspelhoExtra.nome}</option>
+                  )}
                   {colaboradoresEspelho.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.nome}

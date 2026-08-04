@@ -97,9 +97,22 @@ export function parseAbaPontoRh(valor: string | null | undefined): AbaPontoRh {
   return valor === "espelho" ? "espelho" : "pendencias";
 }
 
-export function hrefPontoRh(aba?: AbaPontoRh): string {
-  if (!aba || aba === "pendencias") return "/rh/ponto";
-  return `/rh/ponto?aba=${aba}`;
+/** ID de pessoa em `?pessoa=` (vazio se ausente). */
+export function parsePessoaPontoRh(valor: string | null | undefined): string {
+  return valor?.trim() || "";
+}
+
+export function hrefPontoRh(opts?: { aba?: AbaPontoRh; pessoa?: string } | AbaPontoRh): string {
+  const normalizado =
+    typeof opts === "string" || opts === undefined
+      ? { aba: opts }
+      : opts;
+  const params = new URLSearchParams();
+  if (normalizado.aba === "espelho") params.set("aba", "espelho");
+  const pessoa = normalizado.pessoa?.trim();
+  if (pessoa) params.set("pessoa", pessoa);
+  const q = params.toString();
+  return q ? `/rh/ponto?${q}` : "/rh/ponto";
 }
 
 export type FiltroConvocacaoEscalaRh = "todas" | "enviada";

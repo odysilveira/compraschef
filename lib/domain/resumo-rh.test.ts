@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { DB, PessoaRH } from "../types";
 import { permissoesVazias } from "./rh";
-import { hrefPagamentosRh, parseFiltroPagamentosRh, resumirOperacionalRh } from "./resumo-rh";
+import {
+  hrefConsumosRh,
+  hrefPagamentosRh,
+  hrefPessoasRh,
+  parseFiltroConsumosRh,
+  parseFiltroDocsRh,
+  parseFiltroPagamentosRh,
+  resumirOperacionalRh,
+} from "./resumo-rh";
 
 function pessoa(overrides: Partial<PessoaRH> = {}): PessoaRH {
   return {
@@ -21,7 +29,7 @@ function pessoa(overrides: Partial<PessoaRH> = {}): PessoaRH {
 }
 
 describe("resumo-rh", () => {
-  it("conta docs com alerta, ponto aberto e convocações enviadas", () => {
+  it("conta docs, ponto, convocações, pagamentos e consumos", () => {
     const db = {
       pessoas: [
         pessoa({
@@ -59,6 +67,11 @@ describe("resumo-rh", () => {
         { id: "pg3", status: "previsto" },
         { id: "pg4", status: "pago" },
       ],
+      consumos_pessoas: [
+        { id: "c1", status: "pendente" },
+        { id: "c2", status: "descontado" },
+        { id: "c3", status: "pendente" },
+      ],
     } as unknown as DB;
 
     const r = resumirOperacionalRh(db);
@@ -69,12 +82,20 @@ describe("resumo-rh", () => {
     expect(r.convocacoes_enviadas).toBe(2);
     expect(r.pagamentos_aguardando).toBe(1);
     expect(r.pagamentos_abertos).toBe(2);
+    expect(r.consumos_pendentes).toBe(2);
   });
 
-  it("monta href e parseia filtro de pagamentos", () => {
+  it("monta hrefs e parseia filtros", () => {
     expect(parseFiltroPagamentosRh("aguardando")).toBe("aguardando");
     expect(parseFiltroPagamentosRh("x")).toBe("abertos");
     expect(hrefPagamentosRh()).toBe("/rh/pagamentos");
     expect(hrefPagamentosRh("aguardando")).toBe("/rh/pagamentos?filtro=aguardando");
+    expect(parseFiltroDocsRh("alerta")).toBe("alerta");
+    expect(parseFiltroDocsRh(null)).toBe("todos");
+    expect(hrefPessoasRh({ docs: "alerta" })).toBe("/rh?docs=alerta");
+    expect(hrefPessoasRh()).toBe("/rh");
+    expect(parseFiltroConsumosRh("descontados")).toBe("descontados");
+    expect(hrefConsumosRh()).toBe("/rh/consumos");
+    expect(hrefConsumosRh("todos")).toBe("/rh/consumos?filtro=todos");
   });
 });

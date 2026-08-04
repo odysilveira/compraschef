@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Users } from "lucide-react";
 import { Badge, Campo, Card, Modal, StatCard, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
@@ -19,7 +20,14 @@ import {
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
 import { alertaDocumentosPessoa, garantirChecklistDocumentos } from "@/lib/domain/documentos-pessoa";
-import { hrefPagamentosRh, resumirOperacionalRh } from "@/lib/domain/resumo-rh";
+import {
+  hrefConsumosRh,
+  hrefPagamentosRh,
+  hrefPessoasRh,
+  parseFiltroDocsRh,
+  resumirOperacionalRh,
+  type FiltroDocsRh,
+} from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -77,15 +85,28 @@ function BadgeTipo({ tipo }: { tipo: TipoPessoaRH }) {
   return <Badge cor={cor}>{rotuloTipoPessoa(tipo)}</Badge>;
 }
 
-export default function RhPage() {
+function RhPessoasConteudo() {
   const db = useDB();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [busca, setBusca] = useState("");
   const [filtroTipo, setFiltroTipo] = useState<TipoPessoaRH | "todos">("todos");
-  const [filtroDocs, setFiltroDocs] = useState<"todos" | "alerta">("todos");
+  const [filtroDocs, setFiltroDocs] = useState<FiltroDocsRh>(() =>
+    parseFiltroDocsRh(searchParams.get("docs"))
+  );
   const [form, setForm] = useState<FormNovaPessoa | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   const podeGerirRh = usePodeAcessarModulo("rh");
+
+  useEffect(() => {
+    setFiltroDocs(parseFiltroDocsRh(searchParams.get("docs")));
+  }, [searchParams]);
+
+  function irParaFiltroDocs(proximo: FiltroDocsRh) {
+    setFiltroDocs(proximo);
+    router.replace(hrefPessoasRh({ docs: proximo }), { scroll: false });
+  }
 
   const contagemAlertaDocs = useMemo(() => {
     return (db.pessoas ?? []).filter((p) => p.ativo && alertaDocumentosPessoa(p).tem_alerta).length;
@@ -230,7 +251,7 @@ export default function RhPage() {
           type="button"
           className="text-left"
           onClick={() => {
-            setFiltroDocs("todos");
+            irParaFiltroDocs("todos");
             setFiltroTipo("todos");
             setBusca("");
           }}
@@ -241,7 +262,7 @@ export default function RhPage() {
           type="button"
           className="text-left"
           onClick={() => {
-            setFiltroDocs("alerta");
+            irParaFiltroDocs("alerta");
             setBusca("");
           }}
         >
@@ -292,6 +313,14 @@ export default function RhPage() {
             cor={resumoOp.pagamentos_abertos > 0 ? "amarelo" : "cinza"}
           />
         </Link>
+        <Link href={hrefConsumosRh("pendentes")} className="block">
+          <StatCard
+            rotulo="Consumos pendentes"
+            valor={String(resumoOp.consumos_pendentes)}
+            subtexto="A descontar no pagamento"
+            cor={resumoOp.consumos_pendentes > 0 ? "laranja" : "verde"}
+          />
+        </Link>
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -324,7 +353,7 @@ export default function RhPage() {
           <select
             className="input w-full"
             value={filtroDocs}
-            onChange={(e) => setFiltroDocs(e.target.value as "todos" | "alerta")}
+            onChange={(e) => irParaFiltroDocs(e.target.value as FiltroDocsRh)}
           >
             <option value="todos">Todos</option>
             <option value="alerta">Com alerta ({contagemAlertaDocs})</option>
@@ -596,5 +625,20 @@ export default function RhPage() {
         )}
       </Modal>
     </div>
+  );
+}
+
+export default function RhPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="RH — Pessoas" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando pessoas…</p>
+        </div>
+      }
+    >
+      <RhPessoasConteudo />
+    </Suspense>
   );
 }

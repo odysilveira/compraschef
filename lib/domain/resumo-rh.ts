@@ -245,6 +245,7 @@ export function parseFiltroConvocacaoEscalaRh(
 export function hrefEscalaRh(opts?: {
   convocacao?: FiltroConvocacaoEscalaRh;
   clt?: "sem";
+  pessoa?: string;
 }): string {
   const params = new URLSearchParams();
   if (opts?.convocacao === "enviada" || opts?.convocacao === "rascunho") {
@@ -253,6 +254,8 @@ export function hrefEscalaRh(opts?: {
   if (opts?.clt === "sem") {
     params.set("clt", "sem");
   }
+  const pessoa = opts?.pessoa?.trim();
+  if (pessoa) params.set("pessoa", pessoa);
   const q = params.toString();
   return q ? `/rh/escala?${q}` : "/rh/escala";
 }
@@ -265,11 +268,24 @@ export function parseAlertaCltEscalaRh(valor: string | null | undefined): boolea
 /**
  * Com filtro `enviada`/`rascunho` ativo, destaca plantões daquele status e atenua os demais.
  * Sem filtro, todos ficam `normal`.
+ * Com `filtroPessoa`, só os plantões dessa pessoa ficam em destaque (demais atenuados).
  */
 export function destaqueSlotFiltroConvocacao(
   filtro: FiltroConvocacaoEscalaRh,
-  statusConvocacao: string | undefined
+  statusConvocacao: string | undefined,
+  opts?: { filtroPessoa?: string; pessoaId?: string }
 ): "destaque" | "atenuado" | "normal" {
+  const filtroPessoa = opts?.filtroPessoa?.trim();
+  if (filtroPessoa) {
+    if (opts?.pessoaId !== filtroPessoa) return "atenuado";
+    if (filtro === "enviada") {
+      return statusConvocacao === "enviada" ? "destaque" : "atenuado";
+    }
+    if (filtro === "rascunho") {
+      return statusConvocacao === "rascunho" ? "destaque" : "atenuado";
+    }
+    return "destaque";
+  }
   if (filtro === "enviada") {
     return statusConvocacao === "enviada" ? "destaque" : "atenuado";
   }

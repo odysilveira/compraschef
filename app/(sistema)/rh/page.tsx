@@ -19,7 +19,7 @@ import {
   validarCpf,
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
-import { alertaDocumentosPessoa, garantirChecklistDocumentos } from "@/lib/domain/documentos-pessoa";
+import { alertaDocumentosPessoa, garantirChecklistDocumentos, rotuloCurtoAlertaDocumentos } from "@/lib/domain/documentos-pessoa";
 import { hrefConsumosRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
@@ -395,11 +395,7 @@ function RhPessoasConteudo() {
                               : "cinza"
                         }
                       >
-                        {alertaDocs.vencido > 0
-                          ? "Doc. vencido"
-                          : alertaDocs.a_vencer > 0
-                            ? "Doc. a vencer"
-                            : "Doc. pendente"}
+                        {rotuloCurtoAlertaDocumentos(alertaDocs)}
                       </Badge>
                     ) : (
                       <Badge cor="verde">Docs OK</Badge>

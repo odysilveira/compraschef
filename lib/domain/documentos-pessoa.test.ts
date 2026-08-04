@@ -10,6 +10,7 @@ import {
   alertaDocumentosPessoa,
   diasRestantesValidade,
   formatarDiasRestantesDocumento,
+  rotuloCurtoAlertaDocumentos,
 } from "./documentos-pessoa";
 import { permissoesVazias } from "./rh";
 
@@ -152,5 +153,35 @@ describe("documentos-pessoa", () => {
     expect(formatarDiasRestantesDocumento(1)).toBe("vence amanhã");
     expect(formatarDiasRestantesDocumento(0)).toBe("vence hoje");
     expect(formatarDiasRestantesDocumento(-3)).toBe("venceu há 3 dias");
+  });
+
+  it("rotulo curto do badge de alerta", () => {
+    expect(
+      rotuloCurtoAlertaDocumentos({
+        tem_alerta: false,
+        ausente: 0,
+        vencido: 0,
+        a_vencer: 0,
+        rotulo: "Docs OK",
+      })
+    ).toBe("Docs OK");
+    expect(
+      rotuloCurtoAlertaDocumentos({
+        tem_alerta: true,
+        ausente: 0,
+        vencido: 1,
+        a_vencer: 0,
+        rotulo: "ASO vencido",
+      })
+    ).toBe("Doc. vencido");
+    expect(
+      rotuloCurtoAlertaDocumentos({
+        tem_alerta: true,
+        ausente: 0,
+        vencido: 0,
+        a_vencer: 1,
+        rotulo: "ASO (vence em 15 dias)",
+      })
+    ).toBe("Doc. a vencer");
   });
 });

@@ -298,3 +298,11 @@ export function alertaDocumentosPessoa(
     rotulo,
   };
 }
+
+/** Texto curto do badge (lista / perfil). */
+export function rotuloCurtoAlertaDocumentos(alerta: AlertaDocumentosPessoa): string {
+  if (!alerta.tem_alerta) return "Docs OK";
+  if (alerta.vencido > 0) return "Doc. vencido";
+  if (alerta.a_vencer > 0) return "Doc. a vencer";
+  return "Doc. pendente";
+}

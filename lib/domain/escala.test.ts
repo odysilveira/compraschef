@@ -18,6 +18,7 @@ import {
   montarGradeCalendario,
   montarTextoConvocacaoWhatsApp,
   moverSlotParaData,
+  exportarEscalaCsv,
   registrarRespostaConvocacao,
   registrarSilencioConvocacoesVencidas,
   resumoSetoresDoDia,
@@ -721,5 +722,31 @@ describe("escala domain", () => {
     const lista = listarConvocacoesRascunhoNaJanela(db, ["2026-08-10", "2026-08-11"]);
     expect(lista.map((c) => c.id)).toEqual(["conv-rasc"]);
     expect(listarConvocacoesRascunhoNaJanela(db, ["2026-08-20"])).toHaveLength(0);
+  });
+
+  it("exporta CSV da escala com BOM e status de convocação", () => {
+    const db = dbBase();
+    const r = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-10",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+        funcao: "Salão",
+        local: "Vera Bela",
+      },
+      { id: "esc-csv", convocacaoId: "conv-csv", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    expect(r.sucesso).toBe(true);
+    const csv = exportarEscalaCsv([r.slot!], {
+      nomePorId: () => "Carlos Extra",
+      tipoPorId: () => "Intermitente",
+      statusConvocacaoPorSlotId: () => "Rascunho",
+    });
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Data;Pessoa;Tipo vínculo");
+    expect(csv).toContain("2026-08-10;Carlos Extra;Intermitente;Salão;Vera Bela;18:00;23:00;30;Rascunho;");
   });
 });

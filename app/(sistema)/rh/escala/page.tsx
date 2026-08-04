@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, Check, Copy, GripVertical, Plus, RefreshCw } from "lucide-react";
+import { CalendarDays, Check, Copy, Download, GripVertical, Plus, RefreshCw } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
@@ -14,6 +14,7 @@ import {
   convocacaoDoSlot,
   criarSlot,
   excluirSlot,
+  exportarEscalaCsv,
   formatDataBrLonga,
   gerarEscalaPadraoClt,
   janelaCalendarioEscala,
@@ -750,6 +751,44 @@ function RhEscalaConteudo() {
       ? linkWhatsAppConvocacao(detalhePessoa.telefone, detalheConv.texto_mensagem)
       : null;
 
+  function baixarEscalaCsv() {
+    const slotsCsv =
+      filtroConvocacao === "todas"
+        ? slots
+        : slots.filter((s) => {
+            const status = convocacaoDoSlot(db, s.id)?.status;
+            return filtroConvocacao === "rascunho"
+              ? status === "rascunho"
+              : status === "enviada";
+          });
+    if (slotsCsv.length === 0) {
+      setMensagem("Nenhum plantão neste filtro para exportar.");
+      return;
+    }
+    const csv = exportarEscalaCsv(slotsCsv, {
+      nomePorId: nomePessoa,
+      tipoPorId: (id) => {
+        const p = db.pessoas.find((x) => x.id === id);
+        return p ? rotuloTipoPessoa(p.tipo) : "";
+      },
+      statusConvocacaoPorSlotId: (slotId) => {
+        const c = convocacaoDoSlot(db, slotId);
+        return c ? rotuloStatusConvocacao(c.status) : "";
+      },
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const sufixo =
+      filtroConvocacao === "todas" ? "janela" : filtroConvocacao;
+    a.download = `rh-escala-${sufixo}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagem(`CSV baixado (${slotsCsv.length} plantão(ões)).`);
+    setErro(null);
+  }
+
   return (
     <div>
       <TituloPagina
@@ -757,6 +796,19 @@ function RhEscalaConteudo() {
         subtitulo={`Resto do mês atual + mês seguinte (${periodoRotulo}). CLT (12x36) e intermitentes/motoboys no mesmo calendário — arraste da lista ou gere o padrão.`}
         acao={
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={baixarEscalaCsv}
+              disabled={slots.length === 0}
+              title={
+                slots.length === 0
+                  ? "Nenhum plantão na janela"
+                  : "Exportar plantões do filtro atual (CSV)"
+              }
+            >
+              <Download size={16} /> Exportar CSV
+            </button>
             <button type="button" className="btn-secundario" onClick={() => abrirPadrao()}>
               <RefreshCw size={16} /> Gerar padrão CLT
             </button>

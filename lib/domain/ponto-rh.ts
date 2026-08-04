@@ -483,6 +483,39 @@ export function recusarPendenciaPonto(
   return { sucesso: true, pendencia, erros: [] };
 }
 
+/**
+ * Recusa várias pendências em `proposta` de uma vez.
+ * Se `ids` for informado, só esses; senão, todas as propostas do banco.
+ */
+export function recusarPendenciasPonto(
+  db: DB,
+  ids?: string[],
+  opcoes: { agora?: string; revisado_por?: string } = {}
+): { sucesso: boolean; recusadas: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : (db.pendencias_ponto ?? []).filter((p) => p.status === "proposta").map((p) => p.id);
+
+  let recusadas = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const pendencia = (db.pendencias_ponto ?? []).find((p) => p.id === id);
+    if (!pendencia) {
+      erros.push(`${id}: Pendência não encontrada.`);
+      continue;
+    }
+    if (pendencia.status !== "proposta") {
+      erros.push(`${id}: Só é possível recusar em lote quando há proposta.`);
+      continue;
+    }
+    const r = recusarPendenciaPonto(db, id, opcoes);
+    if (r.sucesso) recusadas += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, recusadas, erros };
+}
+
 /** Importa batidas do relógio (demo / futuro AFD). Idempotente por pessoa+data+tipo+hora. */
 export function importarBatidasPonto(
   db: DB,

@@ -26,6 +26,7 @@ import {
   filtrarPendenciasPonto,
   resumirPendenciasPontoAbertas,
   recusarPendenciaPonto,
+  recusarPendenciasPonto,
   registrarPropostaPonto,
   resumirEspelhoPonto,
   exportarEspelhoCsv,
@@ -570,6 +571,28 @@ function RhPontoConteudo() {
     }
   }
 
+  function recusarTodasPropostasDaLista() {
+    const ids = lista.filter((p) => p.status === "proposta").map((p) => p.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhuma proposta neste filtro para recusar.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = recusarPendenciasPonto(proximo, ids, { revisado_por: papel });
+    mutate((atual) => Object.assign(atual, proximo));
+    if (r.recusadas > 0) {
+      setMensagem(`${r.recusadas} proposta(s) recusada(s).`);
+      irParaFiltroPendencias("abertas");
+    }
+    if (r.erros.length) {
+      setErro(
+        (r.recusadas > 0 ? `${r.recusadas} recusada(s). ` : "") + r.erros.join(" ")
+      );
+    } else {
+      setErro(null);
+    }
+  }
+
   function recusar() {
     if (!detalheId) return;
     const proximo = structuredClone(db);
@@ -760,15 +783,26 @@ function RhPontoConteudo() {
               )}
             {filtro === "proposta" &&
               lista.some((p) => p.status === "proposta") && (
-                <button
-                  type="button"
-                  className="btn-primario"
-                  onClick={aprovarTodasPropostasDaLista}
-                  title="Aprova todas as propostas da lista e grava no espelho"
-                >
-                  Aprovar todas (
-                  {lista.filter((p) => p.status === "proposta").length})
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn-primario"
+                    onClick={aprovarTodasPropostasDaLista}
+                    title="Aprova todas as propostas da lista e grava no espelho"
+                  >
+                    Aprovar todas (
+                    {lista.filter((p) => p.status === "proposta").length})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={recusarTodasPropostasDaLista}
+                    title="Recusa todas as propostas da lista"
+                  >
+                    Recusar todas (
+                    {lista.filter((p) => p.status === "proposta").length})
+                  </button>
+                </>
               )}
             <button
               type="button"

@@ -15,6 +15,7 @@ import {
   parseFiltroPagamentosRh,
   parseFiltroPendenciasPontoRh,
   parsePessoaPontoRh,
+  pessoaCorrespondeFiltroDocsRh,
   resumirOperacionalRh,
 } from "./resumo-rh";
 
@@ -110,9 +111,41 @@ describe("resumo-rh", () => {
     );
     expect(hrefPagamentosRh({ pessoa: "pes-1" })).toBe("/rh/pagamentos?pessoa=pes-1");
     expect(parseFiltroDocsRh("alerta")).toBe("alerta");
+    expect(parseFiltroDocsRh("vencido")).toBe("vencido");
+    expect(parseFiltroDocsRh("a_vencer")).toBe("a_vencer");
     expect(parseFiltroDocsRh(null)).toBe("todos");
     expect(hrefPessoasRh({ docs: "alerta" })).toBe("/rh?docs=alerta");
+    expect(hrefPessoasRh({ docs: "vencido" })).toBe("/rh?docs=vencido");
+    expect(hrefPessoasRh({ docs: "a_vencer" })).toBe("/rh?docs=a_vencer");
     expect(hrefPessoasRh()).toBe("/rh");
+    expect(
+      pessoaCorrespondeFiltroDocsRh(
+        pessoa({
+          id: "ok-docs",
+          documentos: [
+            { id: "1", tipo: "contrato", rotulo: "C", presente: true },
+            { id: "2", tipo: "esocial", rotulo: "E", presente: true },
+            { id: "3", tipo: "rg", rotulo: "R", presente: true },
+            { id: "4", tipo: "aso", rotulo: "A", presente: true, validade: "2030-01-01" },
+          ],
+        }),
+        "alerta"
+      )
+    ).toBe(false);
+    expect(
+      pessoaCorrespondeFiltroDocsRh(
+        pessoa({
+          id: "venc",
+          documentos: [
+            { id: "1", tipo: "contrato", rotulo: "C", presente: true },
+            { id: "2", tipo: "esocial", rotulo: "E", presente: true },
+            { id: "3", tipo: "rg", rotulo: "R", presente: true },
+            { id: "4", tipo: "aso", rotulo: "A", presente: true, validade: "2020-01-01" },
+          ],
+        }),
+        "vencido"
+      )
+    ).toBe(true);
     expect(parseFiltroConsumosRh("descontados")).toBe("descontados");
     expect(hrefConsumosRh()).toBe("/rh/consumos");
     expect(hrefConsumosRh("todos")).toBe("/rh/consumos?filtro=todos");

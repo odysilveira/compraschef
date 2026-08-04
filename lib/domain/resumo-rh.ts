@@ -102,15 +102,31 @@ export function hrefPagamentosRh(
   return q ? `/rh/pagamentos?${q}` : "/rh/pagamentos";
 }
 
-export type FiltroDocsRh = "todos" | "alerta";
+export type FiltroDocsRh = "todos" | "alerta" | "vencido" | "a_vencer";
 
 export function parseFiltroDocsRh(valor: string | null | undefined): FiltroDocsRh {
-  return valor === "alerta" ? "alerta" : "todos";
+  if (valor === "alerta" || valor === "vencido" || valor === "a_vencer") return valor;
+  return "todos";
 }
 
 export function hrefPessoasRh(opts?: { docs?: FiltroDocsRh }): string {
   if (opts?.docs === "alerta") return "/rh?docs=alerta";
+  if (opts?.docs === "vencido") return "/rh?docs=vencido";
+  if (opts?.docs === "a_vencer") return "/rh?docs=a_vencer";
   return "/rh";
+}
+
+/** Filtra pessoas da lista RH por status de documentos. */
+export function pessoaCorrespondeFiltroDocsRh(
+  pessoa: Parameters<typeof alertaDocumentosPessoa>[0],
+  filtro: FiltroDocsRh
+): boolean {
+  if (filtro === "todos") return true;
+  const alerta = alertaDocumentosPessoa(pessoa);
+  if (filtro === "alerta") return alerta.tem_alerta;
+  if (filtro === "vencido") return alerta.vencido > 0;
+  if (filtro === "a_vencer") return alerta.a_vencer > 0;
+  return true;
 }
 
 export type FiltroConsumosRh = "pendentes" | "descontados" | "todos";

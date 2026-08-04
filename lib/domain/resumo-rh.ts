@@ -114,3 +114,15 @@ export function hrefEscalaRh(opts?: { convocacao?: FiltroConvocacaoEscalaRh }): 
   if (opts?.convocacao === "enviada") return "/rh/escala?convocacao=enviada";
   return "/rh/escala";
 }
+
+/**
+ * Com filtro `enviada` ativo, destaca plantões aguardando resposta e atenua os demais.
+ * Sem filtro, todos ficam `normal`.
+ */
+export function destaqueSlotFiltroConvocacao(
+  filtro: FiltroConvocacaoEscalaRh,
+  statusConvocacao: string | undefined
+): "destaque" | "atenuado" | "normal" {
+  if (filtro !== "enviada") return "normal";
+  return statusConvocacao === "enviada" ? "destaque" : "atenuado";
+}

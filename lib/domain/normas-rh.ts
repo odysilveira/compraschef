@@ -238,3 +238,51 @@ export function ignorarNorma(
 export function normasPendentes(db: Pick<DB, "normas_rh">): NormaRh[] {
   return (db.normas_rh ?? []).filter((n) => n.status === "pendente");
 }
+
+/**
+ * Confirma várias normas pendentes (aplica parâmetros mapeados).
+ * Se `ids` for informado, só esses; senão, todas as pendentes.
+ */
+export function confirmarNormasPendentes(
+  db: DB,
+  ids?: string[],
+  opcoes: { agora?: string; revisado_por?: string } = {}
+): { sucesso: boolean; confirmadas: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : normasPendentes(db).map((n) => n.id);
+
+  let confirmadas = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const r = confirmarNorma(db, id, opcoes);
+    if (r.sucesso) confirmadas += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, confirmadas, erros };
+}
+
+/**
+ * Ignora várias normas pendentes (não altera config_rh).
+ * Se `ids` for informado, só esses; senão, todas as pendentes.
+ */
+export function ignorarNormasPendentes(
+  db: DB,
+  ids?: string[],
+  opcoes: { agora?: string; revisado_por?: string } = {}
+): { sucesso: boolean; ignoradas: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : normasPendentes(db).map((n) => n.id);
+
+  let ignoradas = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const r = ignorarNorma(db, id, opcoes);
+    if (r.sucesso) ignoradas += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, ignoradas, erros };
+}

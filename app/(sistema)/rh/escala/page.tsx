@@ -145,6 +145,7 @@ function BancoPessoas({
   onGerarPadrao,
   resolverSetor,
   vazio,
+  destaquePessoaId,
 }: {
   titulo: string;
   pessoas: PessoaRH[];
@@ -159,8 +160,18 @@ function BancoPessoas({
   resolverSetor?: (pessoa: PessoaRH) => SetorArrastoEscala;
   /** Mensagem quando a lista está vazia (em vez de ocultar o bloco). */
   vazio?: ReactNode;
+  /** Deep link `?pessoa=` — destaca na lista lateral. */
+  destaquePessoaId?: string;
 }) {
   const ehClt = setor === "clt";
+  const destaqueRef = useRef<HTMLLIElement | null>(null);
+
+  useEffect(() => {
+    if (!destaquePessoaId) return;
+    if (!pessoas.some((p) => p.id === destaquePessoaId)) return;
+    destaqueRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [destaquePessoaId, pessoas]);
+
   if (pessoas.length === 0) {
     if (!vazio) return null;
     return (
@@ -170,35 +181,51 @@ function BancoPessoas({
       </div>
     );
   }
+
+  const ordenadas = destaquePessoaId
+    ? [...pessoas].sort((a, b) => {
+        if (a.id === destaquePessoaId) return -1;
+        if (b.id === destaquePessoaId) return 1;
+        return a.nome.localeCompare(b.nome, "pt-BR");
+      })
+    : pessoas;
+
   return (
     <div className="space-y-1.5">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{titulo}</p>
       <ul className="space-y-1">
-        {pessoas.map((p) => {
+        {ordenadas.map((p) => {
           const setorPessoa = resolverSetor ? resolverSetor(p) : setor;
           const gate = ehClt
             ? { ok: true, erros: [] as string[], avisos: [] as string[] }
             : validarPreRequisitosConvocacao(p);
           const ativo =
             arrasto?.tipo === "pessoa" && arrasto.id === p.id && arrasto.setor === setorPessoa;
+          const emDestaque = Boolean(destaquePessoaId && p.id === destaquePessoaId);
           const temAvisoDocs = gate.ok && gate.avisos.length > 0;
           const rotuloSetor =
             setorPessoa !== "clt" ? rotuloSetorConvocacao(setorPessoa as SetorConvocacaoEscala) : "";
           return (
-            <li key={`${setorPessoa}-${p.id}`} className="space-y-1">
+            <li
+              key={`${setorPessoa}-${p.id}`}
+              ref={emDestaque ? destaqueRef : undefined}
+              className={`space-y-1 ${emDestaque ? "scroll-mt-4 rounded-lg ring-2 ring-sky-500 ring-offset-1" : ""}`}
+            >
               <button
                 type="button"
                 draggable
                 className={`flex w-full cursor-grab items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-sm active:cursor-grabbing ${
                   ativo
                     ? "border-primaria bg-primaria/10 opacity-60"
-                    : gate.ok
-                      ? temAvisoDocs
-                        ? "border-amber-200 bg-amber-50/50 hover:border-amber-400"
-                        : ehClt
-                          ? "border-sky-200 bg-sky-50 hover:border-sky-400"
-                          : "border-stone-200 bg-white hover:border-primaria/40"
-                      : "border-amber-200 bg-amber-50/80"
+                    : emDestaque
+                      ? "border-sky-400 bg-sky-100 hover:border-sky-500"
+                      : gate.ok
+                        ? temAvisoDocs
+                          ? "border-amber-200 bg-amber-50/50 hover:border-amber-400"
+                          : ehClt
+                            ? "border-sky-200 bg-sky-50 hover:border-sky-400"
+                            : "border-stone-200 bg-white hover:border-primaria/40"
+                        : "border-amber-200 bg-amber-50/80"
                 }`}
                 title={
                   ehClt
@@ -1140,6 +1167,7 @@ function RhEscalaConteudo() {
               }}
               onGerarPadrao={(pessoaId) => abrirPadrao(pessoaId)}
               vazio="Nenhum CLT ativo — cadastre em Pessoas."
+              destaquePessoaId={filtroPessoa || undefined}
             />
             <BancoPessoas
               titulo="Intermitentes"
@@ -1161,6 +1189,7 @@ function RhEscalaConteudo() {
                   .
                 </>
               }
+              destaquePessoaId={filtroPessoa || undefined}
             />
             <BancoPessoas
               titulo="Motoboys / entregadores"
@@ -1172,6 +1201,7 @@ function RhEscalaConteudo() {
                 setArrasto(null);
                 setDiaDestinoHover(null);
               }}
+              destaquePessoaId={filtroPessoa || undefined}
             />
             {colaboradores.length === 0 && intermitentes.length === 0 && entregadores.length === 0 && (
               <p className="text-xs text-slate-500">

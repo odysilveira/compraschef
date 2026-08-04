@@ -25,7 +25,7 @@ import {
   garantirChecklistDocumentos,
   rotuloCurtoAlertaDocumentos,
 } from "@/lib/domain/documentos-pessoa";
-import { hrefConsumosRh, hrefEscalaRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -118,7 +118,7 @@ function RhPessoasConteudo() {
     return (db.pessoas ?? [])
       .filter((p) => p.ativo)
       .filter((p) => (filtroTipo === "todos" ? true : p.tipo === filtroTipo))
-      .filter((p) => (filtroDocs === "alerta" ? alertaDocumentosPessoa(p).tem_alerta : true))
+      .filter((p) => pessoaCorrespondeFiltroDocsRh(p, filtroDocs))
       .filter((p) => {
         if (!termo) return true;
         return [p.nome, p.cargo, p.telefone, p.cpf, p.login, rotuloFuncao(p), rotuloTipoPessoa(p.tipo)]
@@ -244,7 +244,9 @@ function RhPessoasConteudo() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `rh-documentos${filtroDocs === "alerta" ? "-alerta" : ""}.csv`;
+    a.download = `rh-documentos${
+      filtroDocs === "todos" ? "" : `-${filtroDocs}`
+    }.csv`;
     a.click();
     URL.revokeObjectURL(url);
     setMensagem(`CSV baixado (${lista.length} pessoa(s)).`);
@@ -305,7 +307,13 @@ function RhPessoasConteudo() {
           type="button"
           className="text-left"
           onClick={() => {
-            irParaFiltroDocs("alerta");
+            irParaFiltroDocs(
+              resumoOp.docs_vencido > 0
+                ? "vencido"
+                : resumoOp.docs_a_vencer > 0
+                  ? "a_vencer"
+                  : "alerta"
+            );
             setBusca("");
           }}
         >
@@ -321,7 +329,15 @@ function RhPessoasConteudo() {
                   ? `${resumoOp.docs_a_vencer} a vencer (30 dias)`
                   : "Clique para filtrar"
             }
-            cor={resumoOp.docs_alerta > 0 ? "laranja" : "verde"}
+            cor={
+              resumoOp.docs_vencido > 0
+                ? "laranja"
+                : resumoOp.docs_a_vencer > 0
+                  ? "amarelo"
+                  : resumoOp.docs_alerta > 0
+                    ? "laranja"
+                    : "verde"
+            }
           />
         </button>
         <Link
@@ -437,6 +453,8 @@ function RhPessoasConteudo() {
           >
             <option value="todos">Todos</option>
             <option value="alerta">Com alerta ({contagemAlertaDocs})</option>
+            <option value="vencido">Vencidos ({resumoOp.docs_vencido})</option>
+            <option value="a_vencer">A vencer ({resumoOp.docs_a_vencer})</option>
           </select>
         </label>
       </div>

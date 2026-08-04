@@ -10,6 +10,7 @@ import { importarAfdNoDb } from "@/lib/domain/afd-ponto";
 import { configControlIdPadrao, maiorNsrDoAfd } from "@/lib/domain/controlid-rep";
 import {
   aprovarPendenciaPonto,
+  aprovarPendenciasPonto,
   avisoPontoHorasDoDb,
   competenciaDeData,
   detectarPendenciasPonto,
@@ -524,6 +525,33 @@ function RhPontoConteudo() {
     setErro(null);
   }
 
+  function aprovarTodasPropostasDaLista() {
+    const ids = lista.filter((p) => p.status === "proposta").map((p) => p.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhuma proposta neste filtro para aprovar.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = aprovarPendenciasPonto(proximo, ids, {
+      revisado_por: papel,
+      idFactory: () => uid("bat"),
+    });
+    mutate((atual) => Object.assign(atual, proximo));
+    if (r.aprovadas > 0) {
+      setMensagem(
+        `${r.aprovadas} proposta(s) aprovada(s) · ${r.batidas} batida(s) no espelho.`
+      );
+      irParaAba("espelho");
+    }
+    if (r.erros.length) {
+      setErro(
+        (r.aprovadas > 0 ? `${r.aprovadas} aprovada(s). ` : "") + r.erros.join(" ")
+      );
+    } else {
+      setErro(null);
+    }
+  }
+
   function recusar() {
     if (!detalheId) return;
     const proximo = structuredClone(db);
@@ -710,6 +738,18 @@ function RhPontoConteudo() {
                 >
                   Marcar avisados (
                   {lista.filter((p) => p.status === "aguardando_aviso").length})
+                </button>
+              )}
+            {filtro === "proposta" &&
+              lista.some((p) => p.status === "proposta") && (
+                <button
+                  type="button"
+                  className="btn-primario"
+                  onClick={aprovarTodasPropostasDaLista}
+                  title="Aprova todas as propostas da lista e grava no espelho"
+                >
+                  Aprovar todas (
+                  {lista.filter((p) => p.status === "proposta").length})
                 </button>
               )}
           </div>

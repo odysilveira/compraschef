@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus, Users } from "lucide-react";
+import { Download, Plus, Users } from "lucide-react";
 import { Badge, Campo, Card, Modal, StatCard, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
@@ -19,7 +19,12 @@ import {
   validarCpf,
 } from "@/lib/domain/rh";
 import { validarAdiantamento } from "@/lib/domain/consumos-pessoas";
-import { alertaDocumentosPessoa, garantirChecklistDocumentos, rotuloCurtoAlertaDocumentos } from "@/lib/domain/documentos-pessoa";
+import {
+  alertaDocumentosPessoa,
+  exportarDocumentosPessoasCsv,
+  garantirChecklistDocumentos,
+  rotuloCurtoAlertaDocumentos,
+} from "@/lib/domain/documentos-pessoa";
 import { hrefConsumosRh, hrefEscalaRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
@@ -89,6 +94,7 @@ function RhPessoasConteudo() {
   );
   const [form, setForm] = useState<FormNovaPessoa | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [mensagem, setMensagem] = useState<string | null>(null);
 
   const podeGerirRh = usePodeAcessarModulo("rh");
 
@@ -227,17 +233,61 @@ function RhPessoasConteudo() {
     setErro(null);
   }
 
+  function baixarDocumentosCsv() {
+    if (lista.length === 0) {
+      setErro("Nenhuma pessoa neste filtro para exportar.");
+      setMensagem(null);
+      return;
+    }
+    const csv = exportarDocumentosPessoasCsv(lista);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rh-documentos${filtroDocs === "alerta" ? "-alerta" : ""}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagem(`CSV baixado (${lista.length} pessoa(s)).`);
+    setErro(null);
+  }
+
   return (
     <div>
       <TituloPagina
         titulo="RH — Pessoas"
         subtitulo="Cadastro do time — escala em Escala e valores em Pagamentos."
         acao={
-          <button type="button" className="btn-primario" onClick={() => setForm(formVazio())}>
-            <Plus size={16} /> Nova pessoa
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secundario"
+              disabled={lista.length === 0}
+              onClick={baixarDocumentosCsv}
+              title={
+                lista.length === 0
+                  ? "Nada para exportar neste filtro"
+                  : "Exportar checklist de documentos (CSV)"
+              }
+            >
+              <Download size={16} /> Exportar docs
+            </button>
+            <button type="button" className="btn-primario" onClick={() => setForm(formVazio())}>
+              <Plus size={16} /> Nova pessoa
+            </button>
+          </div>
         }
       />
+
+      {mensagem && (
+        <div className="mb-4 rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
+          {mensagem}
+        </div>
+      )}
+      {erro && !form && (
+        <div className="mb-4 rounded-card border border-erro bg-erro-clara px-4 py-3 text-sm font-medium text-erro">
+          {erro}
+        </div>
+      )}
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <button

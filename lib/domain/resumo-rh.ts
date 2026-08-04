@@ -5,6 +5,7 @@ import {
   janelaCalendarioEscala,
   listarCltSemPlantaoNaJanela,
 } from "./escala";
+import { normasPendentes } from "./normas-rh";
 import { resumirPendenciasPontoAbertas } from "./ponto-rh";
 
 export interface ResumoOperacionalRh {
@@ -34,6 +35,8 @@ export interface ResumoOperacionalRh {
   pagamentos_liberados: number;
   /** Consumos ainda não descontados em pagamento. */
   consumos_pendentes: number;
+  /** Normas detectadas aguardando confirmação / ignorar. */
+  normas_pendentes: number;
 }
 
 /** Números rápidos para o topo do RH (dono/gerente). */
@@ -46,6 +49,7 @@ export function resumirOperacionalRh(
     | "escala_slots"
     | "pagamentos_pessoas"
     | "consumos_pessoas"
+    | "normas_rh"
   >,
   hoje: string = hojeIsoLocal()
 ): ResumoOperacionalRh {
@@ -92,6 +96,7 @@ export function resumirOperacionalRh(
     pagamentos_previstos: pags.filter((p) => p.status === "previsto").length,
     pagamentos_liberados: pags.filter((p) => p.status === "liberado").length,
     consumos_pendentes: (db.consumos_pessoas ?? []).filter((c) => c.status === "pendente").length,
+    normas_pendentes: normasPendentes(db).length,
   };
 }
 

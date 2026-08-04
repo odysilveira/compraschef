@@ -99,6 +99,11 @@ describe("resumo-rh", () => {
         { id: "c2", status: "descontado" },
         { id: "c3", status: "pendente" },
       ],
+      normas_rh: [
+        { id: "n1", status: "pendente" },
+        { id: "n2", status: "aplicada" },
+        { id: "n3", status: "pendente" },
+      ],
     } as unknown as DB;
 
     const r = resumirOperacionalRh(db, "2026-08-04");
@@ -118,6 +123,7 @@ describe("resumo-rh", () => {
     expect(r.pagamentos_previstos).toBe(1);
     expect(r.pagamentos_liberados).toBe(1);
     expect(r.consumos_pendentes).toBe(2);
+    expect(r.normas_pendentes).toBe(2);
   });
 
   it("monta hrefs e parseia filtros", () => {

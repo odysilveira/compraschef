@@ -473,6 +473,18 @@ function RhPessoasConteudo() {
             cor={resumoOp.consumos_pendentes > 0 ? "laranja" : "verde"}
           />
         </Link>
+        <Link href="/rh/normas" className="block">
+          <StatCard
+            rotulo="Normas a revisar"
+            valor={String(resumoOp.normas_pendentes)}
+            subtexto={
+              resumoOp.normas_pendentes > 0
+                ? "Confirmar ou ignorar · Abrir"
+                : "Nenhuma pendente"
+            }
+            cor={resumoOp.normas_pendentes > 0 ? "laranja" : "verde"}
+          />
+        </Link>
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">

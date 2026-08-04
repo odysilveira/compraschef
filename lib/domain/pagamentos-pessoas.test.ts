@@ -6,6 +6,7 @@ import {
   exportarPagamentosPessoasCsv,
   informarPagamentoPessoa,
   liberarPagamentoPessoa,
+  liberarPagamentosPrevistos,
   registrarDivergenciaPagamentoPessoa,
 } from "./pagamentos-pessoas";
 
@@ -35,6 +36,20 @@ describe("pagamentos de pessoas", () => {
     const r = liberarPagamentoPessoa(db, "pag-x");
     expect(r.sucesso).toBe(true);
     expect(db.pagamentos_pessoas[0].status).toBe("liberado");
+  });
+
+  it("libera vários previstos em lote", () => {
+    const db = structuredClone(seedDB) as DB;
+    db.pagamentos_pessoas = [
+      baseLiberado({ id: "p1", status: "previsto" }),
+      baseLiberado({ id: "p2", status: "previsto" }),
+      baseLiberado({ id: "p3", status: "liberado" }),
+    ];
+    const r = liberarPagamentosPrevistos(db, ["p1", "p2", "p3"]);
+    expect(r.liberados).toBe(2);
+    expect(db.pagamentos_pessoas.find((p) => p.id === "p1")?.status).toBe("liberado");
+    expect(db.pagamentos_pessoas.find((p) => p.id === "p2")?.status).toBe("liberado");
+    expect(db.pagamentos_pessoas.find((p) => p.id === "p3")?.status).toBe("liberado");
   });
 
   it("informar pagamento nao marca como pago", () => {

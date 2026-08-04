@@ -44,7 +44,7 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
-import { hrefConsumosRh, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -429,7 +429,7 @@ function RhPerfilConteudo() {
         subtitulo={`${rotuloTipoPessoa(pessoa.tipo)} · ${rotuloFuncao(pessoa)}`}
         acao={
           <div className="flex flex-wrap items-center gap-2">
-            <Link href="/rh/escala" className="btn-secundario">
+            <Link href={hrefEscalaRh({ pessoa: pessoa.id })} className="btn-secundario">
               Ver na escala
             </Link>
             <Link
@@ -999,7 +999,7 @@ function RhPerfilConteudo() {
                   : ` — ${plantaoesPessoa.length} plantão(ões).`}
               </p>
             </div>
-            <Link href="/rh/escala" className="btn-secundario text-sm">
+            <Link href={hrefEscalaRh({ pessoa: pessoa.id })} className="btn-secundario text-sm">
               Ver calendário da equipe
             </Link>
             {pessoa.tipo === "colaborador" && (

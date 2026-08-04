@@ -197,6 +197,10 @@ describe("resumo-rh", () => {
     expect(hrefEscalaRh({ convocacao: "enviada" })).toBe("/rh/escala?convocacao=enviada");
     expect(hrefEscalaRh({ convocacao: "rascunho" })).toBe("/rh/escala?convocacao=rascunho");
     expect(hrefEscalaRh({ clt: "sem" })).toBe("/rh/escala?clt=sem");
+    expect(hrefEscalaRh({ pessoa: "pes-1" })).toBe("/rh/escala?pessoa=pes-1");
+    expect(hrefEscalaRh({ convocacao: "enviada", pessoa: "pes-1" })).toBe(
+      "/rh/escala?convocacao=enviada&pessoa=pes-1"
+    );
     expect(hrefEscalaRh({ convocacao: "enviada", clt: "sem" })).toBe(
       "/rh/escala?convocacao=enviada&clt=sem"
     );
@@ -208,5 +212,17 @@ describe("resumo-rh", () => {
     expect(destaqueSlotFiltroConvocacao("enviada", undefined)).toBe("atenuado");
     expect(destaqueSlotFiltroConvocacao("rascunho", "rascunho")).toBe("destaque");
     expect(destaqueSlotFiltroConvocacao("rascunho", "enviada")).toBe("atenuado");
+    expect(
+      destaqueSlotFiltroConvocacao("todas", "enviada", {
+        filtroPessoa: "pes-1",
+        pessoaId: "pes-1",
+      })
+    ).toBe("destaque");
+    expect(
+      destaqueSlotFiltroConvocacao("todas", "enviada", {
+        filtroPessoa: "pes-1",
+        pessoaId: "pes-2",
+      })
+    ).toBe("atenuado");
   });
 });

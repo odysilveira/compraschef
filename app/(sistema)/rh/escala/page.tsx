@@ -50,6 +50,7 @@ import {
   hrefEscalaRh,
   parseAlertaCltEscalaRh,
   parseFiltroConvocacaoEscalaRh,
+  parsePessoaPontoRh,
   type FiltroConvocacaoEscalaRh,
 } from "@/lib/domain/resumo-rh";
 import { rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
@@ -265,11 +266,15 @@ function RhEscalaConteudo() {
   const [destaqueCltSem, setDestaqueCltSem] = useState(() =>
     parseAlertaCltEscalaRh(searchParams.get("clt"))
   );
+  const [filtroPessoa, setFiltroPessoa] = useState(() =>
+    parsePessoaPontoRh(searchParams.get("pessoa"))
+  );
   const cltSemRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setFiltroConvocacao(parseFiltroConvocacaoEscalaRh(searchParams.get("convocacao")));
     setDestaqueCltSem(parseAlertaCltEscalaRh(searchParams.get("clt")));
+    setFiltroPessoa(parsePessoaPontoRh(searchParams.get("pessoa")));
   }, [searchParams]);
 
   useEffect(() => {
@@ -280,12 +285,35 @@ function RhEscalaConteudo() {
   function irParaFiltroConvocacao(proximo: FiltroConvocacaoEscalaRh) {
     setFiltroConvocacao(proximo);
     setDestaqueCltSem(false);
-    router.replace(hrefEscalaRh({ convocacao: proximo }), { scroll: false });
+    router.replace(
+      hrefEscalaRh({
+        convocacao: proximo,
+        pessoa: filtroPessoa || undefined,
+      }),
+      { scroll: false }
+    );
   }
 
   function limparDestaqueClt() {
     setDestaqueCltSem(false);
-    router.replace(hrefEscalaRh({ convocacao: filtroConvocacao }), { scroll: false });
+    router.replace(
+      hrefEscalaRh({
+        convocacao: filtroConvocacao,
+        pessoa: filtroPessoa || undefined,
+      }),
+      { scroll: false }
+    );
+  }
+
+  function limparFiltroPessoa() {
+    setFiltroPessoa("");
+    router.replace(
+      hrefEscalaRh({
+        convocacao: filtroConvocacao,
+        clt: destaqueCltSem ? "sem" : undefined,
+      }),
+      { scroll: false }
+    );
   }
 
   const dias = useMemo(() => janelaCalendarioEscala(hojeISO()), []);
@@ -752,7 +780,7 @@ function RhEscalaConteudo() {
       : null;
 
   function baixarEscalaCsv() {
-    const slotsCsv =
+    let slotsCsv =
       filtroConvocacao === "todas"
         ? slots
         : slots.filter((s) => {
@@ -761,6 +789,9 @@ function RhEscalaConteudo() {
               ? status === "rascunho"
               : status === "enviada";
           });
+    if (filtroPessoa) {
+      slotsCsv = slotsCsv.filter((s) => s.pessoa_id === filtroPessoa);
+    }
     if (slotsCsv.length === 0) {
       setMensagem("Nenhum plantão neste filtro para exportar.");
       return;
@@ -780,9 +811,11 @@ function RhEscalaConteudo() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const sufixo =
-      filtroConvocacao === "todas" ? "janela" : filtroConvocacao;
-    a.download = `rh-escala-${sufixo}.csv`;
+    const partes = [
+      filtroConvocacao === "todas" ? "janela" : filtroConvocacao,
+      filtroPessoa || null,
+    ].filter(Boolean);
+    a.download = `rh-escala-${partes.join("-")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     setMensagem(`CSV baixado (${slotsCsv.length} plantão(ões)).`);
@@ -865,6 +898,17 @@ function RhEscalaConteudo() {
           )
         </button>
       </div>
+
+      {filtroPessoa && (
+        <Card className="mb-4 flex flex-wrap items-center justify-between gap-2 border-sky-200 bg-sky-50/70 p-3">
+          <p className="text-sm text-sky-950">
+            Mostrando plantões de <strong>{nomePessoa(filtroPessoa)}</strong> em destaque no calendário.
+          </p>
+          <button type="button" className="btn-secundario text-sm" onClick={limparFiltroPessoa}>
+            Limpar pessoa
+          </button>
+        </Card>
+      )}
 
       {cltSemPlantao.length > 0 && filtroConvocacao === "todas" && (
         <div
@@ -1277,7 +1321,8 @@ function RhEscalaConteudo() {
                                     const setor = setorDoPlantao(slot, pessoaSlot);
                                     const destaque = destaqueSlotFiltroConvocacao(
                                       filtroConvocacao,
-                                      conv?.status
+                                      conv?.status,
+                                      { filtroPessoa, pessoaId: slot.pessoa_id }
                                     );
                                     return (
                                       <button
@@ -1288,7 +1333,9 @@ function RhEscalaConteudo() {
                                           destaque === "destaque"
                                             ? filtroConvocacao === "rascunho"
                                               ? "bg-stone-300 text-stone-950 ring-1 ring-stone-500 hover:bg-stone-400/90"
-                                              : "bg-amber-200 text-amber-950 ring-1 ring-amber-500 hover:bg-amber-300/90"
+                                              : filtroPessoa
+                                                ? "bg-sky-200 text-sky-950 ring-1 ring-sky-600 hover:bg-sky-300/90"
+                                                : "bg-amber-200 text-amber-950 ring-1 ring-amber-500 hover:bg-amber-300/90"
                                             : destaque === "atenuado"
                                               ? "bg-stone-100/70 text-slate-400 opacity-45 hover:opacity-70"
                                               : ehClt

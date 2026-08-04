@@ -3,11 +3,13 @@ import type { DB, PessoaRH } from "../types";
 import { permissoesVazias } from "./rh";
 import {
   hrefConsumosRh,
+  hrefEscalaRh,
   hrefPagamentosRh,
   hrefPessoasRh,
   hrefPontoRh,
   parseAbaPontoRh,
   parseFiltroConsumosRh,
+  parseFiltroConvocacaoEscalaRh,
   parseFiltroDocsRh,
   parseFiltroPagamentosRh,
   resumirOperacionalRh,
@@ -104,5 +106,9 @@ describe("resumo-rh", () => {
     expect(parseAbaPontoRh(null)).toBe("pendencias");
     expect(hrefPontoRh()).toBe("/rh/ponto");
     expect(hrefPontoRh("espelho")).toBe("/rh/ponto?aba=espelho");
+    expect(parseFiltroConvocacaoEscalaRh("enviada")).toBe("enviada");
+    expect(parseFiltroConvocacaoEscalaRh(null)).toBe("todas");
+    expect(hrefEscalaRh()).toBe("/rh/escala");
+    expect(hrefEscalaRh({ convocacao: "enviada" })).toBe("/rh/escala?convocacao=enviada");
   });
 });

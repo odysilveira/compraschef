@@ -63,9 +63,13 @@ describe("resumo-rh", () => {
         { id: "pp2", status: "aprovada" },
       ],
       convocacoes: [
-        { id: "c1", status: "enviada" },
-        { id: "c2", status: "aceita" },
-        { id: "c3", status: "enviada" },
+        { id: "c1", status: "enviada", escala_slot_id: "esc-passado" },
+        { id: "c2", status: "aceita", escala_slot_id: "esc-x" },
+        { id: "c3", status: "enviada", escala_slot_id: "esc-futuro" },
+      ],
+      escala_slots: [
+        { id: "esc-passado", data: "2026-08-01" },
+        { id: "esc-futuro", data: "2026-08-20" },
       ],
       pagamentos_pessoas: [
         { id: "pg1", status: "aguardando_conciliacao" },
@@ -80,13 +84,14 @@ describe("resumo-rh", () => {
       ],
     } as unknown as DB;
 
-    const r = resumirOperacionalRh(db);
+    const r = resumirOperacionalRh(db, "2026-08-04");
     expect(r.pessoas_ativas).toBe(2);
     expect(r.docs_alerta).toBe(1);
     expect(r.docs_vencido).toBe(1);
     expect(r.docs_a_vencer).toBe(0);
     expect(r.ponto_abertas).toBe(1);
     expect(r.convocacoes_enviadas).toBe(2);
+    expect(r.convocacoes_sem_resposta).toBe(1);
     expect(r.pagamentos_aguardando).toBe(1);
     expect(r.pagamentos_abertos).toBe(2);
     expect(r.consumos_pendentes).toBe(2);

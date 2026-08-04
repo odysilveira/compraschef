@@ -1,5 +1,6 @@
 import type { DB } from "../types";
-import { alertaDocumentosPessoa } from "./documentos-pessoa";
+import { alertaDocumentosPessoa, hojeIsoLocal } from "./documentos-pessoa";
+import { convocacaoEnviadaSemRespostaVencida } from "./escala";
 import { pendenciasPontoAbertas } from "./ponto-rh";
 
 export interface ResumoOperacionalRh {
@@ -9,6 +10,8 @@ export interface ResumoOperacionalRh {
   docs_a_vencer: number;
   ponto_abertas: number;
   convocacoes_enviadas: number;
+  /** Enviadas com plantão já passado — triagem de silêncio na escala. */
+  convocacoes_sem_resposta: number;
   /** Títulos informados, aguardando conciliação bancária. */
   pagamentos_aguardando: number;
   /** Previstos + liberados (ainda não pagos). */
@@ -21,8 +24,14 @@ export interface ResumoOperacionalRh {
 export function resumirOperacionalRh(
   db: Pick<
     DB,
-    "pessoas" | "pendencias_ponto" | "convocacoes" | "pagamentos_pessoas" | "consumos_pessoas"
-  >
+    | "pessoas"
+    | "pendencias_ponto"
+    | "convocacoes"
+    | "escala_slots"
+    | "pagamentos_pessoas"
+    | "consumos_pessoas"
+  >,
+  hoje: string = hojeIsoLocal()
 ): ResumoOperacionalRh {
   const ativas = (db.pessoas ?? []).filter((p) => p.ativo);
   let docs_alerta = 0;
@@ -35,13 +44,23 @@ export function resumirOperacionalRh(
     if (alerta.a_vencer > 0) docs_a_vencer += 1;
   }
   const pags = db.pagamentos_pessoas ?? [];
+  const slots = db.escala_slots ?? [];
+  const enviadas = (db.convocacoes ?? []).filter((c) => c.status === "enviada");
+  let convocacoes_sem_resposta = 0;
+  for (const c of enviadas) {
+    const slot = slots.find((s) => s.id === c.escala_slot_id);
+    if (convocacaoEnviadaSemRespostaVencida(c.status, slot?.data, hoje)) {
+      convocacoes_sem_resposta += 1;
+    }
+  }
   return {
     pessoas_ativas: ativas.length,
     docs_alerta,
     docs_vencido,
     docs_a_vencer,
     ponto_abertas: pendenciasPontoAbertas(db).length,
-    convocacoes_enviadas: (db.convocacoes ?? []).filter((c) => c.status === "enviada").length,
+    convocacoes_enviadas: enviadas.length,
+    convocacoes_sem_resposta,
     pagamentos_aguardando: pags.filter((p) => p.status === "aguardando_conciliacao").length,
     pagamentos_abertos: pags.filter(
       (p) => p.status === "previsto" || p.status === "liberado"

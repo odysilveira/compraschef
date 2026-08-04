@@ -336,8 +336,18 @@ function RhPessoasConteudo() {
           <StatCard
             rotulo="Convocações enviadas"
             valor={String(resumoOp.convocacoes_enviadas)}
-            subtexto="Abrir escala"
-            cor={resumoOp.convocacoes_enviadas > 0 ? "amarelo" : "cinza"}
+            subtexto={
+              resumoOp.convocacoes_sem_resposta > 0
+                ? `${resumoOp.convocacoes_sem_resposta} sem resposta · Abrir escala`
+                : "Abrir escala"
+            }
+            cor={
+              resumoOp.convocacoes_sem_resposta > 0
+                ? "laranja"
+                : resumoOp.convocacoes_enviadas > 0
+                  ? "amarelo"
+                  : "cinza"
+            }
           />
         </Link>
         <Link href={hrefPagamentosRh("aguardando")} className="block">

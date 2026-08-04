@@ -56,7 +56,7 @@ export type TipoDocumentoPessoa =
   | "cnh"
   | "outro";
 
-export type StatusDocumentoPessoa = "presente" | "ausente" | "vencido";
+export type StatusDocumentoPessoa = "presente" | "ausente" | "vencido" | "a_vencer";
 
 export interface DocumentoPessoa {
   id: string;

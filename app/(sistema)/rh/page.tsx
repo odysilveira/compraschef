@@ -264,8 +264,12 @@ function RhPessoasConteudo() {
             valor={String(resumoOp.docs_alerta)}
             subtexto={
               resumoOp.docs_vencido > 0
-                ? `${resumoOp.docs_vencido} com documento vencido`
-                : "Clique para filtrar"
+                ? `${resumoOp.docs_vencido} vencido(s)${
+                    resumoOp.docs_a_vencer > 0 ? ` · ${resumoOp.docs_a_vencer} a vencer` : ""
+                  }`
+                : resumoOp.docs_a_vencer > 0
+                  ? `${resumoOp.docs_a_vencer} a vencer (30 dias)`
+                  : "Clique para filtrar"
             }
             cor={resumoOp.docs_alerta > 0 ? "laranja" : "verde"}
           />
@@ -382,8 +386,20 @@ function RhPessoasConteudo() {
                   <div className="flex flex-wrap items-center gap-2">
                     <BadgeTipo tipo={pessoa.tipo} />
                     {alertaDocs.tem_alerta ? (
-                      <Badge cor={alertaDocs.vencido > 0 ? "laranja" : "cinza"}>
-                        {alertaDocs.vencido > 0 ? "Doc. vencido" : "Doc. pendente"}
+                      <Badge
+                        cor={
+                          alertaDocs.vencido > 0
+                            ? "laranja"
+                            : alertaDocs.a_vencer > 0
+                              ? "azul"
+                              : "cinza"
+                        }
+                      >
+                        {alertaDocs.vencido > 0
+                          ? "Doc. vencido"
+                          : alertaDocs.a_vencer > 0
+                            ? "Doc. a vencer"
+                            : "Doc. pendente"}
                       </Badge>
                     ) : (
                       <Badge cor="verde">Docs OK</Badge>

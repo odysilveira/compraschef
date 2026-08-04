@@ -80,6 +80,7 @@ describe("resumo-rh", () => {
     expect(r.pessoas_ativas).toBe(2);
     expect(r.docs_alerta).toBe(1);
     expect(r.docs_vencido).toBe(1);
+    expect(r.docs_a_vencer).toBe(0);
     expect(r.ponto_abertas).toBe(1);
     expect(r.convocacoes_enviadas).toBe(2);
     expect(r.pagamentos_aguardando).toBe(1);

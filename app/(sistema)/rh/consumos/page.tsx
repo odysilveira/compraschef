@@ -15,6 +15,7 @@ import {
 } from "@/lib/domain/consumos-pessoas";
 import {
   hrefConsumosRh,
+  hrefPagamentosRh,
   parseFiltroConsumosRh,
   parsePessoaPontoRh,
   type FiltroConsumosRh,
@@ -270,7 +271,12 @@ function RhConsumosConteudo() {
             {rotulo}
           </button>
         ))}
-        <Link href="/rh/pagamentos" className="btn-secundario sm:ml-auto">
+        <Link
+          href={hrefPagamentosRh(
+            filtroPessoa !== "todos" ? { pessoa: filtroPessoa } : undefined
+          )}
+          className="btn-secundario sm:ml-auto"
+        >
           Ver pagamentos
         </Link>
       </div>

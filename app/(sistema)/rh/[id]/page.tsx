@@ -44,7 +44,7 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
-import { hrefConsumosRh, hrefEscalaRh, filtroPagamentosRhDeStatus, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, filtroConsumosRhDeStatus, filtroPagamentosRhDeStatus, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -1162,7 +1162,7 @@ function RhPerfilConteudo() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-bold">Consumos no restaurante</h2>
             <Link
-              href={hrefConsumosRh({ filtro: "todos", pessoa: pessoa.id })}
+              href={hrefConsumosRh({ pessoa: pessoa.id })}
               className="btn-secundario text-sm"
             >
               Lançar consumo
@@ -1183,6 +1183,15 @@ function RhPerfilConteudo() {
                       {dataBR(consumo.data)} · qtd {consumo.quantidade} · líquido{" "}
                       {moeda(consumo.valor_liquido)}
                     </p>
+                    <Link
+                      href={hrefConsumosRh({
+                        filtro: filtroConsumosRhDeStatus(consumo.status),
+                        pessoa: pessoa.id,
+                      })}
+                      className="mt-1 inline-block text-sm text-primaria-escura underline"
+                    >
+                      Ver na lista
+                    </Link>
                   </div>
                   <Badge cor={consumo.status === "pendente" ? "laranja" : "verde"}>
                     {rotuloStatusConsumo(consumo.status)}

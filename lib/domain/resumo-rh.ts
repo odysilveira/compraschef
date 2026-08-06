@@ -125,7 +125,9 @@ export function parseFiltroPagamentosRh(
 }
 
 export function hrefPagamentosRh(
-  opts?: FiltroPagamentosRh | { filtro?: FiltroPagamentosRh; pessoa?: string }
+  opts?:
+    | FiltroPagamentosRh
+    | { filtro?: FiltroPagamentosRh; pessoa?: string; competencia?: string }
 ): string {
   const normalizado =
     typeof opts === "string" || opts === undefined ? { filtro: opts } : opts;
@@ -135,8 +137,19 @@ export function hrefPagamentosRh(
   }
   const pessoa = normalizado.pessoa?.trim();
   if (pessoa) params.set("pessoa", pessoa);
+  const competencia = normalizado.competencia?.trim();
+  if (competencia && /^\d{4}-(0[1-9]|1[0-2])$/.test(competencia)) {
+    params.set("competencia", competencia);
+  }
   const q = params.toString();
   return q ? `/rh/pagamentos?${q}` : "/rh/pagamentos";
+}
+
+/** YYYY-MM válido; vazio = sem filtro de competência (diferente do espelho). */
+export function parseCompetenciaPagamentosRh(valor: string | null | undefined): string {
+  const v = valor?.trim() ?? "";
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) return v;
+  return "";
 }
 
 export type FiltroDocsRh = "todos" | "alerta" | "vencido" | "a_vencer";

@@ -1006,7 +1006,7 @@ function RhPontoConteudo() {
             <div className="grid gap-3 sm:grid-cols-3">
               <Campo rotulo="Competência">
                 <input
-                  className="input"
+                  className="campo"
                   type="month"
                   value={competenciaEspelho}
                   onChange={(e) => setCompetenciaEspelho(e.target.value)}
@@ -1014,11 +1014,11 @@ function RhPontoConteudo() {
               </Campo>
               <Campo rotulo="Pessoa">
                 <select
-                  className="input"
+                  className="campo"
                   value={pessoaEspelho}
                   onChange={(e) => aoMudarPessoaEspelho(e.target.value)}
                 >
-                  <option value="">Todas</option>
+                  <option value="">Todas ({colaboradoresEspelho.length} CLT)</option>
                   {pessoaEspelhoExtra && (
                     <option value={pessoaEspelhoExtra.id}>{pessoaEspelhoExtra.nome}</option>
                   )}
@@ -1032,7 +1032,7 @@ function RhPontoConteudo() {
               <Campo rotulo="Tolerância (min)">
                 <div className="flex gap-2">
                   <input
-                    className="input"
+                    className="campo"
                     type="number"
                     min={0}
                     max={180}

@@ -44,7 +44,9 @@ import {
   parseCompetenciaPagamentosRh,
   parseFiltroPagamentosRh,
   parsePessoaPontoRh,
+  parseTipoPagamentosRh,
   type FiltroPagamentosRh,
+  type FiltroTipoPagamentosRh,
 } from "@/lib/domain/resumo-rh";
 import { hrefPerfilRh } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
@@ -115,7 +117,9 @@ function RhPagamentosConteudo() {
     const pessoa = parsePessoaPontoRh(searchParams.get("pessoa"));
     return pessoa || "todos";
   });
-  const [filtroTipo, setFiltroTipo] = useState<TipoPagamentoPessoa | "todos">("todos");
+  const [filtroTipo, setFiltroTipo] = useState<FiltroTipoPagamentosRh>(() =>
+    parseTipoPagamentosRh(searchParams.get("tipo"))
+  );
   const [filtroCompetencia, setFiltroCompetencia] = useState<string>(() =>
     parseCompetenciaPagamentosRh(searchParams.get("competencia"))
   );
@@ -151,6 +155,7 @@ function RhPagamentosConteudo() {
   useEffect(() => {
     setFiltro(parseFiltroPagamentosRh(searchParams.get("filtro")));
     setFiltroCompetencia(parseCompetenciaPagamentosRh(searchParams.get("competencia")));
+    setFiltroTipo(parseTipoPagamentosRh(searchParams.get("tipo")));
     const pessoaUrl = parsePessoaPontoRh(searchParams.get("pessoa"));
     if (!pessoaUrl) {
       setFiltroPessoa("todos");
@@ -163,16 +168,19 @@ function RhPagamentosConteudo() {
   function irParaFiltros(
     proximoFiltro: FiltroPagamentosRh,
     proximaPessoa: string = filtroPessoa,
-    proximaCompetencia: string = filtroCompetencia
+    proximaCompetencia: string = filtroCompetencia,
+    proximoTipo: FiltroTipoPagamentosRh = filtroTipo
   ) {
     setFiltro(proximoFiltro);
     setFiltroPessoa(proximaPessoa);
     setFiltroCompetencia(proximaCompetencia);
+    setFiltroTipo(proximoTipo);
     router.replace(
       hrefPagamentosRh({
         filtro: proximoFiltro,
         pessoa: proximaPessoa !== "todos" ? proximaPessoa : undefined,
         competencia: proximaCompetencia.trim() || undefined,
+        tipo: proximoTipo,
       }),
       { scroll: false }
     );
@@ -188,6 +196,10 @@ function RhPagamentosConteudo() {
 
   function aoMudarFiltroCompetencia(proximaCompetencia: string) {
     irParaFiltros(filtro, filtroPessoa, proximaCompetencia);
+  }
+
+  function aoMudarFiltroTipo(proximoTipo: FiltroTipoPagamentosRh) {
+    irParaFiltros(filtro, filtroPessoa, filtroCompetencia, proximoTipo);
   }
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
@@ -509,8 +521,7 @@ function RhPagamentosConteudo() {
       return;
     }
     mutate((atual) => Object.assign(atual, proximo));
-    setFiltroTipo("salario");
-    irParaFiltros("abertos", filtroPessoa, competencia);
+    irParaFiltros("abertos", filtroPessoa, competencia, "salario");
     const avisos = r.avisos.length ? ` ${r.avisos.join(" ")}` : "";
     setMensagem(
       `Folha ${competencia}: ${r.criados} salário(s) criado(s)${
@@ -718,7 +729,7 @@ function RhPagamentosConteudo() {
           <select
             className="campo"
             value={filtroTipo}
-            onChange={(e) => setFiltroTipo(e.target.value as TipoPagamentoPessoa | "todos")}
+            onChange={(e) => aoMudarFiltroTipo(e.target.value as FiltroTipoPagamentosRh)}
           >
             <option value="todos">Todos</option>
             {TIPOS_PAGAMENTO_PESSOA.map((t) => (

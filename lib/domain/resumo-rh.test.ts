@@ -17,6 +17,7 @@ import {
   parseFiltroEspelhoPontoRh,
   parseCompetenciaEspelhoPontoRh,
   parseCompetenciaPagamentosRh,
+  parseTipoPagamentosRh,
   parseFiltroNormasRh,
   parseFiltroPagamentosRh,
   parseFiltroPendenciasPontoRh,
@@ -153,6 +154,18 @@ describe("resumo-rh", () => {
     expect(
       hrefPagamentosRh({ filtro: "previsto", pessoa: "pes-1", competencia: "2026-06" })
     ).toBe("/rh/pagamentos?filtro=previsto&pessoa=pes-1&competencia=2026-06");
+    expect(parseTipoPagamentosRh("salario")).toBe("salario");
+    expect(parseTipoPagamentosRh("x")).toBe("todos");
+    expect(parseTipoPagamentosRh(null)).toBe("todos");
+    expect(hrefPagamentosRh({ tipo: "salario" })).toBe("/rh/pagamentos?tipo=salario");
+    expect(
+      hrefPagamentosRh({
+        filtro: "abertos",
+        pessoa: "pes-1",
+        competencia: "2026-06",
+        tipo: "salario",
+      })
+    ).toBe("/rh/pagamentos?pessoa=pes-1&competencia=2026-06&tipo=salario");
     expect(parseFiltroDocsRh("alerta")).toBe("alerta");
     expect(parseFiltroDocsRh("vencido")).toBe("vencido");
     expect(parseFiltroDocsRh("a_vencer")).toBe("a_vencer");

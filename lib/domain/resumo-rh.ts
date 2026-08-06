@@ -1,4 +1,4 @@
-import type { DB } from "../types";
+import type { DB, TipoPagamentoPessoa } from "../types";
 import { alertaDocumentosPessoa, hojeIsoLocal } from "./documentos-pessoa";
 import {
   convocacaoEnviadaSemRespostaVencida,
@@ -6,6 +6,7 @@ import {
   listarCltSemPlantaoNaJanela,
 } from "./escala";
 import { normasPendentes } from "./normas-rh";
+import { TIPOS_PAGAMENTO_PESSOA } from "./pagamentos-pessoas";
 import { resumirPendenciasPontoAbertas, competenciaDeData, type FiltroEspelhoPonto } from "./ponto-rh";
 
 export interface ResumoOperacionalRh {
@@ -127,7 +128,12 @@ export function parseFiltroPagamentosRh(
 export function hrefPagamentosRh(
   opts?:
     | FiltroPagamentosRh
-    | { filtro?: FiltroPagamentosRh; pessoa?: string; competencia?: string }
+    | {
+        filtro?: FiltroPagamentosRh;
+        pessoa?: string;
+        competencia?: string;
+        tipo?: TipoPagamentoPessoa | "todos";
+      }
 ): string {
   const normalizado =
     typeof opts === "string" || opts === undefined ? { filtro: opts } : opts;
@@ -141,6 +147,9 @@ export function hrefPagamentosRh(
   if (competencia && /^\d{4}-(0[1-9]|1[0-2])$/.test(competencia)) {
     params.set("competencia", competencia);
   }
+  if (normalizado.tipo && normalizado.tipo !== "todos") {
+    params.set("tipo", normalizado.tipo);
+  }
   const q = params.toString();
   return q ? `/rh/pagamentos?${q}` : "/rh/pagamentos";
 }
@@ -150,6 +159,17 @@ export function parseCompetenciaPagamentosRh(valor: string | null | undefined): 
   const v = valor?.trim() ?? "";
   if (/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) return v;
   return "";
+}
+
+export type FiltroTipoPagamentosRh = TipoPagamentoPessoa | "todos";
+
+export function parseTipoPagamentosRh(
+  valor: string | null | undefined
+): FiltroTipoPagamentosRh {
+  if (TIPOS_PAGAMENTO_PESSOA.some((t) => t.id === valor)) {
+    return valor as TipoPagamentoPessoa;
+  }
+  return "todos";
 }
 
 export type FiltroDocsRh = "todos" | "alerta" | "vencido" | "a_vencer";

@@ -45,6 +45,7 @@ import {
   parsePessoaPontoRh,
   type FiltroPagamentosRh,
 } from "@/lib/domain/resumo-rh";
+import { hrefPerfilRh } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { PagamentoPessoa, TipoPagamentoPessoa } from "@/lib/types";
@@ -750,6 +751,12 @@ function RhPagamentosConteudo() {
                   {pagamento.conciliacao_divergente && pagamento.conciliacao_divergencia_motivo && (
                     <p className="text-sm font-medium text-destaque">Divergência: {pagamento.conciliacao_divergencia_motivo}</p>
                   )}
+                  <Link
+                    href={hrefPerfilRh(pagamento.pessoa_id)}
+                    className="mt-1 inline-block text-sm text-primaria-escura underline"
+                  >
+                    Ver perfil
+                  </Link>
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <BadgeStatusPagamento pagamento={pagamento} />
@@ -959,7 +966,13 @@ function RhPagamentosConteudo() {
               Informar pagamento não dá baixa final. O título fica em aguardando conciliação.
             </div>
             <p className="text-sm text-slate-700">
-              {nomePessoa(pagamentoInformar.pessoa_id)} · {moeda(pagamentoInformar.valor)}
+              {nomePessoa(pagamentoInformar.pessoa_id)} · {moeda(pagamentoInformar.valor)}{" "}
+              <Link
+                href={hrefPerfilRh(pagamentoInformar.pessoa_id)}
+                className="text-primaria-escura underline"
+              >
+                Ver perfil
+              </Link>
             </p>
             {(() => {
               const pessoa = db.pessoas.find((p) => p.id === pagamentoInformar.pessoa_id);
@@ -1028,7 +1041,13 @@ function RhPagamentosConteudo() {
           <form onSubmit={confirmarConciliar} className="space-y-3">
             <p className="text-sm text-slate-700">
               {nomePessoa(pagamentoConciliar.pessoa_id)} ·{" "}
-              {moeda(pagamentoConciliar.pagamento_valor ?? pagamentoConciliar.valor)}
+              {moeda(pagamentoConciliar.pagamento_valor ?? pagamentoConciliar.valor)}{" "}
+              <Link
+                href={hrefPerfilRh(pagamentoConciliar.pessoa_id)}
+                className="text-primaria-escura underline"
+              >
+                Ver perfil
+              </Link>
             </p>
             <Campo rotulo="Data da liquidação *">
               <input

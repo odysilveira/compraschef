@@ -19,6 +19,7 @@ import {
   parsePessoaPontoRh,
   type FiltroConsumosRh,
 } from "@/lib/domain/resumo-rh";
+import { hrefPerfilRh } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, moeda } from "@/lib/format";
 import type { ConsumoPessoa } from "@/lib/types";
@@ -305,6 +306,12 @@ function RhConsumosConteudo() {
                     {dataBR(consumo.data)} · cheio {moeda(consumo.valor_bruto)} → com desconto{" "}
                     <span className="font-semibold text-slate-800">{moeda(consumo.valor_liquido)}</span>
                   </p>
+                  <Link
+                    href={hrefPerfilRh(consumo.pessoa_id)}
+                    className="mt-1 inline-block text-sm text-primaria-escura underline"
+                  >
+                    Ver perfil
+                  </Link>
                 </div>
                 <BadgeStatus consumo={consumo} />
               </div>

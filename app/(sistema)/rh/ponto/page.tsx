@@ -41,6 +41,7 @@ import {
 } from "@/lib/domain/ponto-rh";
 import type { FiltroEspelhoPonto, StatusDiaEspelho } from "@/lib/domain/ponto-rh";
 import {
+  hrefEscalaRh,
   hrefPontoRh,
   parseAbaPontoRh,
   parseCompetenciaEspelhoPontoRh,
@@ -712,7 +713,10 @@ function RhPontoConteudo() {
         <Link href="/rh" className="btn-secundario">
           Pessoas
         </Link>
-        <Link href="/rh/escala" className="btn-secundario">
+        <Link
+          href={hrefEscalaRh(pessoaEspelho ? { pessoa: pessoaEspelho } : undefined)}
+          className="btn-secundario"
+        >
           Escala
         </Link>
       </div>

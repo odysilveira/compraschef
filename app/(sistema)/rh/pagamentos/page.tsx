@@ -41,6 +41,7 @@ import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import {
+  hrefConsumosRh,
   hrefPagamentosRh,
   parseCompetenciaPagamentosRh,
   parseFiltroPagamentosRh,
@@ -754,7 +755,12 @@ function RhPagamentosConteudo() {
         <Link href="/rh" className="btn-secundario ml-auto">
           Ver pessoas
         </Link>
-        <Link href="/rh/consumos" className="btn-secundario">
+        <Link
+          href={hrefConsumosRh(
+            filtroPessoa !== "todos" ? { pessoa: filtroPessoa } : undefined
+          )}
+          className="btn-secundario"
+        >
           Consumos
         </Link>
       </div>

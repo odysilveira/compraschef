@@ -951,7 +951,10 @@ function RhEscalaConteudo() {
         <Link href="/rh" className="btn-secundario">
           Pessoas
         </Link>
-        <Link href={hrefPagamentosRh()} className="btn-secundario">
+        <Link
+          href={hrefPagamentosRh(filtroPessoa ? { pessoa: filtroPessoa } : undefined)}
+          className="btn-secundario"
+        >
           Pagamentos
         </Link>
         <button

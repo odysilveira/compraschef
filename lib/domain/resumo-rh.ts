@@ -1,4 +1,4 @@
-import type { DB, StatusPagamentoPessoa, TipoPagamentoPessoa } from "../types";
+import type { DB, StatusConsumoPessoa, StatusPagamentoPessoa, TipoPagamentoPessoa } from "../types";
 import { alertaDocumentosPessoa, hojeIsoLocal } from "./documentos-pessoa";
 import {
   convocacaoEnviadaSemRespostaVencida,
@@ -222,6 +222,11 @@ export function parseFiltroConsumosRh(
 ): FiltroConsumosRh {
   if (valor === "pendentes" || valor === "descontados" || valor === "todos") return valor;
   return "pendentes";
+}
+
+/** Mapeia status do consumo para o filtro da lista. */
+export function filtroConsumosRhDeStatus(status: StatusConsumoPessoa): FiltroConsumosRh {
+  return status === "pendente" ? "pendentes" : "descontados";
 }
 
 export function hrefConsumosRh(

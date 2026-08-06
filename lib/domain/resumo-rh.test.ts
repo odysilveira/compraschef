@@ -10,6 +10,7 @@ import {
   hrefPontoRh,
   destaqueSlotFiltroConvocacao,
   filtroPagamentosRhDeStatus,
+  filtroConsumosRhDeStatus,
   parseAbaPontoRh,
   parseAlertaCltEscalaRh,
   parseFiltroConsumosRh,
@@ -208,6 +209,8 @@ describe("resumo-rh", () => {
       )
     ).toBe(true);
     expect(parseFiltroConsumosRh("descontados")).toBe("descontados");
+    expect(filtroConsumosRhDeStatus("pendente")).toBe("pendentes");
+    expect(filtroConsumosRhDeStatus("descontado")).toBe("descontados");
     expect(hrefConsumosRh()).toBe("/rh/consumos");
     expect(hrefConsumosRh("todos")).toBe("/rh/consumos?filtro=todos");
     expect(hrefConsumosRh({ filtro: "todos", pessoa: "pes-1" })).toBe(

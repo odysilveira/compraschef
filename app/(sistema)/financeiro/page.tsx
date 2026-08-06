@@ -79,6 +79,8 @@ import {
   registrarDivergenciaPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
+import { filtroPagamentosRhDeStatus, hrefPagamentosRh } from "@/lib/domain/resumo-rh";
+import { hrefPerfilRh } from "@/lib/domain/rh";
 import { parseOfx } from "@/lib/domain/extrato-ofx";
 import {
   aplicarMatchesExtrato,
@@ -1887,12 +1889,29 @@ export default function FinanceiroPage() {
               <Users size={12} /> RH
             </p>
             <p className="font-bold">{nomePessoaRh(pagamento.pessoa_id)}</p>
+            <Link
+              href={hrefPerfilRh(pagamento.pessoa_id, { aba: "pagamentos" })}
+              className="mt-0.5 inline-block text-sm text-primaria-escura underline"
+            >
+              Ver perfil
+            </Link>
             <p className="text-sm text-slate-600">
               {rotuloTipoPagamentoPessoa(pagamento.tipo)}
               {pagamento.descricao ? ` · ${pagamento.descricao}` : ""}
             </p>
             <p className="text-xl font-bold">{moeda(valor)}</p>
             <p className="text-sm text-slate-600">Vencimento: {dataBR(pagamento.vencimento)}</p>
+            <Link
+              href={hrefPagamentosRh({
+                filtro: filtroPagamentosRhDeStatus(pagamento.status),
+                pessoa: pagamento.pessoa_id,
+                competencia: pagamento.competencia || undefined,
+                tipo: pagamento.tipo,
+              })}
+              className="mt-0.5 inline-block text-sm text-primaria-escura underline"
+            >
+              Ver na lista RH
+            </Link>
           </div>
           <div className="flex flex-col items-end gap-1">
             <Badge cor={pagamento.status === "pago" ? "verde" : "azul"}>
@@ -2121,7 +2140,10 @@ export default function FinanceiroPage() {
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="rotulo text-blue-700">Aguardando conciliação</p>
-                <Link href="/rh/pagamentos" className="text-xs font-medium text-blue-800 underline-offset-2 hover:underline">
+                <Link
+                  href={hrefPagamentosRh("aguardando")}
+                  className="text-xs font-medium text-blue-800 underline-offset-2 hover:underline"
+                >
                   Ver pagamentos de RH
                 </Link>
               </div>
@@ -3041,6 +3063,12 @@ export default function FinanceiroPage() {
           <form onSubmit={confirmarConciliarRh} className="space-y-3">
             <Card className="space-y-2 bg-slate-50 py-3">
               <p className="font-bold text-slate-900">{nomePessoaRh(rhConciliar.pessoa_id)}</p>
+              <Link
+                href={hrefPerfilRh(rhConciliar.pessoa_id, { aba: "pagamentos" })}
+                className="inline-block text-sm text-primaria-escura underline"
+              >
+                Ver perfil
+              </Link>
               <p className="text-sm text-slate-700">
                 {rotuloTipoPagamentoPessoa(rhConciliar.tipo)}
                 {rhConciliar.descricao ? ` · ${rhConciliar.descricao}` : ""}
@@ -3126,6 +3154,12 @@ export default function FinanceiroPage() {
           <form onSubmit={confirmarDivergenciaRh} className="space-y-3">
             <Card className="space-y-2 bg-slate-50 py-3">
               <p className="font-bold text-slate-900">{nomePessoaRh(rhDivergencia.pessoa_id)}</p>
+              <Link
+                href={hrefPerfilRh(rhDivergencia.pessoa_id, { aba: "pagamentos" })}
+                className="inline-block text-sm text-primaria-escura underline"
+              >
+                Ver perfil
+              </Link>
               <p className="text-sm text-slate-700">
                 Valor informado:{" "}
                 {rhDivergencia.pagamento_valor != null ? moeda(rhDivergencia.pagamento_valor) : moeda(rhDivergencia.valor)}

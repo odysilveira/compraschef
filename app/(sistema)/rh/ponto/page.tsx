@@ -49,6 +49,7 @@ import {
   type AbaPontoRh,
   type FiltroPendenciasPontoRh,
 } from "@/lib/domain/resumo-rh";
+import { hrefPerfilRh } from "@/lib/domain/rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { PendenciaPonto, StatusPendenciaPonto } from "@/lib/types";
@@ -876,6 +877,12 @@ function RhPontoConteudo() {
                           : ""}
                       </p>
                       <p className="text-sm text-slate-500">{rotuloTipoFaltaPonto(p.tipo_falta)}</p>
+                      <Link
+                        href={hrefPerfilRh(p.pessoa_id)}
+                        className="mt-1 inline-block text-sm text-primaria-escura underline"
+                      >
+                        Ver perfil
+                      </Link>
                     </div>
                     <BadgeStatus status={p.status} />
                   </div>
@@ -1184,6 +1191,12 @@ function RhPontoConteudo() {
                 {dataBR(detalhe.data)} · {rotuloTipoFaltaPonto(detalhe.tipo_falta)}
               </p>
               <BadgeStatus status={detalhe.status} />
+              <Link
+                href={hrefPerfilRh(detalhe.pessoa_id)}
+                className="mt-2 inline-block text-sm text-primaria-escura underline"
+              >
+                Ver perfil
+              </Link>
             </div>
 
             {(detalhe.status === "aguardando_aviso" ||

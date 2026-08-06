@@ -307,7 +307,7 @@ function RhConsumosConteudo() {
             Mostrando consumos de <strong>{nomePessoa(filtroPessoa)}</strong>.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Link href={hrefPerfilRh(filtroPessoa)} className="btn-secundario text-sm">
+            <Link href={hrefPerfilRh(filtroPessoa, { aba: "consumos" })} className="btn-secundario text-sm">
               Ver perfil
             </Link>
             <button
@@ -344,7 +344,7 @@ function RhConsumosConteudo() {
                     <span className="font-semibold text-slate-800">{moeda(consumo.valor_liquido)}</span>
                   </p>
                   <Link
-                    href={hrefPerfilRh(consumo.pessoa_id)}
+                    href={hrefPerfilRh(consumo.pessoa_id, { aba: "consumos" })}
                     className="mt-1 inline-block text-sm text-primaria-escura underline"
                   >
                     Ver perfil

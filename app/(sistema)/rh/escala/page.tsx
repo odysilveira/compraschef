@@ -980,9 +980,14 @@ function RhEscalaConteudo() {
           <p className="text-sm text-sky-950">
             Mostrando plantões de <strong>{nomePessoa(filtroPessoa)}</strong> em destaque no calendário.
           </p>
-          <button type="button" className="btn-secundario text-sm" onClick={limparFiltroPessoa}>
-            Limpar pessoa
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link href={hrefPerfilRh(filtroPessoa, { aba: "escala" })} className="btn-secundario text-sm">
+              Ver perfil
+            </Link>
+            <button type="button" className="btn-secundario text-sm" onClick={limparFiltroPessoa}>
+              Limpar pessoa
+            </button>
+          </div>
         </Card>
       )}
 
@@ -1019,7 +1024,7 @@ function RhEscalaConteudo() {
                   <p className="font-medium text-slate-900">{p.nome}</p>
                   <p className="text-sm text-slate-600">{rotuloFuncao(p)}</p>
                   <Link
-                    href={hrefPerfilRh(p.id)}
+                    href={hrefPerfilRh(p.id, { aba: "escala" })}
                     className="mt-1 inline-block text-sm text-primaria-escura underline"
                   >
                     Ver perfil
@@ -1078,7 +1083,7 @@ function RhEscalaConteudo() {
                           : "Plantão"}
                       </p>
                       <Link
-                        href={hrefPerfilRh(conv.pessoa_id)}
+                        href={hrefPerfilRh(conv.pessoa_id, { aba: "escala" })}
                         className="mt-1 inline-block text-sm text-primaria-escura underline"
                       >
                         Ver perfil
@@ -1194,7 +1199,7 @@ function RhEscalaConteudo() {
                         {vencida ? " · plantão já passou" : ""}
                       </p>
                       <Link
-                        href={hrefPerfilRh(conv.pessoa_id)}
+                        href={hrefPerfilRh(conv.pessoa_id, { aba: "escala" })}
                         className="mt-1 inline-block text-sm text-primaria-escura underline"
                       >
                         Ver perfil
@@ -1633,7 +1638,7 @@ function RhEscalaConteudo() {
                             <li key={msg}>{msg}</li>
                           ))}
                         </ul>
-                        <Link href={`/rh/${p.id}`} className="mt-2 inline-block text-primaria-escura underline">
+                        <Link href={hrefPerfilRh(p.id)} className="mt-2 inline-block text-primaria-escura underline">
                           Abrir perfil e marcar contrato / eSocial
                         </Link>
                       </div>
@@ -1646,7 +1651,7 @@ function RhEscalaConteudo() {
                             <li key={msg}>{msg}</li>
                           ))}
                         </ul>
-                        <Link href={`/rh/${p.id}?aba=documentos`} className="mt-2 inline-block text-primaria-escura underline">
+                        <Link href={hrefPerfilRh(p.id, { aba: "documentos" })} className="mt-2 inline-block text-primaria-escura underline">
                           Ver documentos no perfil
                         </Link>
                       </div>
@@ -1826,7 +1831,7 @@ function RhEscalaConteudo() {
               <p className="text-sm text-slate-500">
                 {detalheSlot.funcao ?? "—"} · {detalheSlot.local ?? LOCAL_PADRAO_ESCALA}
               </p>
-              <Link href={`/rh/${detalheSlot.pessoa_id}`} className="text-sm text-primaria-escura underline">
+              <Link href={hrefPerfilRh(detalheSlot.pessoa_id, { aba: "escala" })} className="text-sm text-primaria-escura underline">
                 Ver perfil
               </Link>
             </div>

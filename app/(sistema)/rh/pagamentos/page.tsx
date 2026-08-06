@@ -815,7 +815,7 @@ function RhPagamentosConteudo() {
             Mostrando pagamentos de <strong>{nomePessoa(filtroPessoa)}</strong>.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Link href={hrefPerfilRh(filtroPessoa)} className="btn-secundario text-sm">
+            <Link href={hrefPerfilRh(filtroPessoa, { aba: "pagamentos" })} className="btn-secundario text-sm">
               Ver perfil
             </Link>
             <button
@@ -870,7 +870,7 @@ function RhPagamentosConteudo() {
                     <p className="text-sm font-medium text-destaque">Divergência: {pagamento.conciliacao_divergencia_motivo}</p>
                   )}
                   <Link
-                    href={hrefPerfilRh(pagamento.pessoa_id)}
+                    href={hrefPerfilRh(pagamento.pessoa_id, { aba: "pagamentos" })}
                     className="mt-1 inline-block text-sm text-primaria-escura underline"
                   >
                     Ver perfil
@@ -1086,7 +1086,7 @@ function RhPagamentosConteudo() {
             <p className="text-sm text-slate-700">
               {nomePessoa(pagamentoInformar.pessoa_id)} · {moeda(pagamentoInformar.valor)}{" "}
               <Link
-                href={hrefPerfilRh(pagamentoInformar.pessoa_id)}
+                href={hrefPerfilRh(pagamentoInformar.pessoa_id, { aba: "pagamentos" })}
                 className="text-primaria-escura underline"
               >
                 Ver perfil
@@ -1231,7 +1231,7 @@ function RhPagamentosConteudo() {
               {nomePessoa(pagamentoConciliar.pessoa_id)} ·{" "}
               {moeda(pagamentoConciliar.pagamento_valor ?? pagamentoConciliar.valor)}{" "}
               <Link
-                href={hrefPerfilRh(pagamentoConciliar.pessoa_id)}
+                href={hrefPerfilRh(pagamentoConciliar.pessoa_id, { aba: "pagamentos" })}
                 className="text-primaria-escura underline"
               >
                 Ver perfil

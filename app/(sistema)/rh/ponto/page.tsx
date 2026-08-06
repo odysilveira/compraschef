@@ -44,6 +44,7 @@ import type { FiltroEspelhoPonto, StatusDiaEspelho } from "@/lib/domain/ponto-rh
 import {
   hrefPontoRh,
   parseAbaPontoRh,
+  parseFiltroEspelhoPontoRh,
   parseFiltroPendenciasPontoRh,
   parsePessoaPontoRh,
   type AbaPontoRh,
@@ -92,7 +93,9 @@ function RhPontoConteudo() {
   const [pessoaEspelho, setPessoaEspelho] = useState<string>(() =>
     parsePessoaPontoRh(searchParams.get("pessoa"))
   );
-  const [filtroEspelho, setFiltroEspelho] = useState<FiltroEspelhoPonto>("todos");
+  const [filtroEspelho, setFiltroEspelho] = useState<FiltroEspelhoPonto>(() =>
+    parseFiltroEspelhoPontoRh(searchParams.get("status"))
+  );
   const [detalheId, setDetalheId] = useState<string | null>(null);
   const [propostaEntrada, setPropostaEntrada] = useState("");
   const [propostaSaida, setPropostaSaida] = useState("");
@@ -107,6 +110,8 @@ function RhPontoConteudo() {
     setAba(proximaAba);
     if (proximaAba === "pendencias") {
       setFiltro(parseFiltroPendenciasPontoRh(searchParams.get("filtro")));
+    } else {
+      setFiltroEspelho(parseFiltroEspelhoPontoRh(searchParams.get("status")));
     }
     const pessoaUrl = parsePessoaPontoRh(searchParams.get("pessoa"));
     if (!pessoaUrl) {
@@ -120,16 +125,19 @@ function RhPontoConteudo() {
   function irParaPonto(
     proxima: AbaPontoRh,
     pessoaId: string = pessoaEspelho,
-    proximoFiltro: FiltroPendenciasPontoRh = filtro
+    proximoFiltro: FiltroPendenciasPontoRh = filtro,
+    proximoStatus: FiltroEspelhoPonto = filtroEspelho
   ) {
     setAba(proxima);
     setPessoaEspelho(pessoaId);
     if (proxima === "pendencias") setFiltro(proximoFiltro);
+    if (proxima === "espelho") setFiltroEspelho(proximoStatus);
     router.replace(
       hrefPontoRh({
         aba: proxima,
         pessoa: pessoaId || undefined,
         filtro: proxima === "pendencias" ? proximoFiltro : undefined,
+        status: proxima === "espelho" ? proximoStatus : undefined,
       }),
       { scroll: false }
     );
@@ -143,8 +151,16 @@ function RhPontoConteudo() {
     irParaPonto("pendencias", pessoaEspelho, proximo);
   }
 
+  function irParaFiltroEspelho(proximo: FiltroEspelhoPonto) {
+    irParaPonto("espelho", pessoaEspelho, filtro, proximo);
+  }
+
   function aoMudarPessoaEspelho(pessoaId: string) {
     irParaPonto(aba === "pendencias" ? "espelho" : aba, pessoaId);
+  }
+
+  function limparPessoaEspelho() {
+    aoMudarPessoaEspelho("");
   }
 
   const horasAviso = avisoPontoHorasDoDb(db);
@@ -1004,6 +1020,29 @@ function RhPontoConteudo() {
             </div>
           </Card>
 
+          {pessoaEspelho && (
+            <Card className="flex flex-wrap items-center justify-between gap-2 border-sky-200 bg-sky-50/70 p-3">
+              <p className="text-sm text-sky-950">
+                Mostrando espelho de <strong>{nomePessoa(pessoaEspelho)}</strong>.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={hrefPerfilRh(pessoaEspelho)}
+                  className="btn-secundario text-sm"
+                >
+                  Ver perfil
+                </Link>
+                <button
+                  type="button"
+                  className="btn-secundario text-sm"
+                  onClick={limparPessoaEspelho}
+                >
+                  Limpar pessoa
+                </button>
+              </div>
+            </Card>
+          )}
+
           {espelho.length === 0 ? (
             <Vazio mensagem="Nenhum plantão nem batida neste mês. Monte a escala ou sincronize o REP." />
           ) : (
@@ -1023,7 +1062,7 @@ function RhPontoConteudo() {
                     key={id}
                     type="button"
                     className={filtroEspelho === id ? "btn-primario" : "btn-secundario"}
-                    onClick={() => setFiltroEspelho(id)}
+                    onClick={() => irParaFiltroEspelho(id)}
                   >
                     {rotulo}
                   </button>
@@ -1042,7 +1081,7 @@ function RhPontoConteudo() {
                     key={id}
                     type="button"
                     className={filtroEspelho === id ? "btn-primario" : "btn-secundario"}
-                    onClick={() => setFiltroEspelho(id)}
+                    onClick={() => irParaFiltroEspelho(id)}
                   >
                     {rotulo}
                   </button>

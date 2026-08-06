@@ -239,6 +239,57 @@ export function normasPendentes(db: Pick<DB, "normas_rh">): NormaRh[] {
   return (db.normas_rh ?? []).filter((n) => n.status === "pendente");
 }
 
+function csvEscapeNorma(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+/**
+ * CSV das normas (separador `;`, UTF-8 com BOM) para Excel/pt-BR.
+ */
+export function exportarNormasRhCsv(normas: NormaRh[]): string {
+  const cabecalho = [
+    "Título",
+    "Fonte",
+    "Status",
+    "Relevância",
+    "Publicado em",
+    "Vigência",
+    "Parâmetro",
+    "Valor anterior",
+    "Valor proposto",
+    "Detectado em",
+    "Revisado em",
+    "Revisado por",
+    "URL",
+    "Resumo",
+  ];
+  const ordenadas = normas
+    .slice()
+    .sort((a, b) => b.detectado_em.localeCompare(a.detectado_em) || a.titulo.localeCompare(b.titulo, "pt-BR"));
+  const linhas = ordenadas.map((n) =>
+    [
+      n.titulo,
+      n.fonte,
+      rotuloStatusNorma(n.status),
+      n.relevancia,
+      n.publicado_em ?? "",
+      n.vigencia_em ?? "",
+      n.parametro ? rotuloParametroNorma(n.parametro) : "",
+      n.valor_anterior != null ? String(n.valor_anterior) : "",
+      n.valor_proposto != null ? String(n.valor_proposto) : "",
+      n.detectado_em,
+      n.revisado_em ?? "",
+      n.revisado_por ?? "",
+      n.url_fonte ?? "",
+      n.resumo,
+    ]
+      .map((c) => csvEscapeNorma(String(c)))
+      .join(";")
+  );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}
+
 /**
  * Confirma várias normas pendentes (aplica parâmetros mapeados).
  * Se `ids` for informado, só esses; senão, todas as pendentes.

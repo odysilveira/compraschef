@@ -2,13 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { BookOpenCheck, ExternalLink, RefreshCw } from "lucide-react";
+import { BookOpenCheck, Download, ExternalLink, RefreshCw } from "lucide-react";
 import { Badge, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
 import {
   antecedenciaMinimaDoDb,
   confirmarNorma,
   confirmarNormasPendentes,
+  exportarNormasRhCsv,
   ignorarNorma,
   ignorarNormasPendentes,
   normasPendentes,
@@ -140,15 +141,47 @@ export default function RhNormasPage() {
     setFiltro("pendente");
   }
 
+  function baixarNormasCsv() {
+    if (lista.length === 0) {
+      setMensagem("Nenhuma norma neste filtro para exportar.");
+      return;
+    }
+    const csv = exportarNormasRhCsv(lista);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rh-normas-${filtro}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagem(`CSV baixado (${lista.length} norma(s)).`);
+    setErro(null);
+  }
+
   return (
     <div>
       <TituloPagina
         titulo="Normas RH"
         subtitulo="O sistema detecta publicações relevantes; você confirma antes de qualquer mudança na escala."
         acao={
-          <button type="button" className="btn-primario" onClick={verificar}>
-            <RefreshCw size={16} /> Verificar agora
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={baixarNormasCsv}
+              disabled={lista.length === 0}
+              title={
+                lista.length === 0
+                  ? "Nenhuma norma neste filtro"
+                  : "Exportar normas do filtro atual (CSV)"
+              }
+            >
+              <Download size={16} /> Exportar CSV
+            </button>
+            <button type="button" className="btn-primario" onClick={verificar}>
+              <RefreshCw size={16} /> Verificar agora
+            </button>
+          </div>
         }
       />
 

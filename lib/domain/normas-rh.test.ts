@@ -5,6 +5,7 @@ import {
   antecedenciaMinimaDoDb,
   confirmarNorma,
   confirmarNormasPendentes,
+  exportarNormasRhCsv,
   ignorarNorma,
   ignorarNormasPendentes,
   normasPendentes,
@@ -178,5 +179,18 @@ describe("normas-rh", () => {
     const ign = ignorarNormasPendentes(db, [ids[1]!], { revisado_por: "dono" });
     expect(ign.ignoradas).toBe(1);
     expect(normasPendentes(db)).toHaveLength(0);
+  });
+
+  it("exporta CSV das normas com BOM e status", () => {
+    const db = dbVazio();
+    verificarAtualizacoesNormas(db, {
+      agora: "2026-08-03T12:00:00.000Z",
+      idFactory: () => `n-${db.normas_rh!.length}`,
+    });
+    const csv = exportarNormasRhCsv(db.normas_rh ?? []);
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Título;Fonte;Status");
+    expect(csv).toContain("Pendente");
+    expect(csv).toContain("eSocial");
   });
 });

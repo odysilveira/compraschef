@@ -12,6 +12,7 @@ import {
   exportarPagamentosPessoasCsv,
   gerarFolhaCltMes,
   informarPagamentoPessoa,
+  informarPagamentosLiberados,
   liberarPagamentoPessoa,
   liberarPagamentosPrevistos,
   conciliarPagamentosAguardando,
@@ -128,6 +129,7 @@ function RhPagamentosConteudo() {
   const [mensagem, setMensagem] = useState<string | null>(null);
 
   const [informarId, setInformarId] = useState<string | null>(null);
+  const [informarLoteAberto, setInformarLoteAberto] = useState(false);
   const [formInformar, setFormInformar] = useState<FormInformar>({
     dataPagamento: hojeISO(),
     valorPago: "",
@@ -348,10 +350,29 @@ function RhPagamentosConteudo() {
   }
 
   function abrirInformar(pagamento: PagamentoPessoa) {
+    setInformarLoteAberto(false);
     setInformarId(pagamento.id);
     setFormInformar({
       dataPagamento: hojeISO(),
       valorPago: pagamento.valor.toFixed(2),
+      bancoConta: contaPadraoOrigem(db),
+      responsavel: "usuário local",
+      observacao: "",
+    });
+    setErroInformar(null);
+  }
+
+  function abrirInformarLote() {
+    const liberados = lista.filter((p) => p.status === "liberado");
+    if (liberados.length === 0) {
+      setMensagem("Nenhum pagamento liberado neste filtro.");
+      return;
+    }
+    setInformarId(null);
+    setInformarLoteAberto(true);
+    setFormInformar({
+      dataPagamento: hojeISO(),
+      valorPago: "",
       bancoConta: contaPadraoOrigem(db),
       responsavel: "usuário local",
       observacao: "",
@@ -378,6 +399,35 @@ function RhPagamentosConteudo() {
     mutate((atual) => Object.assign(atual, proximo));
     setInformarId(null);
     setMensagem("Pagamento informado. Aguardando conciliação bancária.");
+  }
+
+  function confirmarInformarLote(e: FormEvent) {
+    e.preventDefault();
+    const ids = lista.filter((p) => p.status === "liberado").map((p) => p.id);
+    if (ids.length === 0) {
+      setErroInformar("Nenhum pagamento liberado neste filtro.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = informarPagamentosLiberados(proximo, ids, {
+      dataPagamento: formInformar.dataPagamento,
+      bancoConta: formInformar.bancoConta,
+      responsavel: formInformar.responsavel,
+      observacao: formInformar.observacao,
+    });
+    mutate((atual) => Object.assign(atual, proximo));
+    setInformarLoteAberto(false);
+    if (r.informados > 0) {
+      setMensagem(
+        `${r.informados} pagamento(s) informado(s). Aguardando conciliação bancária.`
+      );
+      irParaFiltro("aguardando");
+    }
+    if (r.erros.length) {
+      setMensagem(
+        (r.informados > 0 ? `${r.informados} informado(s). ` : "") + r.erros.join(" ")
+      );
+    }
   }
 
   function confirmarConciliar(e: FormEvent) {
@@ -677,6 +727,16 @@ function RhPagamentosConteudo() {
         {filtro === "previsto" && lista.some((p) => p.status === "previsto") && (
           <button type="button" className="btn-primario" onClick={liberarTodosPrevistosDaLista}>
             Liberar todos ({lista.filter((p) => p.status === "previsto").length})
+          </button>
+        )}
+        {filtro === "liberado" && lista.some((p) => p.status === "liberado") && (
+          <button
+            type="button"
+            className="btn-primario"
+            onClick={abrirInformarLote}
+            title="Informa todos os liberados do filtro (valor de cada título)"
+          >
+            Informar todos ({lista.filter((p) => p.status === "liberado").length})
           </button>
         )}
         {filtro === "aguardando" &&
@@ -1088,6 +1148,76 @@ function RhPagamentosConteudo() {
               </button>
               <button type="submit" className="btn-primario">
                 Informar pagamento
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={informarLoteAberto}
+        titulo="Informar pagamentos em lote"
+        onFechar={() => setInformarLoteAberto(false)}
+        fecharAoClicarFundo={false}
+      >
+        {informarLoteAberto && (
+          <form onSubmit={confirmarInformarLote} className="space-y-3">
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              Informar não dá baixa final. Cada título vai para aguardando conciliação com o valor do
+              próprio título.
+            </div>
+            {(() => {
+              const liberados = lista.filter((p) => p.status === "liberado");
+              const total = liberados.reduce((acc, p) => acc + (p.pagamento_valor ?? p.valor), 0);
+              return (
+                <p className="text-sm text-slate-700">
+                  {liberados.length} pagamento(s) liberado(s) neste filtro · total{" "}
+                  <strong>{moeda(total)}</strong>
+                </p>
+              );
+            })()}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Campo rotulo="Data *">
+                <input
+                  type="date"
+                  className="campo"
+                  required
+                  value={formInformar.dataPagamento}
+                  onChange={(e) => setFormInformar({ ...formInformar, dataPagamento: e.target.value })}
+                />
+              </Campo>
+              <Campo rotulo="Responsável">
+                <input
+                  className="campo"
+                  value={formInformar.responsavel}
+                  onChange={(e) => setFormInformar({ ...formInformar, responsavel: e.target.value })}
+                />
+              </Campo>
+              <div className="sm:col-span-2 space-y-2">
+                <Campo rotulo="De qual banco/conta saiu o pagamento? *">
+                  <SeletorContaOrigem
+                    db={db}
+                    valor={formInformar.bancoConta}
+                    onChange={(bancoConta) => setFormInformar({ ...formInformar, bancoConta })}
+                    listId="contas-origem-rh-lote"
+                  />
+                </Campo>
+                <p className="text-xs text-slate-500">
+                  Mesma origem para todos os títulos do lote — facilita achar no extrato.
+                </p>
+              </div>
+            </div>
+            {erroInformar && <p className="text-sm font-medium text-erro">{erroInformar}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={() => setInformarLoteAberto(false)}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario">
+                Informar todos
               </button>
             </div>
           </form>

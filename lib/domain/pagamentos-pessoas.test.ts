@@ -6,6 +6,7 @@ import {
   conciliarPagamentosAguardando,
   exportarPagamentosPessoasCsv,
   informarPagamentoPessoa,
+  informarPagamentosLiberados,
   liberarPagamentoPessoa,
   liberarPagamentosPrevistos,
   registrarDivergenciaPagamentoPessoa,
@@ -64,6 +65,26 @@ describe("pagamentos de pessoas", () => {
     expect(r.sucesso).toBe(true);
     expect(db.pagamentos_pessoas[0].status).toBe("aguardando_conciliacao");
     expect(db.pagamentos_pessoas[0].status).not.toBe("pago");
+  });
+
+  it("informa vários liberados em lote com o valor de cada título", () => {
+    const db = structuredClone(seedDB) as DB;
+    db.pagamentos_pessoas = [
+      baseLiberado({ id: "i1", valor: 1000 }),
+      baseLiberado({ id: "i2", valor: 500 }),
+      baseLiberado({ id: "i3", status: "previsto", valor: 200 }),
+    ];
+    const r = informarPagamentosLiberados(db, ["i1", "i2", "i3"], {
+      dataPagamento: "2026-08-08",
+      bancoConta: "Conta corrente",
+      responsavel: "Ody",
+    });
+    expect(r.informados).toBe(2);
+    expect(db.pagamentos_pessoas.find((p) => p.id === "i1")?.status).toBe("aguardando_conciliacao");
+    expect(db.pagamentos_pessoas.find((p) => p.id === "i1")?.pagamento_valor).toBe(1000);
+    expect(db.pagamentos_pessoas.find((p) => p.id === "i2")?.pagamento_valor).toBe(500);
+    expect(db.pagamentos_pessoas.find((p) => p.id === "i3")?.status).toBe("previsto");
+    expect(r.erros.length).toBeGreaterThan(0);
   });
 
   it("concilia para pago e limpa divergencia", () => {

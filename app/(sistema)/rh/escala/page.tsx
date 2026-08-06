@@ -50,6 +50,8 @@ import {
   filtroPagamentosRhDeStatus,
   hrefEscalaRh,
   hrefPagamentosRh,
+  hrefPessoasRh,
+  hrefPontoRh,
   parseAlertaCltEscalaRh,
   parseFiltroConvocacaoEscalaRh,
   parsePessoaPontoRh,
@@ -948,7 +950,7 @@ function RhEscalaConteudo() {
       )}
 
       <div className="mb-4 flex flex-wrap gap-2">
-        <Link href="/rh" className="btn-secundario">
+        <Link href={hrefPessoasRh()} className="btn-secundario">
           Pessoas
         </Link>
         <Link
@@ -956,6 +958,16 @@ function RhEscalaConteudo() {
           className="btn-secundario"
         >
           Pagamentos
+        </Link>
+        <Link
+          href={hrefPontoRh(
+            filtroPessoa
+              ? { aba: "espelho", pessoa: filtroPessoa }
+              : { aba: "espelho" }
+          )}
+          className="btn-secundario"
+        >
+          Ponto
         </Link>
         <button
           type="button"

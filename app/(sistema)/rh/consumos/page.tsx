@@ -270,24 +270,35 @@ function RhConsumosConteudo() {
             {rotulo}
           </button>
         ))}
-        <label className="block min-w-[12rem] flex-1 sm:max-w-xs">
-          <span className="rotulo mb-1 block">Pessoa</span>
-          <select
-            className="input w-full"
-            value={filtroPessoa}
-            onChange={(e) => aoMudarFiltroPessoa(e.target.value)}
-          >
-            <option value="todos">Todas</option>
-            {pessoasAtivas.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nome}
-              </option>
-            ))}
-          </select>
-        </label>
         <Link href="/rh/pagamentos" className="btn-secundario sm:ml-auto">
           Ver pagamentos
         </Link>
+      </div>
+
+      <div className="mb-4 max-w-sm">
+        <Campo rotulo="Pessoa">
+          <select
+            className="campo"
+            value={filtroPessoa}
+            onChange={(e) => aoMudarFiltroPessoa(e.target.value)}
+          >
+            <option value="todos">Todas ({pessoasAtivas.length} ativas)</option>
+            {pessoasAtivas.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nome} ({p.tipo})
+              </option>
+            ))}
+          </select>
+        </Campo>
+        {pessoasAtivas.length === 0 && (
+          <p className="mt-1 text-sm text-destaque">
+            Nenhuma pessoa ativa — cadastre em{" "}
+            <Link href="/rh" className="underline">
+              Pessoas
+            </Link>
+            .
+          </p>
+        )}
       </div>
 
       {filtroPessoa !== "todos" && (
@@ -315,7 +326,7 @@ function RhConsumosConteudo() {
           mensagem={
             filtroPessoa !== "todos"
               ? `Nenhum consumo de ${nomePessoa(filtroPessoa)} neste filtro.`
-              : "Nenhum consumo neste filtro."
+              : "Nenhum consumo neste filtro. Use Novo lançamento e escolha a pessoa."
           }
         />
       ) : (

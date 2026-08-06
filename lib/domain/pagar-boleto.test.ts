@@ -10,6 +10,7 @@ import {
   criarSnapshotPagamentoBoleto,
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
+  informarPagamentosBoletosLiberados,
   montarEstadoAgendaPagamentoBoleto,
   obterCodigoCanonicoConfirmadoDoDocumento,
   registrarDivergenciaBoleto,
@@ -271,6 +272,41 @@ describe("informar pagamento do boleto", () => {
     expect(resultado.sucesso).toBe(true);
     expect(db.boletos[0].pagamento_responsavel).toBe("usuário local");
     expect(db.boleto_pagamentos_historico[0].responsavel).toBe("usuário local");
+  });
+
+  it("informa vários boletos liberados em lote e rejeita não liberados", () => {
+    const db = dbTeste();
+    db.boletos = [
+      boletoBase({ id: "bol-a", status: "liberado", valor: 100 }),
+      boletoBase({ id: "bol-b", status: "liberado", valor: 200 }),
+      boletoAguardandoConciliacao({ id: "bol-c", valor: 50 }),
+    ];
+    db.boleto_pagamentos_historico = [];
+
+    let n = 0;
+    const r = informarPagamentosBoletosLiberados(
+      db,
+      ["bol-a", "bol-b", "bol-c"],
+      {
+        dataPagamento: "2026-08-08",
+        bancoConta: "Banco X / Conta Operacional",
+        responsavel: "Marina",
+        confirmouAviso: true,
+      },
+      {
+        agora: "2026-08-08T10:00:00.000Z",
+        gerarIdHistorico: () => `bph-inf-${++n}`,
+      }
+    );
+
+    expect(r.informados).toBe(2);
+    expect(r.sucesso).toBe(false);
+    expect(r.erros.some((e) => e.includes("bol-c"))).toBe(true);
+    expect(db.boletos.find((b) => b.id === "bol-a")?.status).toBe("aguardando_conciliacao");
+    expect(db.boletos.find((b) => b.id === "bol-a")?.pagamento_valor).toBe(100);
+    expect(db.boletos.find((b) => b.id === "bol-b")?.pagamento_valor).toBe(200);
+    expect(db.boletos.find((b) => b.id === "bol-c")?.status).toBe("aguardando_conciliacao");
+    expect(db.boleto_pagamentos_historico).toHaveLength(2);
   });
 });
 

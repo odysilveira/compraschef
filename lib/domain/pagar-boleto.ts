@@ -391,6 +391,54 @@ export function informarPagamentoBoleto(
   };
 }
 
+/**
+ * Informa pagamento de vários boletos liberados (mesma data/conta).
+ * Valor pago = valor de face de cada boleto. Se `ids` for informado, só esses.
+ */
+export function informarPagamentosBoletosLiberados(
+  db: DB,
+  ids: string[] | undefined,
+  dados: Omit<DadosPagamentoBoleto, "valorPago">,
+  opcoes: OpcoesInformarPagamentoBoleto = {}
+): { sucesso: boolean; informados: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : (db.boletos ?? []).filter((b) => b.status === "liberado").map((b) => b.id);
+
+  let informados = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const boleto = db.boletos.find((b) => b.id === id);
+    if (!boleto) {
+      erros.push(`${id}: Boleto não encontrado.`);
+      continue;
+    }
+    if (boleto.status !== "liberado") {
+      erros.push(`${id}: só boletos liberados entram no lote.`);
+      continue;
+    }
+    const snapshot = criarSnapshotPagamentoBoleto(boleto);
+    const r = informarPagamentoBoleto(
+      db,
+      id,
+      snapshot,
+      {
+        dataPagamento: dados.dataPagamento,
+        valorPago: boleto.valor,
+        bancoConta: dados.bancoConta,
+        responsavel: dados.responsavel,
+        observacao: dados.observacao,
+        confirmouAviso: dados.confirmouAviso,
+      },
+      opcoes
+    );
+    if (r.sucesso) informados += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, informados, erros };
+}
+
 export function conciliarBoleto(
   db: DB,
   boletoId: string,

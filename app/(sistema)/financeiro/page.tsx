@@ -70,6 +70,7 @@ import {
   criarSnapshotPagamentoBoleto,
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
+  informarPagamentosBoletosLiberados,
   montarEstadoAgendaPagamentoBoleto,
   registrarDivergenciaBoleto,
   type SegmentoCodigoBarrasItf,
@@ -507,6 +508,7 @@ export default function FinanceiroPage() {
   const [erroPagamentoBoleto, setErroPagamentoBoleto] = useState<string | null>(null);
   const [mensagemPagamentoBoleto, setMensagemPagamentoBoleto] = useState<string | null>(null);
   const [processandoPagamentoBoleto, setProcessandoPagamentoBoleto] = useState(false);
+  const [informarBoletosLoteAberto, setInformarBoletosLoteAberto] = useState(false);
   const [boletoConciliarId, setBoletoConciliarId] = useState<string | null>(null);
   const [formConciliarBoleto, setFormConciliarBoleto] = useState<FormConciliarBoletoState>(novaConciliacaoBoletoInicial());
   const [erroConciliarBoleto, setErroConciliarBoleto] = useState<string | null>(null);
@@ -597,6 +599,97 @@ export default function FinanceiroPage() {
     setFormPagamentoBoleto(novoPagamentoBoletoInicial());
     setErroPagamentoBoleto(null);
     setMensagemPagamentoBoleto(null);
+  }
+
+  function abrirInformarBoletosLote() {
+    const liberados = db.boletos.filter(
+      (b) =>
+        !golpeConfirmado(b) &&
+        b.status === "liberado" &&
+        avaliarElegibilidadePagamentoBoleto(b).permitido
+    );
+    if (liberados.length === 0) {
+      setMensagemReceberBoleto("Nenhum boleto liberado apto para informar pagamento.");
+      return;
+    }
+    setBoletoPagamentoId(null);
+    setSnapshotPagamento(null);
+    setInformarBoletosLoteAberto(true);
+    setFormPagamentoBoleto({
+      ...novoPagamentoBoletoInicial(),
+      bancoConta: contaPadraoOrigem(db),
+      confirmouAviso: false,
+    });
+    setErroPagamentoBoleto(null);
+    setMensagemPagamentoBoleto(null);
+  }
+
+  function fecharInformarBoletosLote() {
+    if (processandoPagamentoBoleto) return;
+    setInformarBoletosLoteAberto(false);
+    setFormPagamentoBoleto(novoPagamentoBoletoInicial());
+    setErroPagamentoBoleto(null);
+    setMensagemPagamentoBoleto(null);
+  }
+
+  function confirmarInformarBoletosLote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (processandoPagamentoBoletoRef.current) return;
+    const ids = db.boletos
+      .filter(
+        (b) =>
+          !golpeConfirmado(b) &&
+          b.status === "liberado" &&
+          avaliarElegibilidadePagamentoBoleto(b).permitido
+      )
+      .map((b) => b.id);
+    if (ids.length === 0) {
+      setErroPagamentoBoleto("Nenhum boleto liberado apto neste momento.");
+      return;
+    }
+    if (!formPagamentoBoleto.confirmouAviso) {
+      setErroPagamentoBoleto("Confirme o aviso de responsabilidade antes de continuar.");
+      return;
+    }
+    processandoPagamentoBoletoRef.current = true;
+    setProcessandoPagamentoBoleto(true);
+    setErroPagamentoBoleto(null);
+    try {
+      const proximo = structuredClone(db) as DB;
+      const r = informarPagamentosBoletosLiberados(
+        proximo,
+        ids,
+        {
+          dataPagamento: formPagamentoBoleto.dataPagamento,
+          bancoConta: formPagamentoBoleto.bancoConta,
+          responsavel: formPagamentoBoleto.responsavel,
+          observacao: formPagamentoBoleto.observacao,
+          confirmouAviso: formPagamentoBoleto.confirmouAviso,
+        },
+        {
+          responsavelPadrao: "usuário local",
+          gerarIdHistorico: () => uid("bph"),
+        }
+      );
+      mutate((atual) => {
+        Object.assign(atual, proximo);
+      });
+      setInformarBoletosLoteAberto(false);
+      setFormPagamentoBoleto(novoPagamentoBoletoInicial());
+      if (r.informados > 0) {
+        setMensagemReceberBoleto(
+          `${r.informados} boleto(s) informado(s). Aguardando conciliação bancária.`
+        );
+      }
+      if (r.erros.length) {
+        setMensagemReceberBoleto(
+          (r.informados > 0 ? `${r.informados} informado(s). ` : "") + r.erros.join(" ")
+        );
+      }
+    } finally {
+      processandoPagamentoBoletoRef.current = false;
+      setProcessandoPagamentoBoleto(false);
+    }
   }
 
   function abrirConciliarBoleto(boleto: Boleto) {
@@ -1093,6 +1186,10 @@ export default function FinanceiroPage() {
 
   // Agenda: atrasados + próximos 7 dias
   const boletosAtivos = db.boletos.filter((boleto) => !golpeConfirmado(boleto));
+  const boletosLiberadosElegiveis = boletosAtivos.filter(
+    (boleto) =>
+      boleto.status === "liberado" && avaliarElegibilidadePagamentoBoleto(boleto).permitido
+  );
   const boletosAguardandoConciliacao = boletosAtivos.filter((boleto) => boleto.status === "aguardando_conciliacao");
   const boletosPagos = boletosAtivos.filter((boleto) => boleto.status === "pago");
   const boletosPendentesAgenda = boletosAtivos.filter(
@@ -2124,6 +2221,19 @@ export default function FinanceiroPage() {
             </Card>
           </div>
 
+          {boletosLiberadosElegiveis.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-primario"
+                onClick={abrirInformarBoletosLote}
+                title="Informa pagamento de todos os liberados aptos com a mesma data/conta"
+              >
+                Informar pagamentos em lote ({boletosLiberadosElegiveis.length})
+              </button>
+            </div>
+          )}
+
           {/* Agenda financeira */}
           <section className="space-y-4">
             <h2>Agenda financeira</h2>
@@ -2935,6 +3045,102 @@ export default function FinanceiroPage() {
               </button>
               <button type="submit" className="btn-primario" disabled={processandoPagamentoBoleto}>
                 <CircleCheckBig size={16} /> {processandoPagamentoBoleto ? "Informando..." : "Informar pagamento"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={informarBoletosLoteAberto}
+        titulo="Informar pagamentos de boletos em lote"
+        onFechar={fecharInformarBoletosLote}
+        fecharAoClicarFundo={false}
+      >
+        {informarBoletosLoteAberto && (
+          <form onSubmit={confirmarInformarBoletosLote} className="space-y-3">
+            <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+              Informar não dá baixa final. Cada boleto vai para aguardando conciliação com o valor de face.
+            </div>
+            <p className="text-sm text-slate-700">
+              {boletosLiberadosElegiveis.length} boleto(s) liberado(s) apto(s) · total{" "}
+              <strong>
+                {moeda(boletosLiberadosElegiveis.reduce((acc, b) => acc + b.valor, 0))}
+              </strong>
+            </p>
+
+            <label className="block rounded-card border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              <span className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={formPagamentoBoleto.confirmouAviso}
+                  onChange={(event) => atualizarCampoPagamento("confirmouAviso", event.target.checked)}
+                />
+                Confirmo que revisei beneficiário, valor e vencimento de cada boleto do lote antes de informar.
+              </span>
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="rotulo mb-1 block">Data do pagamento *</span>
+                <input
+                  type="date"
+                  className="input w-full"
+                  value={formPagamentoBoleto.dataPagamento}
+                  onChange={(event) => atualizarCampoPagamento("dataPagamento", event.target.value)}
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="rotulo mb-1 block">Responsável</span>
+                <input
+                  className="input w-full"
+                  value={formPagamentoBoleto.responsavel}
+                  onChange={(event) => atualizarCampoPagamento("responsavel", event.target.value)}
+                />
+              </label>
+              <div className="sm:col-span-2 space-y-2">
+                <label className="block">
+                  <span className="rotulo mb-1 block">De qual banco/conta saiu o pagamento? *</span>
+                  <SeletorContaOrigem
+                    db={db}
+                    valor={formPagamentoBoleto.bancoConta}
+                    onChange={(bancoConta) => atualizarCampoPagamento("bancoConta", bancoConta)}
+                    listId="contas-origem-boletos-lote"
+                  />
+                </label>
+                <p className="text-xs text-slate-500">
+                  Mesma origem para todos os boletos do lote — facilita achar no extrato.
+                </p>
+              </div>
+              <label className="block sm:col-span-2">
+                <span className="rotulo mb-1 block">Observação (opcional)</span>
+                <textarea
+                  className="input min-h-20 w-full py-2"
+                  value={formPagamentoBoleto.observacao}
+                  onChange={(event) => atualizarCampoPagamento("observacao", event.target.value)}
+                />
+              </label>
+            </div>
+
+            {erroPagamentoBoleto && (
+              <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">
+                {erroPagamentoBoleto}
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={fecharInformarBoletosLote}
+                disabled={processandoPagamentoBoleto}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primario" disabled={processandoPagamentoBoleto}>
+                <CircleCheckBig size={16} />{" "}
+                {processandoPagamentoBoleto ? "Informando..." : "Informar pagamentos"}
               </button>
             </div>
           </form>

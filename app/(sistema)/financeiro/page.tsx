@@ -66,6 +66,7 @@ import {
   acoesPagamentoDisponiveisNoLayout,
   avaliarElegibilidadePagamentoBoleto,
   conciliarBoleto,
+  conciliarBoletosAguardando,
   criarSnapshotPagamentoBoleto,
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
@@ -760,6 +761,34 @@ export default function FinanceiroPage() {
     } finally {
       processandoConciliarBoletoRef.current = false;
       setProcessandoConciliarBoleto(false);
+    }
+  }
+
+  function conciliarTodosBoletosAguardando() {
+    const ids = boletosAguardandoConciliacao.map((b) => b.id);
+    if (ids.length === 0) {
+      setMensagemReceberBoleto("Nenhum boleto aguardando conciliação.");
+      return;
+    }
+    const proximo = structuredClone(db) as DB;
+    const r = conciliarBoletosAguardando(
+      proximo,
+      ids,
+      { dataLiquidacao: hojeISO(), responsavel: "usuário local" },
+      { gerarIdHistorico: () => uid("bph") }
+    );
+    mutate((atual) => {
+      Object.assign(atual, proximo);
+    });
+    if (r.conciliados > 0) {
+      setMensagemReceberBoleto(
+        `${r.conciliados} boleto(s) conciliado(s) e marcado(s) como pago.`
+      );
+    }
+    if (r.erros.length) {
+      setMensagemReceberBoleto(
+        (r.conciliados > 0 ? `${r.conciliados} conciliado(s). ` : "") + r.erros.join(" ")
+      );
     }
   }
 
@@ -2140,12 +2169,24 @@ export default function FinanceiroPage() {
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="rotulo text-blue-700">Aguardando conciliação</p>
-                <Link
-                  href={hrefPagamentosRh("aguardando")}
-                  className="text-xs font-medium text-blue-800 underline-offset-2 hover:underline"
-                >
-                  Ver pagamentos de RH
-                </Link>
+                <div className="flex flex-wrap items-center gap-2">
+                  {boletosAguardandoConciliacao.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-primario text-sm"
+                      onClick={conciliarTodosBoletosAguardando}
+                      title="Marca todos os boletos desta fila como pagos com a data de hoje"
+                    >
+                      Conciliar todos boletos ({boletosAguardandoConciliacao.length})
+                    </button>
+                  )}
+                  <Link
+                    href={hrefPagamentosRh("aguardando")}
+                    className="text-xs font-medium text-blue-800 underline-offset-2 hover:underline"
+                  >
+                    Ver pagamentos de RH
+                  </Link>
+                </div>
               </div>
               {boletosAguardandoConciliacao.length === 0 && rhAguardandoConciliacao.length === 0 ? (
                 <Vazio mensagem="Nenhum boleto ou pagamento de RH aguardando conciliação." />

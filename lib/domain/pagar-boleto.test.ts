@@ -6,6 +6,7 @@ import {
   alternarCodigoAberto,
   avaliarElegibilidadePagamentoBoleto,
   conciliarBoleto,
+  conciliarBoletosAguardando,
   criarSnapshotPagamentoBoleto,
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
@@ -382,6 +383,35 @@ describe("conciliar boleto", () => {
     expect(db.boletos[0].conciliacao_divergente).toBe(false);
     expect(db.boletos[0].conciliacao_divergencia_motivo).toBeUndefined();
     expect(db.boletos[0].conciliacao_divergencia_em).toBeUndefined();
+  });
+
+  it("concilia vários boletos aguardando em lote e rejeita liberados", () => {
+    const db = dbTeste();
+    db.boletos = [
+      boletoAguardandoConciliacao({ id: "bol-a", pagamento_valor: 100 }),
+      boletoAguardandoConciliacao({ id: "bol-b", pagamento_valor: 200 }),
+      boletoBase({ id: "bol-lib", status: "liberado" }),
+    ];
+    db.boleto_pagamentos_historico = [];
+
+    let n = 0;
+    const r = conciliarBoletosAguardando(
+      db,
+      ["bol-a", "bol-b", "bol-lib"],
+      { dataLiquidacao: "2026-08-09", responsavel: "Ody" },
+      {
+        agora: "2026-08-09T12:00:00.000Z",
+        gerarIdHistorico: () => `bph-lote-${++n}`,
+      }
+    );
+
+    expect(r.conciliados).toBe(2);
+    expect(r.sucesso).toBe(false);
+    expect(r.erros.some((e) => e.includes("bol-lib"))).toBe(true);
+    expect(db.boletos.find((b) => b.id === "bol-a")?.status).toBe("pago");
+    expect(db.boletos.find((b) => b.id === "bol-b")?.status).toBe("pago");
+    expect(db.boletos.find((b) => b.id === "bol-lib")?.status).toBe("liberado");
+    expect(db.boleto_pagamentos_historico).toHaveLength(2);
   });
 });
 

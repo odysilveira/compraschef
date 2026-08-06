@@ -465,6 +465,33 @@ export function conciliarBoleto(
   };
 }
 
+/**
+ * Concilia vários boletos aguardando de uma vez (mesma data/responsável).
+ * Se `ids` for informado, só esses; senão, todos em aguardando conciliação.
+ */
+export function conciliarBoletosAguardando(
+  db: DB,
+  ids: string[] | undefined,
+  dados: DadosConciliarBoleto,
+  opcoes: OpcoesConciliarBoleto = {}
+): { sucesso: boolean; conciliados: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : (db.boletos ?? [])
+          .filter((b) => b.status === "aguardando_conciliacao")
+          .map((b) => b.id);
+
+  let conciliados = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const r = conciliarBoleto(db, id, dados, opcoes);
+    if (r.sucesso) conciliados += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, conciliados, erros };
+}
+
 export function registrarDivergenciaBoleto(
   db: DB,
   boletoId: string,

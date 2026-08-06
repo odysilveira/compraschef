@@ -12,7 +12,6 @@ import {
   aprovarPendenciaPonto,
   aprovarPendenciasPonto,
   avisoPontoHorasDoDb,
-  competenciaDeData,
   detectarPendenciasPonto,
   garantirConfigRh,
   importarBatidasPonto,

@@ -579,22 +579,32 @@ export function parseFiltroPendenciasPonto(
 
 export function filtrarPendenciasPonto(
   pendencias: PendenciaPonto[],
-  filtro: FiltroPendenciasPonto
+  filtro: FiltroPendenciasPonto,
+  opts?: { pessoa_id?: string }
 ): PendenciaPonto[] {
   const lista = [...pendencias].sort((a, b) => b.data.localeCompare(a.data) || a.id.localeCompare(b.id));
+  let filtradas: PendenciaPonto[];
   switch (filtro) {
     case "aviso":
-      return lista.filter((p) => p.status === "aguardando_aviso");
+      filtradas = lista.filter((p) => p.status === "aguardando_aviso");
+      break;
     case "aguardando":
-      return lista.filter((p) => p.status === "aguardando_funcionario");
+      filtradas = lista.filter((p) => p.status === "aguardando_funcionario");
+      break;
     case "proposta":
-      return lista.filter((p) => p.status === "proposta");
+      filtradas = lista.filter((p) => p.status === "proposta");
+      break;
     case "todas":
-      return lista;
+      filtradas = lista;
+      break;
     case "abertas":
     default:
-      return lista.filter((p) => STATUS_ABERTOS.includes(p.status));
+      filtradas = lista.filter((p) => STATUS_ABERTOS.includes(p.status));
+      break;
   }
+  const pessoaId = opts?.pessoa_id?.trim();
+  if (!pessoaId) return filtradas;
+  return filtradas.filter((p) => p.pessoa_id === pessoaId);
 }
 
 export function resumirPendenciasPontoAbertas(db: Pick<DB, "pendencias_ponto">): {

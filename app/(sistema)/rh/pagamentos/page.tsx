@@ -717,8 +717,34 @@ function RhPagamentosConteudo() {
         </label>
       </div>
 
+      {filtroPessoa !== "todos" && (
+        <Card className="mb-4 flex flex-wrap items-center justify-between gap-2 border-sky-200 bg-sky-50/70 p-3">
+          <p className="text-sm text-sky-950">
+            Mostrando pagamentos de <strong>{nomePessoa(filtroPessoa)}</strong>.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link href={hrefPerfilRh(filtroPessoa)} className="btn-secundario text-sm">
+              Ver perfil
+            </Link>
+            <button
+              type="button"
+              className="btn-secundario text-sm"
+              onClick={() => irParaFiltros(filtro, "todos")}
+            >
+              Limpar pessoa
+            </button>
+          </div>
+        </Card>
+      )}
+
       {lista.length === 0 ? (
-        <Vazio mensagem="Nenhum pagamento neste filtro." />
+        <Vazio
+          mensagem={
+            filtroPessoa !== "todos"
+              ? `Nenhum pagamento de ${nomePessoa(filtroPessoa)} neste filtro.`
+              : "Nenhum pagamento neste filtro."
+          }
+        />
       ) : (
         <div className="space-y-3">
           {lista.map((pagamento) => (

@@ -676,25 +676,34 @@ function RhPagamentosConteudo() {
       </div>
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <label className="block">
-          <span className="rotulo mb-1 block">Pessoa</span>
+        <div>
+          <Campo rotulo="Pessoa">
+            <select
+              className="campo"
+              value={filtroPessoa}
+              onChange={(e) => aoMudarFiltroPessoa(e.target.value)}
+            >
+              <option value="todos">Todas ({pessoasAtivas.length} ativas)</option>
+              {pessoasAtivas.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nome} ({p.tipo})
+                </option>
+              ))}
+            </select>
+          </Campo>
+          {pessoasAtivas.length === 0 && (
+            <p className="mt-1 text-sm text-destaque">
+              Nenhuma pessoa ativa — cadastre em{" "}
+              <Link href="/rh" className="underline">
+                Pessoas
+              </Link>
+              .
+            </p>
+          )}
+        </div>
+        <Campo rotulo="Tipo">
           <select
-            className="input w-full"
-            value={filtroPessoa}
-            onChange={(e) => aoMudarFiltroPessoa(e.target.value)}
-          >
-            <option value="todos">Todas</option>
-            {pessoasAtivas.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nome}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="rotulo mb-1 block">Tipo</span>
-          <select
-            className="input w-full"
+            className="campo"
             value={filtroTipo}
             onChange={(e) => setFiltroTipo(e.target.value as TipoPagamentoPessoa | "todos")}
           >
@@ -705,16 +714,15 @@ function RhPagamentosConteudo() {
               </option>
             ))}
           </select>
-        </label>
-        <label className="block">
-          <span className="rotulo mb-1 block">Competência (YYYY-MM)</span>
+        </Campo>
+        <Campo rotulo="Competência (YYYY-MM)">
           <input
-            className="input w-full"
+            className="campo"
             value={filtroCompetencia}
             onChange={(e) => setFiltroCompetencia(e.target.value)}
             placeholder={competenciaAtual()}
           />
-        </label>
+        </Campo>
       </div>
 
       {filtroPessoa !== "todos" && (

@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BookOpenCheck, Download, ExternalLink, RefreshCw } from "lucide-react";
 import { Badge, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
@@ -17,6 +18,11 @@ import {
   rotuloStatusNorma,
   verificarAtualizacoesNormas,
 } from "@/lib/domain/normas-rh";
+import {
+  hrefNormasRh,
+  parseFiltroNormasRh,
+  type FiltroNormasRh,
+} from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo, usePapel } from "@/lib/roles";
 import { dataBR } from "@/lib/format";
 import type { NormaRh } from "@/lib/types";
@@ -31,13 +37,26 @@ function BadgeStatus({ status }: { status: NormaRh["status"] }) {
   return <Badge cor={cor}>{rotuloStatusNorma(status)}</Badge>;
 }
 
-export default function RhNormasPage() {
+function RhNormasConteudo() {
   const db = useDB();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { papel } = usePapel();
   const podeRh = usePodeAcessarModulo("rh");
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const [filtro, setFiltro] = useState<"pendente" | "todas">("pendente");
+  const [filtro, setFiltro] = useState<FiltroNormasRh>(() =>
+    parseFiltroNormasRh(searchParams.get("filtro"))
+  );
+
+  useEffect(() => {
+    setFiltro(parseFiltroNormasRh(searchParams.get("filtro")));
+  }, [searchParams]);
+
+  function irParaFiltro(proximo: FiltroNormasRh) {
+    setFiltro(proximo);
+    router.replace(hrefNormasRh(proximo));
+  }
 
   const antecedencia = antecedenciaMinimaDoDb(db);
   const pendentes = useMemo(() => normasPendentes(db), [db]);
@@ -67,7 +86,7 @@ export default function RhNormasPage() {
       setMensagem("Nenhuma publicação nova no catálogo demo. A fila já está atualizada.");
     } else {
       setMensagem(`${r.novas.length} norma(s) detectada(s) para revisão.`);
-      setFiltro("pendente");
+      irParaFiltro("pendente");
     }
   }
 
@@ -118,7 +137,7 @@ export default function RhNormasPage() {
           }. Antecedência vigente: ${antecedenciaMinimaDoDb(proximo)} dia(s).`
         : r.erros.join(" ") || "Nenhuma norma confirmada."
     );
-    setFiltro("pendente");
+    irParaFiltro("pendente");
   }
 
   function ignorarTodasPendentes() {
@@ -138,7 +157,7 @@ export default function RhNormasPage() {
         ? `${r.ignoradas} norma(s) ignorada(s) — configuração não mudou.`
         : r.erros.join(" ") || "Nenhuma norma ignorada."
     );
-    setFiltro("pendente");
+    irParaFiltro("pendente");
   }
 
   function baixarNormasCsv() {
@@ -225,14 +244,14 @@ export default function RhNormasPage() {
         <button
           type="button"
           className={filtro === "pendente" ? "btn-primario" : "btn-secundario"}
-          onClick={() => setFiltro("pendente")}
+          onClick={() => irParaFiltro("pendente")}
         >
           Pendentes ({pendentes.length})
         </button>
         <button
           type="button"
           className={filtro === "todas" ? "btn-primario" : "btn-secundario"}
-          onClick={() => setFiltro("todas")}
+          onClick={() => irParaFiltro("todas")}
         >
           Todas
         </button>
@@ -296,16 +315,16 @@ export default function RhNormasPage() {
                 <a
                   href={norma.url_fonte}
                   target="_blank"
-                  rel="noopener noreferrer"
+                  rel="noreferrer"
                   className="inline-flex items-center gap-1 text-sm text-primaria-escura underline"
                 >
-                  Fonte oficial <ExternalLink size={14} />
+                  <ExternalLink size={14} /> Fonte
                 </a>
               )}
               {norma.status === "pendente" && (
-                <div className="flex flex-wrap gap-2 border-t border-stone-200 pt-3">
+                <div className="flex flex-wrap gap-2">
                   <button type="button" className="btn-primario" onClick={() => confirmar(norma.id)}>
-                    Confirmar{norma.parametro ? " e aplicar" : ""}
+                    Confirmar
                   </button>
                   <button type="button" className="btn-secundario" onClick={() => ignorar(norma.id)}>
                     Ignorar
@@ -317,5 +336,20 @@ export default function RhNormasPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function RhNormasPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="Normas RH" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando normas…</p>
+        </div>
+      }
+    >
+      <RhNormasConteudo />
+    </Suspense>
   );
 }

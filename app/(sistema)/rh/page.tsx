@@ -25,7 +25,7 @@ import {
   garantirChecklistDocumentos,
   rotuloCurtoAlertaDocumentos,
 } from "@/lib/domain/documentos-pessoa";
-import { hrefConsumosRh, hrefEscalaRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -473,7 +473,7 @@ function RhPessoasConteudo() {
             cor={resumoOp.consumos_pendentes > 0 ? "laranja" : "verde"}
           />
         </Link>
-        <Link href="/rh/normas" className="block">
+        <Link href={hrefNormasRh("pendente")} className="block">
           <StatCard
             rotulo="Normas a revisar"
             valor={String(resumoOp.normas_pendentes)}

@@ -818,7 +818,7 @@ function RhPontoConteudo() {
               </p>
               <div className="flex flex-wrap gap-2">
                 <Link
-                  href={hrefPerfilRh(pessoaEspelho)}
+                  href={hrefPerfilRh(pessoaEspelho, { aba: "escala" })}
                   className="btn-secundario text-sm"
                 >
                   Ver perfil
@@ -933,7 +933,7 @@ function RhPontoConteudo() {
                       </p>
                       <p className="text-sm text-slate-500">{rotuloTipoFaltaPonto(p.tipo_falta)}</p>
                       <Link
-                        href={hrefPerfilRh(p.pessoa_id)}
+                        href={hrefPerfilRh(p.pessoa_id, { aba: "escala" })}
                         className="mt-1 inline-block text-sm text-primaria-escura underline"
                       >
                         Ver perfil
@@ -1066,7 +1066,7 @@ function RhPontoConteudo() {
               </p>
               <div className="flex flex-wrap gap-2">
                 <Link
-                  href={hrefPerfilRh(pessoaEspelho)}
+                  href={hrefPerfilRh(pessoaEspelho, { aba: "escala" })}
                   className="btn-secundario text-sm"
                 >
                   Ver perfil
@@ -1270,7 +1270,7 @@ function RhPontoConteudo() {
               </p>
               <BadgeStatus status={detalhe.status} />
               <Link
-                href={hrefPerfilRh(detalhe.pessoa_id)}
+                href={hrefPerfilRh(detalhe.pessoa_id, { aba: "escala" })}
                 className="mt-2 inline-block text-sm text-primaria-escura underline"
               >
                 Ver perfil

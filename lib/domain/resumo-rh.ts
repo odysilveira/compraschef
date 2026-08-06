@@ -6,7 +6,7 @@ import {
   listarCltSemPlantaoNaJanela,
 } from "./escala";
 import { normasPendentes } from "./normas-rh";
-import { resumirPendenciasPontoAbertas } from "./ponto-rh";
+import { resumirPendenciasPontoAbertas, type FiltroEspelhoPonto } from "./ponto-rh";
 
 export interface ResumoOperacionalRh {
   pessoas_ativas: number;
@@ -233,9 +233,32 @@ export function parseFiltroPendenciasPontoRh(
   return "abertas";
 }
 
+export function parseFiltroEspelhoPontoRh(
+  valor: string | null | undefined
+): FiltroEspelhoPonto {
+  if (
+    valor === "ok" ||
+    valor === "atraso" ||
+    valor === "incompleto" ||
+    valor === "sem_batida" ||
+    valor === "sem_escala" ||
+    valor === "saldo_positivo" ||
+    valor === "saldo_negativo" ||
+    valor === "saldo_zero"
+  ) {
+    return valor;
+  }
+  return "todos";
+}
+
 export function hrefPontoRh(
   opts?:
-    | { aba?: AbaPontoRh; pessoa?: string; filtro?: FiltroPendenciasPontoRh }
+    | {
+        aba?: AbaPontoRh;
+        pessoa?: string;
+        filtro?: FiltroPendenciasPontoRh;
+        status?: FiltroEspelhoPonto;
+      }
     | AbaPontoRh
 ): string {
   const normalizado =
@@ -243,8 +266,12 @@ export function hrefPontoRh(
       ? { aba: opts }
       : opts;
   const params = new URLSearchParams();
-  if (normalizado.aba === "espelho") params.set("aba", "espelho");
-  else if (normalizado.filtro && normalizado.filtro !== "abertas") {
+  if (normalizado.aba === "espelho") {
+    params.set("aba", "espelho");
+    if (normalizado.status && normalizado.status !== "todos") {
+      params.set("status", normalizado.status);
+    }
+  } else if (normalizado.filtro && normalizado.filtro !== "abertas") {
     params.set("filtro", normalizado.filtro);
   }
   const pessoa = normalizado.pessoa?.trim();

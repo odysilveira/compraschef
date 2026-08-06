@@ -100,6 +100,51 @@ export function liberarPagamentosPrevistos(
   return { sucesso: erros.length === 0, liberados, erros };
 }
 
+/**
+ * Informa vários títulos liberados de uma vez (mesma data/conta).
+ * Valor pago = valor do título. Se `ids` for informado, só esses; senão, todos os liberados.
+ */
+export function informarPagamentosLiberados(
+  db: DB,
+  ids: string[] | undefined,
+  dados: Omit<DadosInformarPagamentoPessoa, "valorPago">,
+  opcoes: OpcoesPagamentoPessoa = {}
+): { sucesso: boolean; informados: number; erros: string[] } {
+  const alvoIds =
+    ids && ids.length > 0
+      ? ids
+      : (db.pagamentos_pessoas ?? []).filter((p) => p.status === "liberado").map((p) => p.id);
+
+  let informados = 0;
+  const erros: string[] = [];
+  for (const id of alvoIds) {
+    const pagamento = db.pagamentos_pessoas.find((p) => p.id === id);
+    if (!pagamento) {
+      erros.push(`${id}: Pagamento não encontrado.`);
+      continue;
+    }
+    if (pagamento.status !== "liberado") {
+      erros.push(`${id}: só títulos liberados entram no lote.`);
+      continue;
+    }
+    const r = informarPagamentoPessoa(
+      db,
+      id,
+      {
+        dataPagamento: dados.dataPagamento,
+        valorPago: pagamento.pagamento_valor ?? pagamento.valor,
+        bancoConta: dados.bancoConta,
+        responsavel: dados.responsavel,
+        observacao: dados.observacao,
+      },
+      opcoes
+    );
+    if (r.sucesso) informados += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+  }
+  return { sucesso: erros.length === 0, informados, erros };
+}
+
 export function informarPagamentoPessoa(
   db: DB,
   pagamentoId: string,

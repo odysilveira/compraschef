@@ -47,7 +47,9 @@ import {
 } from "@/lib/domain/escala";
 import {
   destaqueSlotFiltroConvocacao,
+  filtroPagamentosRhDeStatus,
   hrefEscalaRh,
+  hrefPagamentosRh,
   parseAlertaCltEscalaRh,
   parseFiltroConvocacaoEscalaRh,
   parsePessoaPontoRh,
@@ -300,6 +302,7 @@ function RhEscalaConteudo() {
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
+  const [mensagemHrefPagamentos, setMensagemHrefPagamentos] = useState<string | null>(null);
   const [detalheSlotId, setDetalheSlotId] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
   const [formPadrao, setFormPadrao] = useState<FormPadrao | null>(null);
@@ -666,11 +669,20 @@ function RhEscalaConteudo() {
     }
     mutate((atual) => Object.assign(atual, proximo));
     if (status === "aceita" && r.pagamento) {
+      setMensagemHrefPagamentos(
+        hrefPagamentosRh({
+          filtro: "previsto",
+          pessoa: r.pagamento.pessoa_id,
+          competencia: r.pagamento.competencia || undefined,
+          tipo: r.pagamento.tipo,
+        })
+      );
       setMensagem(
         `Convocação aceita. Pagamento previsto de ${moeda(r.pagamento.valor)} criado — veja em Pagamentos.`
       );
       setErro(null);
     } else {
+      setMensagemHrefPagamentos(null);
       setMensagem(`Resposta registrada: ${rotuloStatusConvocacao(status)}.`);
     }
   }
@@ -922,8 +934,8 @@ function RhEscalaConteudo() {
       {mensagem && (
         <div className="mb-4 rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
           {mensagem}{" "}
-          {mensagem.includes("Pagamentos") && (
-            <Link href="/rh/pagamentos" className="underline">
+          {mensagemHrefPagamentos && mensagem.includes("Pagamentos") && (
+            <Link href={mensagemHrefPagamentos} className="underline">
               Abrir pagamentos
             </Link>
           )}
@@ -939,7 +951,7 @@ function RhEscalaConteudo() {
         <Link href="/rh" className="btn-secundario">
           Pessoas
         </Link>
-        <Link href="/rh/pagamentos" className="btn-secundario">
+        <Link href={hrefPagamentosRh()} className="btn-secundario">
           Pagamentos
         </Link>
         <button
@@ -1912,7 +1924,15 @@ function RhEscalaConteudo() {
                     : ""}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <Link href="/rh/pagamentos" className="btn-secundario">
+                  <Link
+                    href={hrefPagamentosRh({
+                      filtro: filtroPagamentosRhDeStatus(detalhePagamento.status),
+                      pessoa: detalhePagamento.pessoa_id,
+                      competencia: detalhePagamento.competencia || undefined,
+                      tipo: detalhePagamento.tipo,
+                    })}
+                    className="btn-secundario"
+                  >
                     Abrir pagamentos
                   </Link>
                   {(detalhePagamento.status === "aguardando_conciliacao" ||

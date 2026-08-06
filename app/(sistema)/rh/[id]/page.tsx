@@ -44,7 +44,7 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
-import { hrefConsumosRh, hrefEscalaRh, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, filtroPagamentosRhDeStatus, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
@@ -1102,7 +1102,7 @@ function RhPerfilConteudo() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-bold">Pagamentos desta pessoa</h2>
             <Link
-              href={hrefPagamentosRh({ filtro: "todos", pessoa: pessoa.id })}
+              href={hrefPagamentosRh({ pessoa: pessoa.id })}
               className="btn-secundario text-sm"
             >
               Abrir pagamentos
@@ -1127,6 +1127,17 @@ function RhPerfilConteudo() {
                       Venc. {dataBR(pagamento.vencimento)}
                       {pagamento.competencia ? ` · ${pagamento.competencia}` : ""}
                     </p>
+                    <Link
+                      href={hrefPagamentosRh({
+                        filtro: filtroPagamentosRhDeStatus(pagamento.status),
+                        pessoa: pessoa.id,
+                        competencia: pagamento.competencia || undefined,
+                        tipo: pagamento.tipo,
+                      })}
+                      className="mt-1 inline-block text-sm text-primaria-escura underline"
+                    >
+                      Ver na lista
+                    </Link>
                   </div>
                   <Badge
                     cor={

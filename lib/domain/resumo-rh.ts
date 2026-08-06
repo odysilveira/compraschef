@@ -1,4 +1,4 @@
-import type { DB, TipoPagamentoPessoa } from "../types";
+import type { DB, StatusPagamentoPessoa, TipoPagamentoPessoa } from "../types";
 import { alertaDocumentosPessoa, hojeIsoLocal } from "./documentos-pessoa";
 import {
   convocacaoEnviadaSemRespostaVencida,
@@ -123,6 +123,22 @@ export function parseFiltroPagamentosRh(
     return valor;
   }
   return "abertos";
+}
+
+/** Mapeia status do título para o filtro da lista de pagamentos. */
+export function filtroPagamentosRhDeStatus(
+  status: StatusPagamentoPessoa
+): FiltroPagamentosRh {
+  switch (status) {
+    case "previsto":
+      return "previsto";
+    case "liberado":
+      return "liberado";
+    case "aguardando_conciliacao":
+      return "aguardando";
+    case "pago":
+      return "pagos";
+  }
 }
 
 export function hrefPagamentosRh(

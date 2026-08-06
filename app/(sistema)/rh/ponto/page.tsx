@@ -12,7 +12,6 @@ import {
   aprovarPendenciaPonto,
   aprovarPendenciasPonto,
   avisoPontoHorasDoDb,
-  competenciaDeData,
   detectarPendenciasPonto,
   garantirConfigRh,
   importarBatidasPonto,
@@ -44,6 +43,7 @@ import type { FiltroEspelhoPonto, StatusDiaEspelho } from "@/lib/domain/ponto-rh
 import {
   hrefPontoRh,
   parseAbaPontoRh,
+  parseCompetenciaEspelhoPontoRh,
   parseFiltroEspelhoPontoRh,
   parseFiltroPendenciasPontoRh,
   parsePessoaPontoRh,
@@ -89,7 +89,9 @@ function RhPontoConteudo() {
     parseFiltroPendenciasPontoRh(searchParams.get("filtro"))
   );
   const [aba, setAba] = useState<AbaPontoRh>(() => parseAbaPontoRh(searchParams.get("aba")));
-  const [competenciaEspelho, setCompetenciaEspelho] = useState(() => competenciaDeData());
+  const [competenciaEspelho, setCompetenciaEspelho] = useState(() =>
+    parseCompetenciaEspelhoPontoRh(searchParams.get("competencia"))
+  );
   const [pessoaEspelho, setPessoaEspelho] = useState<string>(() =>
     parsePessoaPontoRh(searchParams.get("pessoa"))
   );
@@ -112,6 +114,7 @@ function RhPontoConteudo() {
       setFiltro(parseFiltroPendenciasPontoRh(searchParams.get("filtro")));
     } else {
       setFiltroEspelho(parseFiltroEspelhoPontoRh(searchParams.get("status")));
+      setCompetenciaEspelho(parseCompetenciaEspelhoPontoRh(searchParams.get("competencia")));
     }
     const pessoaUrl = parsePessoaPontoRh(searchParams.get("pessoa"));
     if (!pessoaUrl) {
@@ -126,18 +129,23 @@ function RhPontoConteudo() {
     proxima: AbaPontoRh,
     pessoaId: string = pessoaEspelho,
     proximoFiltro: FiltroPendenciasPontoRh = filtro,
-    proximoStatus: FiltroEspelhoPonto = filtroEspelho
+    proximoStatus: FiltroEspelhoPonto = filtroEspelho,
+    proximaCompetencia: string = competenciaEspelho
   ) {
     setAba(proxima);
     setPessoaEspelho(pessoaId);
     if (proxima === "pendencias") setFiltro(proximoFiltro);
-    if (proxima === "espelho") setFiltroEspelho(proximoStatus);
+    if (proxima === "espelho") {
+      setFiltroEspelho(proximoStatus);
+      setCompetenciaEspelho(proximaCompetencia);
+    }
     router.replace(
       hrefPontoRh({
         aba: proxima,
         pessoa: pessoaId || undefined,
         filtro: proxima === "pendencias" ? proximoFiltro : undefined,
         status: proxima === "espelho" ? proximoStatus : undefined,
+        competencia: proxima === "espelho" ? proximaCompetencia : undefined,
       }),
       { scroll: false }
     );
@@ -157,6 +165,10 @@ function RhPontoConteudo() {
 
   function aoMudarPessoaEspelho(pessoaId: string) {
     irParaPonto("espelho", pessoaId);
+  }
+
+  function aoMudarCompetenciaEspelho(competencia: string) {
+    irParaPonto("espelho", pessoaEspelho, filtro, filtroEspelho, competencia);
   }
 
   function limparPessoaEspelho() {
@@ -1009,7 +1021,7 @@ function RhPontoConteudo() {
                   className="campo"
                   type="month"
                   value={competenciaEspelho}
-                  onChange={(e) => setCompetenciaEspelho(e.target.value)}
+                  onChange={(e) => aoMudarCompetenciaEspelho(e.target.value)}
                 />
               </Campo>
               <Campo rotulo="Pessoa">

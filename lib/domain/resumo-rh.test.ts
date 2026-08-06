@@ -15,6 +15,7 @@ import {
   parseFiltroConvocacaoEscalaRh,
   parseFiltroDocsRh,
   parseFiltroEspelhoPontoRh,
+  parseCompetenciaEspelhoPontoRh,
   parseFiltroNormasRh,
   parseFiltroPagamentosRh,
   parseFiltroPendenciasPontoRh,
@@ -209,6 +210,20 @@ describe("resumo-rh", () => {
     expect(hrefPontoRh({ aba: "espelho", status: "todos", pessoa: "pes-1" })).toBe(
       "/rh/ponto?aba=espelho&pessoa=pes-1"
     );
+    expect(parseCompetenciaEspelhoPontoRh("2026-06")).toBe("2026-06");
+    expect(parseCompetenciaEspelhoPontoRh("2026-13")).toMatch(/^\d{4}-\d{2}$/);
+    expect(parseCompetenciaEspelhoPontoRh(null)).toMatch(/^\d{4}-\d{2}$/);
+    expect(hrefPontoRh({ aba: "espelho", competencia: "2026-01" })).toBe(
+      "/rh/ponto?aba=espelho&competencia=2026-01"
+    );
+    expect(
+      hrefPontoRh({
+        aba: "espelho",
+        competencia: "2026-01",
+        pessoa: "pes-1",
+        status: "atraso",
+      })
+    ).toBe("/rh/ponto?aba=espelho&status=atraso&competencia=2026-01&pessoa=pes-1");
     expect(parseFiltroPendenciasPontoRh("proposta")).toBe("proposta");
     expect(parseFiltroPendenciasPontoRh(null)).toBe("abertas");
     expect(parsePessoaPontoRh(" pes-1 ")).toBe("pes-1");

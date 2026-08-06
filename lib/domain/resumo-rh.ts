@@ -6,7 +6,7 @@ import {
   listarCltSemPlantaoNaJanela,
 } from "./escala";
 import { normasPendentes } from "./normas-rh";
-import { resumirPendenciasPontoAbertas, type FiltroEspelhoPonto } from "./ponto-rh";
+import { resumirPendenciasPontoAbertas, competenciaDeData, type FiltroEspelhoPonto } from "./ponto-rh";
 
 export interface ResumoOperacionalRh {
   pessoas_ativas: number;
@@ -251,6 +251,16 @@ export function parseFiltroEspelhoPontoRh(
   return "todos";
 }
 
+/** YYYY-MM válido; senão competência do mês atual. */
+export function parseCompetenciaEspelhoPontoRh(
+  valor: string | null | undefined,
+  hoje = new Date()
+): string {
+  const v = valor?.trim() ?? "";
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) return v;
+  return competenciaDeData(hoje);
+}
+
 export function hrefPontoRh(
   opts?:
     | {
@@ -258,6 +268,7 @@ export function hrefPontoRh(
         pessoa?: string;
         filtro?: FiltroPendenciasPontoRh;
         status?: FiltroEspelhoPonto;
+        competencia?: string;
       }
     | AbaPontoRh
 ): string {
@@ -270,6 +281,10 @@ export function hrefPontoRh(
     params.set("aba", "espelho");
     if (normalizado.status && normalizado.status !== "todos") {
       params.set("status", normalizado.status);
+    }
+    const competencia = normalizado.competencia?.trim();
+    if (competencia && competencia !== competenciaDeData()) {
+      params.set("competencia", competencia);
     }
   } else if (normalizado.filtro && normalizado.filtro !== "abertas") {
     params.set("filtro", normalizado.filtro);

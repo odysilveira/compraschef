@@ -4,6 +4,7 @@ import { permissoesVazias } from "./rh";
 import {
   hrefConsumosRh,
   hrefEscalaRh,
+  hrefNormasRh,
   hrefPagamentosRh,
   hrefPessoasRh,
   hrefPontoRh,
@@ -13,6 +14,7 @@ import {
   parseFiltroConsumosRh,
   parseFiltroConvocacaoEscalaRh,
   parseFiltroDocsRh,
+  parseFiltroNormasRh,
   parseFiltroPagamentosRh,
   parseFiltroPendenciasPontoRh,
   parsePessoaPontoRh,
@@ -182,6 +184,11 @@ describe("resumo-rh", () => {
       "/rh/consumos?filtro=todos&pessoa=pes-1"
     );
     expect(hrefConsumosRh({ pessoa: "pes-1" })).toBe("/rh/consumos?pessoa=pes-1");
+    expect(parseFiltroNormasRh("todas")).toBe("todas");
+    expect(parseFiltroNormasRh(null)).toBe("pendente");
+    expect(hrefNormasRh()).toBe("/rh/normas");
+    expect(hrefNormasRh("pendente")).toBe("/rh/normas");
+    expect(hrefNormasRh("todas")).toBe("/rh/normas?filtro=todas");
     expect(parseAbaPontoRh("espelho")).toBe("espelho");
     expect(parseAbaPontoRh(null)).toBe("pendencias");
     expect(hrefPontoRh()).toBe("/rh/ponto");

@@ -190,6 +190,21 @@ export function hrefConsumosRh(
   return q ? `/rh/consumos?${q}` : "/rh/consumos";
 }
 
+export type FiltroNormasRh = "pendente" | "todas";
+
+export function parseFiltroNormasRh(valor: string | null | undefined): FiltroNormasRh {
+  if (valor === "todas") return "todas";
+  return "pendente";
+}
+
+/** Deep link do hub / filtros: padrão é pendente (sem query). */
+export function hrefNormasRh(opts?: FiltroNormasRh | { filtro?: FiltroNormasRh }): string {
+  const filtro =
+    typeof opts === "string" || opts === undefined ? opts : opts.filtro;
+  if (filtro === "todas") return "/rh/normas?filtro=todas";
+  return "/rh/normas";
+}
+
 export type AbaPontoRh = "pendencias" | "espelho";
 
 export function parseAbaPontoRh(valor: string | null | undefined): AbaPontoRh {

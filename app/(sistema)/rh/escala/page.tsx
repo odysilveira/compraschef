@@ -848,9 +848,13 @@ function RhEscalaConteudo() {
         ? slots
         : slots.filter((s) => {
             const status = convocacaoDoSlot(db, s.id)?.status;
-            return filtroConvocacao === "rascunho"
-              ? status === "rascunho"
-              : status === "enviada";
+            if (filtroConvocacao === "rascunho") return status === "rascunho";
+            if (filtroConvocacao === "sem_resposta") {
+              return status
+                ? convocacaoEnviadaSemRespostaVencida(status, s.data, hoje)
+                : false;
+            }
+            return status === "enviada";
           });
     if (filtroPessoa) {
       slotsCsv = slotsCsv.filter((s) => s.pessoa_id === filtroPessoa);
@@ -954,12 +958,21 @@ function RhEscalaConteudo() {
             irParaFiltroConvocacao(filtroConvocacao === "enviada" ? "todas" : "enviada")
           }
         >
-          Enviadas ({convocacoesEnviadasNaJanela.length}
-          {convocacoesEnviadasVencidas.length > 0
-            ? ` · ${convocacoesEnviadasVencidas.length} sem resposta`
-            : ""}
-          )
+          Enviadas ({convocacoesEnviadasNaJanela.length})
         </button>
+        {(convocacoesEnviadasVencidas.length > 0 || filtroConvocacao === "sem_resposta") && (
+          <button
+            type="button"
+            className={filtroConvocacao === "sem_resposta" ? "btn-primario" : "btn-secundario"}
+            onClick={() =>
+              irParaFiltroConvocacao(
+                filtroConvocacao === "sem_resposta" ? "todas" : "sem_resposta"
+              )
+            }
+          >
+            Sem resposta ({convocacoesEnviadasVencidas.length})
+          </button>
+        )}
       </div>
 
       {filtroPessoa && (
@@ -1104,15 +1117,21 @@ function RhEscalaConteudo() {
         </Card>
       )}
 
-      {filtroConvocacao === "enviada" && (
+      {(filtroConvocacao === "enviada" || filtroConvocacao === "sem_resposta") && (
         <Card className="mb-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="text-base font-bold">Convocações enviadas (aguardando resposta)</h2>
+              <h2 className="text-base font-bold">
+                {filtroConvocacao === "sem_resposta"
+                  ? `Convocações sem resposta (${convocacoesEnviadasVencidas.length})`
+                  : "Convocações enviadas (aguardando resposta)"}
+              </h2>
               <p className="text-sm text-slate-600">
-                No calendário, plantões enviados ficam em destaque âmbar; os demais ficam atenuados.
-                {convocacoesEnviadasVencidas.length > 0
-                  ? ` ${convocacoesEnviadasVencidas.length} com plantão já passado — registre silêncio para limpar a fila.`
+                {filtroConvocacao === "sem_resposta"
+                  ? "Só plantões enviados cujo dia já passou — registre silêncio para limpar a fila. No calendário, ficam em destaque laranja."
+                  : "No calendário, plantões enviados ficam em destaque âmbar; os demais ficam atenuados."}
+                {filtroConvocacao === "enviada" && convocacoesEnviadasVencidas.length > 0
+                  ? ` ${convocacoesEnviadasVencidas.length} com plantão já passado — use Sem resposta ou registre silêncio.`
                   : ""}
               </p>
             </div>
@@ -1135,11 +1154,23 @@ function RhEscalaConteudo() {
               </button>
             </div>
           </div>
-          {convocacoesEnviadasNaJanela.length === 0 ? (
-            <Vazio mensagem="Nenhuma convocação enviada neste período." />
+          {(filtroConvocacao === "sem_resposta"
+            ? convocacoesEnviadasVencidas
+            : convocacoesEnviadasNaJanela
+          ).length === 0 ? (
+            <Vazio
+              mensagem={
+                filtroConvocacao === "sem_resposta"
+                  ? "Nenhuma convocação sem resposta."
+                  : "Nenhuma convocação enviada neste período."
+              }
+            />
           ) : (
             <ul className="space-y-2">
-              {convocacoesEnviadasNaJanela.map((conv) => {
+              {(filtroConvocacao === "sem_resposta"
+                ? convocacoesEnviadasVencidas
+                : convocacoesEnviadasNaJanela
+              ).map((conv) => {
                 const slot = db.escala_slots.find((s) => s.id === conv.escala_slot_id);
                 const vencida = convocacaoEnviadaSemRespostaVencida(conv.status, slot?.data, hoje);
                 return (
@@ -1311,6 +1342,14 @@ function RhEscalaConteudo() {
                           const diaComEnviada =
                             filtroConvocacao === "enviada" &&
                             lista.some((s) => convocacaoDoSlot(db, s.id)?.status === "enviada");
+                          const diaComSemResposta =
+                            filtroConvocacao === "sem_resposta" &&
+                            lista.some((s) => {
+                              const status = convocacaoDoSlot(db, s.id)?.status;
+                              return status
+                                ? convocacaoEnviadaSemRespostaVencida(status, s.data, hoje)
+                                : false;
+                            });
                           const diaComRascunho =
                             filtroConvocacao === "rascunho" &&
                             lista.some((s) => convocacaoDoSlot(db, s.id)?.status === "rascunho");
@@ -1353,10 +1392,12 @@ function RhEscalaConteudo() {
                               className={`flex min-h-[7.5rem] flex-col rounded-lg border p-1.5 transition-colors ${
                                 ehDestino
                                   ? "border-primaria bg-primaria/10 ring-2 ring-primaria/30"
-                                  : diaComEnviada
-                                    ? "border-amber-400 bg-amber-50/60 ring-1 ring-amber-300/60"
-                                    : diaComRascunho
-                                      ? "border-stone-400 bg-stone-100/80 ring-1 ring-stone-300/70"
+                                  : diaComSemResposta
+                                    ? "border-orange-400 bg-orange-50/70 ring-1 ring-orange-300/70"
+                                    : diaComEnviada
+                                      ? "border-amber-400 bg-amber-50/60 ring-1 ring-amber-300/60"
+                                      : diaComRascunho
+                                        ? "border-stone-400 bg-stone-100/80 ring-1 ring-stone-300/70"
                                       : ehHoje
                                         ? "border-primaria bg-primaria/5"
                                         : lista.length > 0
@@ -1409,7 +1450,12 @@ function RhEscalaConteudo() {
                                     const destaque = destaqueSlotFiltroConvocacao(
                                       filtroConvocacao,
                                       conv?.status,
-                                      { filtroPessoa, pessoaId: slot.pessoa_id }
+                                      {
+                                        filtroPessoa,
+                                        pessoaId: slot.pessoa_id,
+                                        dataSlot: slot.data,
+                                        hoje,
+                                      }
                                     );
                                     return (
                                       <button
@@ -1420,9 +1466,11 @@ function RhEscalaConteudo() {
                                           destaque === "destaque"
                                             ? filtroConvocacao === "rascunho"
                                               ? "bg-stone-300 text-stone-950 ring-1 ring-stone-500 hover:bg-stone-400/90"
-                                              : filtroPessoa
-                                                ? "bg-sky-200 text-sky-950 ring-1 ring-sky-600 hover:bg-sky-300/90"
-                                                : "bg-amber-200 text-amber-950 ring-1 ring-amber-500 hover:bg-amber-300/90"
+                                              : filtroConvocacao === "sem_resposta"
+                                                ? "bg-orange-200 text-orange-950 ring-1 ring-orange-500 hover:bg-orange-300/90"
+                                                : filtroPessoa
+                                                  ? "bg-sky-200 text-sky-950 ring-1 ring-sky-600 hover:bg-sky-300/90"
+                                                  : "bg-amber-200 text-amber-950 ring-1 ring-amber-500 hover:bg-amber-300/90"
                                             : destaque === "atenuado"
                                               ? "bg-stone-100/70 text-slate-400 opacity-45 hover:opacity-70"
                                               : ehClt

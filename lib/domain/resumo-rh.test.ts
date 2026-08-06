@@ -205,10 +205,14 @@ describe("resumo-rh", () => {
     expect(parsePessoaPontoRh(null)).toBe("");
     expect(parseFiltroConvocacaoEscalaRh("enviada")).toBe("enviada");
     expect(parseFiltroConvocacaoEscalaRh("rascunho")).toBe("rascunho");
+    expect(parseFiltroConvocacaoEscalaRh("sem_resposta")).toBe("sem_resposta");
     expect(parseFiltroConvocacaoEscalaRh(null)).toBe("todas");
     expect(hrefEscalaRh()).toBe("/rh/escala");
     expect(hrefEscalaRh({ convocacao: "enviada" })).toBe("/rh/escala?convocacao=enviada");
     expect(hrefEscalaRh({ convocacao: "rascunho" })).toBe("/rh/escala?convocacao=rascunho");
+    expect(hrefEscalaRh({ convocacao: "sem_resposta" })).toBe(
+      "/rh/escala?convocacao=sem_resposta"
+    );
     expect(hrefEscalaRh({ clt: "sem" })).toBe("/rh/escala?clt=sem");
     expect(hrefEscalaRh({ pessoa: "pes-1" })).toBe("/rh/escala?pessoa=pes-1");
     expect(hrefEscalaRh({ convocacao: "enviada", pessoa: "pes-1" })).toBe(
@@ -225,6 +229,24 @@ describe("resumo-rh", () => {
     expect(destaqueSlotFiltroConvocacao("enviada", undefined)).toBe("atenuado");
     expect(destaqueSlotFiltroConvocacao("rascunho", "rascunho")).toBe("destaque");
     expect(destaqueSlotFiltroConvocacao("rascunho", "enviada")).toBe("atenuado");
+    expect(
+      destaqueSlotFiltroConvocacao("sem_resposta", "enviada", {
+        dataSlot: "2026-07-01",
+        hoje: "2026-08-01",
+      })
+    ).toBe("destaque");
+    expect(
+      destaqueSlotFiltroConvocacao("sem_resposta", "enviada", {
+        dataSlot: "2026-08-10",
+        hoje: "2026-08-01",
+      })
+    ).toBe("atenuado");
+    expect(
+      destaqueSlotFiltroConvocacao("sem_resposta", "rascunho", {
+        dataSlot: "2026-07-01",
+        hoje: "2026-08-01",
+      })
+    ).toBe("atenuado");
     expect(
       destaqueSlotFiltroConvocacao("todas", "enviada", {
         filtroPessoa: "pes-1",

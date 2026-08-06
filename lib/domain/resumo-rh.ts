@@ -253,12 +253,12 @@ export function hrefPontoRh(
   return q ? `/rh/ponto?${q}` : "/rh/ponto";
 }
 
-export type FiltroConvocacaoEscalaRh = "todas" | "enviada" | "rascunho";
+export type FiltroConvocacaoEscalaRh = "todas" | "enviada" | "rascunho" | "sem_resposta";
 
 export function parseFiltroConvocacaoEscalaRh(
   valor: string | null | undefined
 ): FiltroConvocacaoEscalaRh {
-  if (valor === "enviada" || valor === "rascunho") return valor;
+  if (valor === "enviada" || valor === "rascunho" || valor === "sem_resposta") return valor;
   return "todas";
 }
 
@@ -268,7 +268,11 @@ export function hrefEscalaRh(opts?: {
   pessoa?: string;
 }): string {
   const params = new URLSearchParams();
-  if (opts?.convocacao === "enviada" || opts?.convocacao === "rascunho") {
+  if (
+    opts?.convocacao === "enviada" ||
+    opts?.convocacao === "rascunho" ||
+    opts?.convocacao === "sem_resposta"
+  ) {
     params.set("convocacao", opts.convocacao);
   }
   if (opts?.clt === "sem") {
@@ -286,18 +290,28 @@ export function parseAlertaCltEscalaRh(valor: string | null | undefined): boolea
 }
 
 /**
- * Com filtro `enviada`/`rascunho` ativo, destaca plantões daquele status e atenua os demais.
+ * Com filtro `enviada`/`rascunho`/`sem_resposta` ativo, destaca plantões daquele status e atenua os demais.
  * Sem filtro, todos ficam `normal`.
  * Com `filtroPessoa`, só os plantões dessa pessoa ficam em destaque (demais atenuados).
+ * Para `sem_resposta`, informe `dataSlot` + `hoje` (plantão enviado com data anterior a hoje).
  */
 export function destaqueSlotFiltroConvocacao(
   filtro: FiltroConvocacaoEscalaRh,
   statusConvocacao: string | undefined,
-  opts?: { filtroPessoa?: string; pessoaId?: string }
+  opts?: { filtroPessoa?: string; pessoaId?: string; dataSlot?: string; hoje?: string }
 ): "destaque" | "atenuado" | "normal" {
   const filtroPessoa = opts?.filtroPessoa?.trim();
+  const hojeRef = opts?.hoje;
+  const ehSemResposta =
+    statusConvocacao === "enviada" &&
+    Boolean(hojeRef) &&
+    convocacaoEnviadaSemRespostaVencida("enviada", opts?.dataSlot, hojeRef!);
+
   if (filtroPessoa) {
     if (opts?.pessoaId !== filtroPessoa) return "atenuado";
+    if (filtro === "sem_resposta") {
+      return ehSemResposta ? "destaque" : "atenuado";
+    }
     if (filtro === "enviada") {
       return statusConvocacao === "enviada" ? "destaque" : "atenuado";
     }
@@ -305,6 +319,9 @@ export function destaqueSlotFiltroConvocacao(
       return statusConvocacao === "rascunho" ? "destaque" : "atenuado";
     }
     return "destaque";
+  }
+  if (filtro === "sem_resposta") {
+    return ehSemResposta ? "destaque" : "atenuado";
   }
   if (filtro === "enviada") {
     return statusConvocacao === "enviada" ? "destaque" : "atenuado";

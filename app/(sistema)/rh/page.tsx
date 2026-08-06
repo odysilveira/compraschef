@@ -488,43 +488,46 @@ function RhPessoasConteudo() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <label className="block min-w-[220px] flex-1">
-          <span className="rotulo mb-1 block">Buscar</span>
-          <input
-            className="input w-full"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Nome, cargo, telefone, login…"
-          />
-        </label>
-        <label className="block w-full sm:w-56">
-          <span className="rotulo mb-1 block">Tipo</span>
-          <select
-            className="input w-full"
-            value={filtroTipo}
-            onChange={(e) => setFiltroTipo(e.target.value as TipoPessoaRH | "todos")}
-          >
-            <option value="todos">Todos</option>
-            {TIPOS_PESSOA_RH.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.rotulo}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block w-full sm:w-56">
-          <span className="rotulo mb-1 block">Documentos</span>
-          <select
-            className="input w-full"
-            value={filtroDocs}
-            onChange={(e) => irParaFiltroDocs(e.target.value as FiltroDocsRh)}
-          >
-            <option value="todos">Todos</option>
-            <option value="alerta">Com alerta ({contagemAlertaDocs})</option>
-            <option value="vencido">Vencidos ({resumoOp.docs_vencido})</option>
-            <option value="a_vencer">A vencer ({resumoOp.docs_a_vencer})</option>
-          </select>
-        </label>
+        <div className="min-w-[220px] flex-1">
+          <Campo rotulo="Buscar">
+            <input
+              className="campo"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Nome, cargo, telefone, login…"
+            />
+          </Campo>
+        </div>
+        <div className="w-full sm:w-56">
+          <Campo rotulo="Tipo">
+            <select
+              className="campo"
+              value={filtroTipo}
+              onChange={(e) => setFiltroTipo(e.target.value as TipoPessoaRH | "todos")}
+            >
+              <option value="todos">Todos</option>
+              {TIPOS_PESSOA_RH.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.rotulo}
+                </option>
+              ))}
+            </select>
+          </Campo>
+        </div>
+        <div className="w-full sm:w-56">
+          <Campo rotulo="Documentos">
+            <select
+              className="campo"
+              value={filtroDocs}
+              onChange={(e) => irParaFiltroDocs(e.target.value as FiltroDocsRh)}
+            >
+              <option value="todos">Todos</option>
+              <option value="alerta">Com alerta ({contagemAlertaDocs})</option>
+              <option value="vencido">Vencidos ({resumoOp.docs_vencido})</option>
+              <option value="a_vencer">A vencer ({resumoOp.docs_a_vencer})</option>
+            </select>
+          </Campo>
+        </div>
       </div>
 
       {lista.length === 0 ? (

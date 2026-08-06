@@ -447,6 +447,16 @@ describe("ponto-rh", () => {
       "3",
     ]);
     expect(filtrarPendenciasPonto(pendencias as never, "todas")).toHaveLength(4);
+    expect(
+      filtrarPendenciasPonto(
+        [
+          ...pendencias,
+          { id: "5", status: "proposta" as const, data: "2026-08-04", pessoa_id: "outra" },
+        ] as never,
+        "proposta",
+        { pessoa_id: "outra" }
+      ).map((p) => p.id)
+    ).toEqual(["5"]);
 
     const resumo = resumirPendenciasPontoAbertas({
       pendencias_ponto: pendencias as never,

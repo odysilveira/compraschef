@@ -156,11 +156,11 @@ function RhPontoConteudo() {
   }
 
   function aoMudarPessoaEspelho(pessoaId: string) {
-    irParaPonto(aba === "pendencias" ? "espelho" : aba, pessoaId);
+    irParaPonto("espelho", pessoaId);
   }
 
   function limparPessoaEspelho() {
-    aoMudarPessoaEspelho("");
+    irParaPonto(aba, "");
   }
 
   const horasAviso = avisoPontoHorasDoDb(db);
@@ -174,8 +174,11 @@ function RhPontoConteudo() {
   const resumoPendencias = useMemo(() => resumirPendenciasPontoAbertas(db), [db]);
   const abertas = useMemo(() => pendenciasPontoAbertas(db), [db]);
   const lista = useMemo(
-    () => filtrarPendenciasPonto(db.pendencias_ponto ?? [], filtro),
-    [db.pendencias_ponto, filtro]
+    () =>
+      filtrarPendenciasPonto(db.pendencias_ponto ?? [], filtro, {
+        pessoa_id: pessoaEspelho || undefined,
+      }),
+    [db.pendencias_ponto, filtro, pessoaEspelho]
   );
 
   const espelho = useMemo(
@@ -796,6 +799,28 @@ function RhPontoConteudo() {
 
       {aba === "pendencias" && (
         <>
+          {pessoaEspelho && (
+            <Card className="mb-3 flex flex-wrap items-center justify-between gap-2 border-sky-200 bg-sky-50/70 p-3">
+              <p className="text-sm text-sky-950">
+                Mostrando pendências de <strong>{nomePessoa(pessoaEspelho)}</strong>.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={hrefPerfilRh(pessoaEspelho)}
+                  className="btn-secundario text-sm"
+                >
+                  Ver perfil
+                </Link>
+                <button
+                  type="button"
+                  className="btn-secundario text-sm"
+                  onClick={limparPessoaEspelho}
+                >
+                  Limpar pessoa
+                </button>
+              </div>
+            </Card>
+          )}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             {(
               [
@@ -868,15 +893,17 @@ function RhPontoConteudo() {
           {lista.length === 0 ? (
             <Vazio
               mensagem={
-                filtro === "todas"
-                  ? "Nenhuma pendência registrada."
-                  : filtro === "proposta"
-                    ? "Nenhuma proposta aguardando confirmação."
-                    : filtro === "aviso"
-                      ? "Nada a avisar agora."
-                      : filtro === "aguardando"
-                        ? "Nenhuma pendência aguardando o funcionário."
-                        : "Nenhuma pendência aberta. Clique em Detectar faltas (há plantão do João sem digital na seed)."
+                pessoaEspelho
+                  ? `Nenhuma pendência de ${nomePessoa(pessoaEspelho)} neste filtro.`
+                  : filtro === "todas"
+                    ? "Nenhuma pendência registrada."
+                    : filtro === "proposta"
+                      ? "Nenhuma proposta aguardando confirmação."
+                      : filtro === "aviso"
+                        ? "Nada a avisar agora."
+                        : filtro === "aguardando"
+                          ? "Nenhuma pendência aguardando o funcionário."
+                          : "Nenhuma pendência aberta. Clique em Detectar faltas (há plantão do João sem digital na seed)."
               }
             />
           ) : (

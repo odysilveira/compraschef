@@ -41,6 +41,7 @@ import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import {
   hrefPagamentosRh,
+  parseCompetenciaPagamentosRh,
   parseFiltroPagamentosRh,
   parsePessoaPontoRh,
   type FiltroPagamentosRh,
@@ -115,7 +116,9 @@ function RhPagamentosConteudo() {
     return pessoa || "todos";
   });
   const [filtroTipo, setFiltroTipo] = useState<TipoPagamentoPessoa | "todos">("todos");
-  const [filtroCompetencia, setFiltroCompetencia] = useState<string>("");
+  const [filtroCompetencia, setFiltroCompetencia] = useState<string>(() =>
+    parseCompetenciaPagamentosRh(searchParams.get("competencia"))
+  );
   const [formNovo, setFormNovo] = useState<FormNovo | null>(null);
   const [erroNovo, setErroNovo] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
@@ -147,6 +150,7 @@ function RhPagamentosConteudo() {
 
   useEffect(() => {
     setFiltro(parseFiltroPagamentosRh(searchParams.get("filtro")));
+    setFiltroCompetencia(parseCompetenciaPagamentosRh(searchParams.get("competencia")));
     const pessoaUrl = parsePessoaPontoRh(searchParams.get("pessoa"));
     if (!pessoaUrl) {
       setFiltroPessoa("todos");
@@ -156,13 +160,19 @@ function RhPagamentosConteudo() {
     setFiltroPessoa(existe ? pessoaUrl : "todos");
   }, [db.pessoas, searchParams]);
 
-  function irParaFiltros(proximoFiltro: FiltroPagamentosRh, proximaPessoa: string = filtroPessoa) {
+  function irParaFiltros(
+    proximoFiltro: FiltroPagamentosRh,
+    proximaPessoa: string = filtroPessoa,
+    proximaCompetencia: string = filtroCompetencia
+  ) {
     setFiltro(proximoFiltro);
     setFiltroPessoa(proximaPessoa);
+    setFiltroCompetencia(proximaCompetencia);
     router.replace(
       hrefPagamentosRh({
         filtro: proximoFiltro,
         pessoa: proximaPessoa !== "todos" ? proximaPessoa : undefined,
+        competencia: proximaCompetencia.trim() || undefined,
       }),
       { scroll: false }
     );
@@ -174,6 +184,10 @@ function RhPagamentosConteudo() {
 
   function aoMudarFiltroPessoa(proximaPessoa: string) {
     irParaFiltros(filtro, proximaPessoa);
+  }
+
+  function aoMudarFiltroCompetencia(proximaCompetencia: string) {
+    irParaFiltros(filtro, filtroPessoa, proximaCompetencia);
   }
   const pessoasAtivas = useMemo(
     () => (db.pessoas ?? []).filter((p) => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
@@ -495,9 +509,8 @@ function RhPagamentosConteudo() {
       return;
     }
     mutate((atual) => Object.assign(atual, proximo));
-    setFiltroCompetencia(competencia);
     setFiltroTipo("salario");
-    setFiltro("abertos");
+    irParaFiltros("abertos", filtroPessoa, competencia);
     const avisos = r.avisos.length ? ` ${r.avisos.join(" ")}` : "";
     setMensagem(
       `Folha ${competencia}: ${r.criados} salário(s) criado(s)${
@@ -719,7 +732,7 @@ function RhPagamentosConteudo() {
           <input
             className="campo"
             value={filtroCompetencia}
-            onChange={(e) => setFiltroCompetencia(e.target.value)}
+            onChange={(e) => aoMudarFiltroCompetencia(e.target.value)}
             placeholder={competenciaAtual()}
           />
         </Campo>

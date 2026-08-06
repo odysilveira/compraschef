@@ -15,6 +15,7 @@ import {
   listarCltSemPlantaoNaJanela,
   listarConvocacoesRascunhoNaJanela,
   marcarConvocacaoEnviada,
+  marcarConvocacoesEnviadas,
   montarGradeCalendario,
   montarTextoConvocacaoWhatsApp,
   moverSlotParaData,
@@ -678,6 +679,57 @@ describe("escala domain", () => {
     expect(r.atualizadas).toBe(1);
     expect(db.convocacoes.find((c) => c.id === "conv-venc")?.status).toBe("silencio");
     expect(db.convocacoes.find((c) => c.id === "conv-fut")?.status).toBe("enviada");
+  });
+
+  it("marca convocações rascunho como enviadas em lote", () => {
+    const db = dbBase();
+    const a = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-05",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-r1", convocacaoId: "conv-r1", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    const b = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-06",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-r2", convocacaoId: "conv-r2", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    const c = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-07",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-r3", convocacaoId: "conv-r3", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    expect(a.sucesso && b.sucesso && c.sucesso).toBe(true);
+    marcarConvocacaoEnviada(db, "conv-r3", "2026-08-01T13:00:00.000Z");
+
+    const r = marcarConvocacoesEnviadas(db, ["conv-r1", "conv-r2", "conv-r3"], "2026-08-02T10:00:00.000Z");
+    expect(r.enviadas).toBe(2);
+    expect(r.sucesso).toBe(false);
+    expect(r.erros.some((e) => e.includes("conv-r3"))).toBe(true);
+    expect(db.convocacoes.find((x) => x.id === "conv-r1")?.status).toBe("enviada");
+    expect(db.convocacoes.find((x) => x.id === "conv-r2")?.status).toBe("enviada");
+    expect(db.convocacoes.find((x) => x.id === "conv-r3")?.status).toBe("enviada");
+
+    const todas = marcarConvocacoesEnviadas(db, undefined, "2026-08-02T11:00:00.000Z");
+    expect(todas.enviadas).toBe(0);
+    expect(todas.sucesso).toBe(true);
   });
 
   it("lista CLT ativos sem plantão na janela", () => {

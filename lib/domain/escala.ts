@@ -702,6 +702,43 @@ export function marcarConvocacaoEnviada(db: DB, convocacaoId: string, agora = ne
   return { sucesso: true, convocacao, erros: [], avisos: [] };
 }
 
+/**
+ * Marca várias convocações em rascunho como enviadas (ex.: após mandar os WhatsApps fora do app).
+ * Se `ids` for informado, só esses; senão, todos os rascunhos do banco.
+ */
+export function marcarConvocacoesEnviadas(
+  db: DB,
+  ids?: string[],
+  agora = new Date().toISOString()
+): { sucesso: boolean; enviadas: number; erros: string[]; avisos: string[] } {
+  const alvo =
+    ids && ids.length > 0
+      ? ids
+      : (db.convocacoes ?? []).filter((c) => c.status === "rascunho").map((c) => c.id);
+
+  const erros: string[] = [];
+  const avisos: string[] = [];
+  let enviadas = 0;
+
+  for (const id of alvo) {
+    const atual = db.convocacoes.find((c) => c.id === id);
+    if (!atual) {
+      erros.push(`${id}: convocação não encontrada.`);
+      continue;
+    }
+    if (atual.status !== "rascunho") {
+      erros.push(`${id}: só rascunhos entram no lote.`);
+      continue;
+    }
+    const r = marcarConvocacaoEnviada(db, id, agora);
+    if (r.sucesso) enviadas += 1;
+    else erros.push(...r.erros.map((e) => `${id}: ${e}`));
+    if (r.avisos.length) avisos.push(...r.avisos);
+  }
+
+  return { sucesso: erros.length === 0, enviadas, erros, avisos };
+}
+
 /** Convocação enviada cujo plantão já passou — ainda aguarda triagem (aceite/recusa/silêncio). */
 export function convocacaoEnviadaSemRespostaVencida(
   status: StatusConvocacao,

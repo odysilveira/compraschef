@@ -22,6 +22,7 @@ import {
   listarCltSemPlantaoNaJanela,
   listarConvocacoesRascunhoNaJanela,
   marcarConvocacaoEnviada,
+  marcarConvocacoesEnviadas,
   montarGradeCalendario,
   moverSlotParaData,
   nomeDiaSemana,
@@ -706,6 +707,25 @@ function RhEscalaConteudo() {
     if (r.avisos.length) setAviso(r.avisos.join(" "));
   }
 
+  function marcarTodasRascunhoEnviadas() {
+    const ids = convocacoesRascunhoNaJanela.map((c) => c.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhuma convocação em rascunho neste período.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = marcarConvocacoesEnviadas(proximo, ids);
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(r.erros.length ? r.erros.join(" ") : null);
+    setMensagemHrefPagamentos(null);
+    setMensagem(
+      r.enviadas === 0
+        ? "Nenhuma convocação marcada como enviada."
+        : `${r.enviadas} convocação(ões) marcada(s) como enviada(s).`
+    );
+    if (r.avisos.length) setAviso(r.avisos.join(" "));
+  }
+
   function soltarPlantaoNoDia(slotId: string, novaData: string) {
     const proximo = structuredClone(db);
     const r = moverSlotParaData(proximo, slotId, novaData);
@@ -1081,13 +1101,25 @@ function RhEscalaConteudo() {
                 esses plantões ficam em destaque.
               </p>
             </div>
-            <button
-              type="button"
-              className="btn-secundario text-sm"
-              onClick={() => irParaFiltroConvocacao("todas")}
-            >
-              Limpar filtro
-            </button>
+            <div className="flex flex-wrap gap-2">
+              {convocacoesRascunhoNaJanela.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-primario text-sm"
+                  onClick={marcarTodasRascunhoEnviadas}
+                  title="Use depois de enviar as mensagens fora do app (ou se já abriu o WhatsApp uma a uma)."
+                >
+                  Marcar todas como enviadas ({convocacoesRascunhoNaJanela.length})
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-secundario text-sm"
+                onClick={() => irParaFiltroConvocacao("todas")}
+              >
+                Limpar filtro
+              </button>
+            </div>
           </div>
           {convocacoesRascunhoNaJanela.length === 0 ? (
             <Vazio mensagem="Nenhuma convocação em rascunho neste período." />

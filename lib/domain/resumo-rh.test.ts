@@ -9,6 +9,7 @@ import {
   hrefPessoasRh,
   hrefPontoRh,
   destaqueSlotFiltroConvocacao,
+  filtroPagamentosRhDeStatus,
   parseAbaPontoRh,
   parseAlertaCltEscalaRh,
   parseFiltroConsumosRh,
@@ -137,6 +138,10 @@ describe("resumo-rh", () => {
     expect(parseFiltroPagamentosRh("previsto")).toBe("previsto");
     expect(parseFiltroPagamentosRh("liberado")).toBe("liberado");
     expect(parseFiltroPagamentosRh("x")).toBe("abertos");
+    expect(filtroPagamentosRhDeStatus("previsto")).toBe("previsto");
+    expect(filtroPagamentosRhDeStatus("liberado")).toBe("liberado");
+    expect(filtroPagamentosRhDeStatus("aguardando_conciliacao")).toBe("aguardando");
+    expect(filtroPagamentosRhDeStatus("pago")).toBe("pagos");
     expect(hrefPagamentosRh()).toBe("/rh/pagamentos");
     expect(hrefPagamentosRh("aguardando")).toBe("/rh/pagamentos?filtro=aguardando");
     expect(hrefPagamentosRh("previsto")).toBe("/rh/pagamentos?filtro=previsto");

@@ -19,7 +19,9 @@ import {
   verificarAtualizacoesNormas,
 } from "@/lib/domain/normas-rh";
 import {
+  hrefEscalaRh,
   hrefNormasRh,
+  hrefPessoasRh,
   parseFiltroNormasRh,
   type FiltroNormasRh,
 } from "@/lib/domain/resumo-rh";
@@ -205,10 +207,10 @@ function RhNormasConteudo() {
       />
 
       <div className="mb-4 flex flex-wrap gap-2">
-        <Link href="/rh" className="btn-secundario">
+        <Link href={hrefPessoasRh()} className="btn-secundario">
           Pessoas
         </Link>
-        <Link href="/rh/escala" className="btn-secundario">
+        <Link href={hrefEscalaRh()} className="btn-secundario">
           Escala
         </Link>
       </div>
@@ -231,7 +233,12 @@ function RhNormasConteudo() {
 
       {mensagem && (
         <p className="mb-3 rounded-card border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          {mensagem}
+          {mensagem}{" "}
+          {mensagem.includes("dia(s)") && (
+            <Link href={hrefEscalaRh()} className="underline">
+              Abrir escala
+            </Link>
+          )}
         </p>
       )}
       {erro && (

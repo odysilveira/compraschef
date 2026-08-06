@@ -375,7 +375,7 @@ function RhPessoasConteudo() {
           href={hrefEscalaRh({
             convocacao:
               resumoOp.convocacoes_sem_resposta > 0
-                ? "enviada"
+                ? "sem_resposta"
                 : resumoOp.convocacoes_rascunho > 0
                   ? "rascunho"
                   : "enviada",

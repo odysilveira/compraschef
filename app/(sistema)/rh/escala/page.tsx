@@ -58,7 +58,7 @@ import {
   montarTextoConfirmacaoRecebimento,
   montarTextoReciboPagamentoPessoa,
 } from "@/lib/domain/recibo-pagamento-pessoa";
-import { rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
+import { hrefPerfilRh, rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
 import type { ConvocacaoIntermitente, EscalaSlot, PessoaRH, StatusConvocacao } from "@/lib/types";
@@ -1005,6 +1005,12 @@ function RhEscalaConteudo() {
                 <div>
                   <p className="font-medium text-slate-900">{p.nome}</p>
                   <p className="text-sm text-slate-600">{rotuloFuncao(p)}</p>
+                  <Link
+                    href={hrefPerfilRh(p.id)}
+                    className="mt-1 inline-block text-sm text-primaria-escura underline"
+                  >
+                    Ver perfil
+                  </Link>
                 </div>
                 <button
                   type="button"
@@ -1058,6 +1064,12 @@ function RhEscalaConteudo() {
                           ? `${formatDataBrLonga(slot.data)} · ${slot.hora_inicio}–${slot.hora_fim}`
                           : "Plantão"}
                       </p>
+                      <Link
+                        href={hrefPerfilRh(conv.pessoa_id)}
+                        className="mt-1 inline-block text-sm text-primaria-escura underline"
+                      >
+                        Ver perfil
+                      </Link>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {linkWa && (
@@ -1150,6 +1162,12 @@ function RhEscalaConteudo() {
                           : "Plantão"}
                         {vencida ? " · plantão já passou" : ""}
                       </p>
+                      <Link
+                        href={hrefPerfilRh(conv.pessoa_id)}
+                        className="mt-1 inline-block text-sm text-primaria-escura underline"
+                      >
+                        Ver perfil
+                      </Link>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {vencida && (

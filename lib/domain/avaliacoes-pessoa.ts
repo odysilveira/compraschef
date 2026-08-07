@@ -89,6 +89,34 @@ export function formatarMediaAvaliacao(media: number | null): string {
   return media.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
+export type FiltroNotaAvaliacaoPessoa = "todas" | NotaAvaliacaoPessoaRh;
+
+export function parseFiltroNotaAvaliacaoPessoa(
+  valor: string | null | undefined
+): FiltroNotaAvaliacaoPessoa {
+  const n = Number((valor ?? "").trim());
+  if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5) return n;
+  return "todas";
+}
+
+export function filtrarAvaliacoesPorNota(
+  avaliacoes: AvaliacaoPessoaRh[],
+  filtro: FiltroNotaAvaliacaoPessoa
+): AvaliacaoPessoaRh[] {
+  if (filtro === "todas") return avaliacoes;
+  return avaliacoes.filter((a) => a.nota === filtro);
+}
+
+export function contarAvaliacoesPorNota(
+  avaliacoes: AvaliacaoPessoaRh[]
+): Record<NotaAvaliacaoPessoaRh, number> {
+  const contagem: Record<NotaAvaliacaoPessoaRh, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  for (const a of avaliacoes) {
+    contagem[a.nota] += 1;
+  }
+  return contagem;
+}
+
 /**
  * Registra avaliação formal (nota 1–5) por competência.
  * Não altera anotações livres nem pagamentos.

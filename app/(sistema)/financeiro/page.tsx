@@ -32,7 +32,7 @@ import { Badge, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui
 import { calcularValorFinal, criarContaManual, mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
 import { identificarFormatoBoleto, normalizarLinhaBoleto } from "@/lib/domain/boletos";
 import { calcularHashSHA256, receberBoletoContaPagar, validarArquivoDocumentoBoleto } from "@/lib/domain/documentos-boleto";
-import { filtrarContasPagar, resumirContasPagar, type FiltroVencimentoConta } from "@/lib/domain/financeiro";
+import { filtrarContasPagar, resumirContasPagar, exportarContasPagarCsv, type FiltroVencimentoConta } from "@/lib/domain/financeiro";
 import {
   combinarTextosPdfFragmentados,
   identificarCodigoBoletoNoArquivoLocal,
@@ -1116,6 +1116,25 @@ export default function FinanceiroPage() {
     a.click();
     URL.revokeObjectURL(url);
     setMensagemReceberBoleto(`CSV baixado (${boletosAtivos.length} boleto(s)).`);
+  }
+
+  function baixarContasPagarCsv() {
+    if (contasFiltradas.length === 0) {
+      setMensagemReceberBoleto("Nenhuma conta no filtro atual para exportar.");
+      return;
+    }
+    const csv = exportarContasPagarCsv(contasFiltradas, {
+      fornecedorDaConta: (conta) =>
+        conta.fornecedor_id ? nomeFornecedor(db, conta.fornecedor_id) : "Sem fornecedor",
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "financeiro-contas-a-pagar.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagemReceberBoleto(`CSV baixado (${contasFiltradas.length} conta(s)).`);
   }
 
   function atualizarCampoPagamento<K extends keyof FormPagamentoBoletoState>(
@@ -2449,9 +2468,25 @@ export default function FinanceiroPage() {
               <h2>Contas a pagar</h2>
               <p className="text-sm text-slate-600">Mesma área financeira, reunindo contas manuais e originadas de NF-e.</p>
             </div>
-            <button type="button" className="btn-primario" onClick={abrirNovaConta}>
-              <Plus size={18} /> Nova conta
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-secundario"
+                disabled={contasFiltradas.length === 0}
+                onClick={baixarContasPagarCsv}
+                title={
+                  contasFiltradas.length === 0
+                    ? "Nada para exportar neste filtro"
+                    : "Exportar contas do filtro atual (CSV)"
+                }
+              >
+                <Download size={16} /> Exportar CSV
+                {contasFiltradas.length > 0 ? ` (${contasFiltradas.length})` : ""}
+              </button>
+              <button type="button" className="btn-primario" onClick={abrirNovaConta}>
+                <Plus size={18} /> Nova conta
+              </button>
+            </div>
           </div>
 
           {mensagemReceberBoleto && (

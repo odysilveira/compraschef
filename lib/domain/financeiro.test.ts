@@ -6,6 +6,7 @@ import {
   contaEstaAtrasada,
   contaVenceHoje,
   contaVenceNosProximos7Dias,
+  exportarContasPagarCsv,
   filtrarContasPagar,
   ordenarContasPagar,
 } from "./financeiro";
@@ -265,5 +266,43 @@ describe("helpers de contas a pagar na tela", () => {
     );
 
     expect(filtradas.map((conta) => conta.id)).toEqual(["cp-1", "cp-3"]);
+  });
+
+  it("exporta CSV das contas com BOM e valores pt-BR", () => {
+    const csv = exportarContasPagarCsv(
+      [
+        contaBase({
+          id: "cp-b",
+          descricao: 'Conta; com "aspas"',
+          data_vencimento: "2026-07-25",
+          valor_final: 1500.5,
+          valor_original: 1500.5,
+          status: "aguardando_boleto",
+          criado_em: "2026-07-20T12:00:00.000Z",
+        }),
+        contaBase({
+          id: "cp-a",
+          fornecedor_id: "forn-b",
+          descricao: "Aluguel",
+          data_vencimento: "2026-07-20",
+          valor_final: 100,
+          valor_original: 100,
+          status: "boleto_recebido",
+          criado_em: "2026-07-10T12:00:00.000Z",
+        }),
+      ],
+      {
+        fornecedorDaConta: (c) => (c.fornecedor_id === "forn-b" ? "Beta Ltda" : "Alfa SA"),
+      }
+    );
+
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Fornecedor;Descrição;Origem;Documento;Categoria");
+    expect(csv).toContain("Beta Ltda");
+    expect(csv).toContain("Aluguel");
+    expect(csv).toContain("Boleto recebido");
+    expect(csv).toContain("1500,50");
+    expect(csv).toContain('"Conta; com ""aspas"""');
+    expect(csv.indexOf("Beta Ltda")).toBeLessThan(csv.indexOf("Alfa SA"));
   });
 });

@@ -131,3 +131,96 @@ export function filtrarContasPagar(contas: ContaPagar[], filtros: FiltrosContaPa
 
   return ordenarContasPagar(filtradas, hoje);
 }
+
+function csvEscape(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+function formatarValorCsv(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  return n.toFixed(2).replace(".", ",");
+}
+
+export function rotuloStatusContaPagar(status: StatusContaPagar): string {
+  switch (status) {
+    case "aguardando_boleto":
+      return "Aguardando boleto";
+    case "boleto_recebido":
+      return "Boleto recebido";
+    case "em_conferencia":
+      return "Em conferência";
+    case "compativel":
+      return "Compatível";
+    case "divergente":
+      return "Divergente";
+    case "bloqueado":
+      return "Bloqueado";
+    case "aguardando_conciliacao":
+      return "Aguardando conciliação";
+    case "conciliado":
+      return "Conciliado";
+    case "cancelado":
+      return "Cancelado";
+  }
+}
+
+function rotuloOrigemContaPagar(origem: ContaPagar["origem"]): string {
+  switch (origem) {
+    case "nfe":
+      return "NF-e";
+    case "manual":
+      return "Manual";
+    case "recorrente":
+      return "Recorrente";
+  }
+}
+
+/**
+ * CSV das contas a pagar filtradas (separador `;`, UTF-8 com BOM) para Excel/pt-BR.
+ */
+export function exportarContasPagarCsv(
+  contas: ContaPagar[],
+  contexto: {
+    fornecedorDaConta: (conta: ContaPagar) => string;
+  }
+): string {
+  const cabecalho = [
+    "Fornecedor",
+    "Descrição",
+    "Origem",
+    "Documento",
+    "Categoria",
+    "Centro de custo",
+    "Emissão",
+    "Vencimento",
+    "Valor original",
+    "Juros",
+    "Desconto",
+    "Valor final",
+    "Status",
+    "Observações",
+  ];
+  const ordenadas = ordenarContasPagar(contas);
+  const linhas = ordenadas.map((conta) =>
+    [
+      contexto.fornecedorDaConta(conta),
+      conta.descricao,
+      rotuloOrigemContaPagar(conta.origem),
+      conta.documento_id ?? "",
+      conta.categoria,
+      conta.centro_custo ?? "",
+      somenteData(conta.data_emissao),
+      somenteData(conta.data_vencimento),
+      formatarValorCsv(conta.valor_original),
+      formatarValorCsv(conta.juros),
+      formatarValorCsv(conta.desconto),
+      formatarValorCsv(conta.valor_final),
+      rotuloStatusContaPagar(conta.status),
+      conta.observacoes ?? "",
+    ]
+      .map((c) => csvEscape(String(c)))
+      .join(";")
+  );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}

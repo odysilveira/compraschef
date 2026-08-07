@@ -24,6 +24,7 @@ import {
   marcarConvocacaoEnviada,
   marcarConvocacoesEnviadas,
   montarGradeCalendario,
+  montarTextosWhatsAppConvocacoesLote,
   moverSlotParaData,
   nomeDiaSemana,
   nomeMesAno,
@@ -550,6 +551,29 @@ function RhEscalaConteudo() {
       }
     } catch {
       setErro("Não foi possível copiar. Selecione o texto manualmente.");
+    }
+  }
+
+  async function copiarWhatsAppsRascunhoDoLote() {
+    const texto = montarTextosWhatsAppConvocacoesLote(convocacoesRascunhoNaJanela, {
+      nomePorId: nomePessoa,
+      telefonePorId: (id) => db.pessoas.find((p) => p.id === id)?.telefone,
+    });
+    if (!texto) {
+      setMensagem("Nenhum texto de WhatsApp para copiar neste período.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+      setMensagemHrefPagamentos(null);
+      setMensagem(
+        `${convocacoesRascunhoNaJanela.length} texto(s) copiado(s). Cole no WhatsApp privado de cada pessoa e depois marque como enviadas.`
+      );
+      setErro(null);
+    } catch {
+      setErro("Não foi possível copiar o lote. Use Copiar em cada convocação.");
     }
   }
 
@@ -1130,14 +1154,24 @@ function RhEscalaConteudo() {
             </div>
             <div className="flex flex-wrap gap-2">
               {convocacoesRascunhoNaJanela.length > 0 && (
-                <button
-                  type="button"
-                  className="btn-primario text-sm"
-                  onClick={marcarTodasRascunhoEnviadas}
-                  title="Use depois de enviar as mensagens fora do app (ou se já abriu o WhatsApp uma a uma)."
-                >
-                  Marcar todas como enviadas ({convocacoesRascunhoNaJanela.length})
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn-secundario text-sm"
+                    onClick={() => void copiarWhatsAppsRascunhoDoLote()}
+                    title="Copia todos os textos com cabeçalho por pessoa. Não marca como enviada."
+                  >
+                    <Copy size={14} /> Copiar WhatsApps ({convocacoesRascunhoNaJanela.length})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primario text-sm"
+                    onClick={marcarTodasRascunhoEnviadas}
+                    title="Use depois de enviar as mensagens fora do app (ou se já abriu o WhatsApp uma a uma)."
+                  >
+                    Marcar todas como enviadas ({convocacoesRascunhoNaJanela.length})
+                  </button>
+                </>
               )}
               <button
                 type="button"

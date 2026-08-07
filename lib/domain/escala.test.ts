@@ -18,6 +18,7 @@ import {
   marcarConvocacoesEnviadas,
   montarGradeCalendario,
   montarTextoConvocacaoWhatsApp,
+  montarTextosWhatsAppConvocacoesLote,
   moverSlotParaData,
   exportarEscalaCsv,
   registrarRespostaConvocacao,
@@ -841,6 +842,57 @@ describe("escala domain", () => {
     const lista = listarConvocacoesRascunhoNaJanela(db, ["2026-08-10", "2026-08-11"]);
     expect(lista.map((c) => c.id)).toEqual(["conv-rasc"]);
     expect(listarConvocacoesRascunhoNaJanela(db, ["2026-08-20"])).toHaveLength(0);
+  });
+
+  it("monta textos de WhatsApp do lote com cabeçalho por pessoa", () => {
+    expect(
+      montarTextosWhatsAppConvocacoesLote([], {
+        nomePorId: () => "X",
+      })
+    ).toBe("");
+
+    const texto = montarTextosWhatsAppConvocacoesLote(
+      [
+        {
+          id: "c1",
+          escala_slot_id: "s1",
+          pessoa_id: "p1",
+          status: "rascunho",
+          texto_mensagem: "Oi Ana, plantão amanhã.",
+          criado_em: "2026-08-01T12:00:00.000Z",
+          atualizado_em: "2026-08-01T12:00:00.000Z",
+        },
+        {
+          id: "c2",
+          escala_slot_id: "s2",
+          pessoa_id: "p2",
+          status: "rascunho",
+          texto_mensagem: "  ",
+          criado_em: "2026-08-01T12:00:00.000Z",
+          atualizado_em: "2026-08-01T12:00:00.000Z",
+        },
+        {
+          id: "c3",
+          escala_slot_id: "s3",
+          pessoa_id: "p3",
+          status: "rascunho",
+          texto_mensagem: "Oi Bia, plantão sexta.",
+          criado_em: "2026-08-01T12:00:00.000Z",
+          atualizado_em: "2026-08-01T12:00:00.000Z",
+        },
+      ],
+      {
+        nomePorId: (id) => (id === "p1" ? "Ana" : id === "p3" ? "Bia" : "X"),
+        telefonePorId: (id) => (id === "p1" ? "43999990001" : undefined),
+      }
+    );
+
+    expect(texto).toContain("—— Ana · 43999990001 ——");
+    expect(texto).toContain("Oi Ana, plantão amanhã.");
+    expect(texto).toContain("—— Bia ——");
+    expect(texto).toContain("Oi Bia, plantão sexta.");
+    expect(texto).toContain("==========");
+    expect(texto).not.toContain("p2");
   });
 
   it("exporta CSV da escala com BOM e status de convocação", () => {

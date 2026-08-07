@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  chavePixDaPessoa,
   montarTextoConfirmacaoRecebimento,
+  montarTextoPixPagamento,
   montarTextoReciboPagamentoPessoa,
+  montarTextosPixPagamentosLote,
   montarTextosWhatsAppRecibosPagamentoLote,
 } from "./recibo-pagamento-pessoa";
 import type { PagamentoPessoa, PessoaRH } from "../types";
@@ -151,5 +154,46 @@ describe("recibo-pagamento-pessoa", () => {
     );
     expect(confirmacoes).toContain("Confirmo o recebimento");
     expect(confirmacoes).toContain("—— Carlos Extra · 43999990001 ——");
+  });
+
+  it("monta textos PIX (individual e lote) e omite sem chave", () => {
+    expect(chavePixDaPessoa(pessoa())).toBe("carlos.extra@pix");
+    expect(chavePixDaPessoa(pessoa({ chave_pix: "  " }))).toBeUndefined();
+
+    const texto = montarTextoPixPagamento({
+      pessoa: pessoa(),
+      pagamento: pagamento({ valor: 150, pagamento_valor: 150, tipo: "intermitente_periodo" }),
+    });
+    expect(texto).toContain("Carlos Extra");
+    expect(texto).toContain("carlos.extra@pix");
+    expect(texto).toContain("150");
+
+    expect(
+      montarTextoPixPagamento({
+        pessoa: pessoa({ chave_pix: undefined }),
+        pagamento: pagamento(),
+      })
+    ).toBeUndefined();
+
+    expect(
+      montarTextosPixPagamentosLote([], {
+        pessoaPorId: () => undefined,
+      })
+    ).toBe("");
+
+    const carlos = pessoa();
+    const bia = pessoa({ id: "pes-2", nome: "Bia Extra", chave_pix: undefined });
+    const lote = montarTextosPixPagamentosLote(
+      [
+        pagamento({ id: "pag-1", pessoa_id: "pes-1", valor: 100 }),
+        pagamento({ id: "pag-2", pessoa_id: "pes-2", valor: 80 }),
+      ],
+      {
+        pessoaPorId: (id) => (id === "pes-1" ? carlos : id === "pes-2" ? bia : undefined),
+      }
+    );
+    expect(lote).toContain("Carlos Extra");
+    expect(lote).toContain("carlos.extra@pix");
+    expect(lote).not.toContain("Bia Extra");
   });
 });

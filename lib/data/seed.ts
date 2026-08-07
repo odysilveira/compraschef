@@ -333,6 +333,8 @@ export const seedDB: DB = {
     { id: "bi-2", balanco_id: "bal-1", caixa_id: "cx-12", qtd_esperada: 7, qtd_encontrada: 6 },
   ],
 
+  eventos_box_operacional: [],
+
   precos_historico: [
     // Muçarela — série p/ gráfico e detecção de preço fora do padrão
     { id: "ph-1", produto_id: "prod-mucarela", fornecedor_id: "forn-laticinios", preco: 36.8, origem: "nota", data: soData(diasAtras(56)) },

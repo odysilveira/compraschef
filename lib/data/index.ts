@@ -16,7 +16,7 @@ import { recuperarVinculosLegadosBoletos } from "../domain/recuperacao-boleto-le
 
 const STORAGE_KEY = "compraschef-db-v1";
 
-let current: DB = seedDB;
+let current: DB = structuredClone(seedDB);
 let loaded = false;
 const listeners = new Set<() => void>();
 
@@ -241,6 +241,30 @@ export function atualizarComNovidades(db: DB): boolean {
     db.boleto_pagamentos_historico = [];
     mudou = true;
   }
+  if (!Array.isArray(db.movimentos_estoque)) {
+    db.movimentos_estoque = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.balancos)) {
+    db.balancos = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.balanco_itens)) {
+    db.balanco_itens = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.eventos_box_operacional)) {
+    db.eventos_box_operacional = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.precos_historico)) {
+    db.precos_historico = [];
+    mudou = true;
+  }
+  if (!Array.isArray(db.integracao_eventos)) {
+    db.integracao_eventos = [];
+    mudou = true;
+  }
   for (const boleto of db.boletos) {
     if (boleto.documento_boleto_id) {
       continue;
@@ -372,12 +396,12 @@ function ensureLoaded() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const carregado = JSON.parse(raw) as DB;
-      if (atualizarComNovidades(carregado)) {
-        current = carregado;
+      const carregado = carregarBancoPersistido(raw);
+      if (carregado.migrado) {
+        current = carregado.db;
         persist();
       } else {
-        current = carregado;
+        current = carregado.db;
       }
       emit();
     }
@@ -392,11 +416,32 @@ export function subscribe(cb: () => void): () => void {
 }
 
 export function getDB(): DB {
+  ensureLoaded();
+  return current;
+}
+
+export function carregarBancoPersistido(raw: string): { db: DB; migrado: boolean } {
+  const db = JSON.parse(raw) as DB;
+  const migrado = atualizarComNovidades(db);
+  return { db, migrado };
+}
+
+export function sincronizarDBLocalSalvo(): DB {
+  if (typeof window === "undefined") return current;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return current;
+    current = carregarBancoPersistido(raw).db;
+    emit();
+  } catch {
+    return current;
+  }
   return current;
 }
 
 /** Substitui o banco por completo em uma única gravação (persist + notificação). */
 export function substituirDB(next: DB): DB {
+  ensureLoaded();
   current = next;
   persist();
   emit();
@@ -405,6 +450,7 @@ export function substituirDB(next: DB): DB {
 
 /** Aplica uma mutação ao banco (clona, altera, persiste e notifica). */
 export function mutate(fn: (db: DB) => void): DB {
+  ensureLoaded();
   const next = structuredClone(current);
   fn(next);
   current = next;
@@ -484,7 +530,10 @@ export function uid(prefixo: string): string {
 export function useDB(): DB {
   const db = useSyncExternalStore(
     subscribe,
-    () => current,
+    () => {
+      ensureLoaded();
+      return current;
+    },
     () => seedDB
   );
   useEffect(() => {
@@ -511,7 +560,13 @@ export function produtosAbaixoDoMinimo(db: DB): { produto: Produto; estoque: num
 /** Caixa que deve ser usada primeiro: menor validade (FEFO), depois preparo/entrada mais antigo (FIFO). */
 export function caixaFifo(db: DB, produtoId: string): Caixa | undefined {
   return db.caixas
-    .filter((c) => c.produto_id === produtoId && c.status !== "vazia" && (c.quantidade ?? 0) > 0)
+    .filter(
+      (c) =>
+        c.produto_id === produtoId &&
+        c.status !== "vazia" &&
+        (c.quantidade ?? 0) > 0 &&
+        c.tipo_box !== "QUARENTENA"
+    )
     .sort(compararPrioridadeConsumo)[0];
 }
 

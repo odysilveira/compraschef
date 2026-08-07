@@ -3,6 +3,7 @@ import { atualizarComNovidades } from "../data/index";
 import type { DB } from "../types";
 import {
   aplicarMetadadosBox,
+  ativarDestinacaoOperacional,
   avisoIncompatibilidadeBox,
   boxEstaAptoParaFluxoOperacionalFuturo,
   boxEstaClassificado,
@@ -74,6 +75,7 @@ function bancoLegado(): DB {
     movimentos_estoque: [],
     balancos: [],
     balanco_itens: [],
+    eventos_box_operacional: [],
     precos_historico: [],
     integracao_eventos: [],
   } as DB;
@@ -219,4 +221,49 @@ describe("estoque boxes fase 1", () => {
     expect(SUPORTA_TRANSFERENCIAS_ENTRE_BOXES).toBe(false);
   });
 
-});
+
+  it("permite atualizar local_id como metadado fisico sem alterar saldo, lote, numero ou QR", () => {
+    const db = bancoLegado();
+    atualizarComNovidades(db);
+    const loteAntes = structuredClone(db.lotes_estoque);
+    const alocacoesAntes = structuredClone(db.alocacoes_caixa);
+
+    db.caixas[0] = aplicarMetadadosBox(db.caixas[0], { local_id: "loc-2" });
+
+    expect(db.caixas[0].local_id).toBe("loc-2");
+    expect(db.caixas[0].numero).toBe(1);
+    expect(db.caixas[0].qr_code).toBe("CXCHEF-001");
+    expect(db.lotes_estoque).toEqual(loteAntes);
+    expect(db.alocacoes_caixa).toEqual(alocacoesAntes);
+  });
+
+  it("nova destinacao operacional exige local fisico definido", () => {
+    const db = bancoLegado();
+    atualizarComNovidades(db);
+    db.produtos.push({ id: "prod-2", nome: "File mignon", unidade_uso_id: "un-kg", fator_conversao: 1, estoque_minimo: 0, ativo: true } as DB["produtos"][number]);
+    db.caixas.push({
+      id: "cx-op-vazio",
+      numero: 13,
+      qr_code: "CXCHEF-013",
+      tipo_box: "OPERACIONAL",
+      posicao_fisica: "FRENTE",
+      status: "vazia",
+      quantidade: 0,
+      atualizado_em: "2026-08-06T10:00:00.000Z",
+    });
+
+    expect(() =>
+      ativarDestinacaoOperacional(db, {
+        boxId: "cx-op-vazio",
+        produtoId: "prod-2",
+        usuarioId: "perfil-1",
+      })
+    ).toThrow("Local físico não definido");
+
+    const caixa = db.caixas.find((item) => item.id === "cx-op-vazio")!;
+    caixa.local_id = "loc-1";
+    ativarDestinacaoOperacional(db, { boxId: "cx-op-vazio", produtoId: "prod-2", usuarioId: "perfil-1" });
+    expect(caixa.produto_operacional_alvo_id).toBe("prod-2");
+    expect(caixa.numero).toBe(13);
+    expect(caixa.qr_code).toBe("CXCHEF-013");
+  });});

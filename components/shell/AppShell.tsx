@@ -47,6 +47,7 @@ const MENU: SecaoMenu[] = [
       { href: "/", rotulo: "Painel", icone: LayoutDashboard },
       { href: "/recebimento", rotulo: "Recebimento", icone: PackageCheck },
       { href: "/estoque", rotulo: "Estoque", icone: Boxes },
+      { href: "/estoque/reposicao", rotulo: "Reposição do Box Operacional", icone: Boxes },
     ],
   },
   {

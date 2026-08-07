@@ -135,6 +135,11 @@ export function atualizarComNovidades(db: DB): boolean {
     }
   }
 
+  if (!Array.isArray(db.avaliacoes_pessoas)) {
+    db.avaliacoes_pessoas = [];
+    mudou = true;
+  }
+
   if (!Array.isArray(db.escala_slots)) {
     db.escala_slots = [];
     mudou = true;

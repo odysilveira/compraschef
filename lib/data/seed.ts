@@ -451,6 +451,29 @@ export const seedDB: DB = {
     },
   ],
 
+  avaliacoes_pessoas: [
+    {
+      id: "aval-1",
+      pessoa_id: "pes-gerente",
+      competencia: soData(diasAtras(30)).slice(0, 7),
+      nota: 5,
+      comentario: "Liderança firme no salão e alinhamento com a cozinha.",
+      avaliador: "Ody",
+      criado_em: diasAtras(20),
+      atualizado_em: diasAtras(20),
+    },
+    {
+      id: "aval-2",
+      pessoa_id: "pes-inter-1",
+      competencia: soData(diasAtras(10)).slice(0, 7),
+      nota: 3,
+      comentario: "Entrega ok; pontualidade a melhorar.",
+      avaliador: "Gerente",
+      criado_em: diasAtras(8),
+      atualizado_em: diasAtras(8),
+    },
+  ],
+
   escala_slots: [
     {
       id: "esc-1",

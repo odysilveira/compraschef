@@ -21,7 +21,14 @@ import {
   TIPOS_ANOTACAO_PESSOA,
   type FiltroTipoAnotacaoPessoa,
 } from "@/lib/domain/anotacoes-pessoa";
-import type { TipoAnotacaoPessoaRh } from "@/lib/types";
+import {
+  adicionarAvaliacaoPessoa,
+  corBadgeNotaAvaliacao,
+  listarAvaliacoesPessoa,
+  NOTAS_AVALIACAO_PESSOA,
+  rotuloCompetenciaAvaliacao,
+} from "@/lib/domain/avaliacoes-pessoa";
+import type { NotaAvaliacaoPessoaRh, TipoAnotacaoPessoaRh } from "@/lib/types";
 import {
   validarAdiantamento,
   TETO_ADIANTAMENTO_PCT,
@@ -129,6 +136,10 @@ function RhPerfilConteudo() {
   const [dataAnotacao, setDataAnotacao] = useState(hojeIsoLocal());
   const [erroAnotacao, setErroAnotacao] = useState<string | null>(null);
   const [editandoAnotacaoId, setEditandoAnotacaoId] = useState<string | null>(null);
+  const [competenciaAvaliacao, setCompetenciaAvaliacao] = useState(() => hojeIsoLocal().slice(0, 7));
+  const [notaAvaliacao, setNotaAvaliacao] = useState<NotaAvaliacaoPessoaRh>(3);
+  const [comentarioAvaliacao, setComentarioAvaliacao] = useState("");
+  const [erroAvaliacao, setErroAvaliacao] = useState<string | null>(null);
 
   const pessoa = useMemo(
     () => (db.pessoas ?? []).find((p) => p.id === params.id) ?? null,
@@ -164,6 +175,10 @@ function RhPerfilConteudo() {
   const anotacoesFiltradas = useMemo(
     () => filtrarAnotacoesPorTipo(anotacoesPessoa, filtroTipoAnotacao),
     [anotacoesPessoa, filtroTipoAnotacao]
+  );
+  const avaliacoesPessoa = useMemo(
+    () => (pessoa ? listarAvaliacoesPessoa(db, pessoa.id) : []),
+    [db, pessoa]
   );
   const porDiaPessoa = useMemo(() => {
     const map = new Map<string, typeof plantaoesPessoa>();
@@ -571,6 +586,36 @@ function RhPerfilConteudo() {
     setMensagem("Anotação excluída.");
   }
 
+  function limparFormAvaliacao() {
+    setCompetenciaAvaliacao(hojeIsoLocal().slice(0, 7));
+    setNotaAvaliacao(3);
+    setComentarioAvaliacao("");
+    setErroAvaliacao(null);
+  }
+
+  function salvarAvaliacao(e: FormEvent) {
+    e.preventDefault();
+    if (!pessoa) return;
+    const proximo = structuredClone(db);
+    const r = adicionarAvaliacaoPessoa(proximo, {
+      id: uid("aval"),
+      pessoa_id: pessoa.id,
+      competencia: competenciaAvaliacao,
+      nota: notaAvaliacao,
+      comentario: comentarioAvaliacao,
+      avaliador: "usuário local",
+    });
+    if (!r.sucesso) {
+      setErroAvaliacao(r.erros.join(" "));
+      setMensagem(null);
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    limparFormAvaliacao();
+    setErro(null);
+    setMensagem("Avaliação registrada.");
+  }
+
   function salvarDados(e: FormEvent) {
     e.preventDefault();
     if (!editando.nome.trim()) {
@@ -776,6 +821,7 @@ function RhPerfilConteudo() {
             ["pagamentos", "Pagamentos"],
             ["consumos", "Consumos"],
             ["anotacoes", "Anotações"],
+            ["avaliacoes", "Avaliações"],
           ] as const satisfies ReadonlyArray<readonly [AbaPerfilRh, string]>
         ).map(([id, rotulo]) => (
           <button
@@ -1399,7 +1445,15 @@ function RhPerfilConteudo() {
             >
               Anotações
             </button>{" "}
-            registram o histórico livre; avaliações formais entram depois.
+            registram o histórico livre;{" "}
+            <button
+              type="button"
+              className="font-medium text-primaria-escura underline"
+              onClick={() => irParaAba("avaliacoes")}
+            >
+              Avaliações
+            </button>{" "}
+            guardam a nota formal por competência.
           </p>
         </Card>
       )}
@@ -1753,7 +1807,7 @@ function RhPerfilConteudo() {
               {editandoAnotacaoId ? "Editar anotação" : "Nova anotação"}
             </h2>
             <p className="text-sm text-slate-600">
-              Histórico livre (elogios, avisos, observações). Avaliações formais entram depois.
+              Histórico livre (elogios, avisos, observações). Notas formais ficam em Avaliações.
             </p>
             <form onSubmit={salvarAnotacao} className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1878,6 +1932,87 @@ function RhPerfilConteudo() {
                         </button>
                       </div>
                     </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {aba === "avaliacoes" && (
+        <div className="space-y-4">
+          <Card className="space-y-3">
+            <h2 className="text-base font-bold">Nova avaliação</h2>
+            <p className="text-sm text-slate-600">
+              Nota formal por competência (1 a 5). Anotações livres ficam na aba Anotações.
+            </p>
+            <form onSubmit={salvarAvaliacao} className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Campo rotulo="Competência *">
+                  <input
+                    type="month"
+                    className="campo"
+                    required
+                    value={competenciaAvaliacao}
+                    onChange={(e) => setCompetenciaAvaliacao(e.target.value)}
+                  />
+                </Campo>
+                <Campo rotulo="Nota *">
+                  <select
+                    className="campo"
+                    required
+                    value={notaAvaliacao}
+                    onChange={(e) => setNotaAvaliacao(Number(e.target.value) as NotaAvaliacaoPessoaRh)}
+                  >
+                    {NOTAS_AVALIACAO_PESSOA.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </Campo>
+              </div>
+              <Campo rotulo="Comentário">
+                <textarea
+                  className="campo min-h-24"
+                  value={comentarioAvaliacao}
+                  onChange={(e) => setComentarioAvaliacao(e.target.value)}
+                  placeholder="Pontos fortes, melhorias, contexto do ciclo…"
+                />
+              </Campo>
+              {erroAvaliacao && <p className="text-sm font-medium text-erro">{erroAvaliacao}</p>}
+              <div className="flex justify-end">
+                <button type="submit" className="btn-primario">
+                  Salvar avaliação
+                </button>
+              </div>
+            </form>
+          </Card>
+
+          <Card className="space-y-3">
+            <h2 className="text-base font-bold">Histórico formal</h2>
+            {avaliacoesPessoa.length === 0 ? (
+              <Vazio mensagem="Nenhuma avaliação neste perfil." />
+            ) : (
+              <div className="space-y-2">
+                {avaliacoesPessoa.map((avaliacao) => (
+                  <div
+                    key={avaliacao.id}
+                    className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                  >
+                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                      <Badge cor={corBadgeNotaAvaliacao(avaliacao.nota)}>Nota {avaliacao.nota}</Badge>
+                      <p className="text-xs text-slate-500">
+                        {rotuloCompetenciaAvaliacao(avaliacao.competencia)}
+                        {avaliacao.avaliador ? ` · ${avaliacao.avaliador}` : ""}
+                      </p>
+                    </div>
+                    {avaliacao.comentario ? (
+                      <p className="whitespace-pre-wrap text-sm text-slate-900">{avaliacao.comentario}</p>
+                    ) : (
+                      <p className="text-sm text-slate-500">Sem comentário.</p>
+                    )}
                   </div>
                 ))}
               </div>

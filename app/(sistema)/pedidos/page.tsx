@@ -28,7 +28,9 @@ function PedidosConteudo() {
   const { papel } = usePapel();
   const verValores = podeVerValores(papel);
   const donoAprova = podeAprovar(papel);
-  const [selecionado, setSelecionado] = useState<string | null>(null);
+  const [selecionado, setSelecionado] = useState<string | null>(() =>
+    searchParams.get("pedido")
+  );
   const [avisoMock, setAvisoMock] = useState<string | null>(null);
   const [filtroStatus, setFiltroStatus] = useState<FiltroStatusPedido>(() =>
     parseFiltroStatusPedido(searchParams.get("status"))
@@ -36,7 +38,12 @@ function PedidosConteudo() {
 
   useEffect(() => {
     setFiltroStatus(parseFiltroStatusPedido(searchParams.get("status")));
-  }, [searchParams]);
+    const pedidoUrl = searchParams.get("pedido");
+    if (pedidoUrl && db.pedidos.some((p) => p.id === pedidoUrl)) {
+      setSelecionado(pedidoUrl);
+      setAvisoMock(null);
+    }
+  }, [searchParams, db.pedidos]);
 
   const pedidos = useMemo(
     () => [...db.pedidos].sort((a, b) => b.criado_em.localeCompare(a.criado_em)),
@@ -54,17 +61,17 @@ function PedidosConteudo() {
     router.replace(hrefPedidos({ status: proximo }), { scroll: false });
   }
 
+  function fechar() {
+    setSelecionado(null);
+    setAvisoMock(null);
+    router.replace(hrefPedidos({ status: filtroStatus }), { scroll: false });
+  }
   function atualizarStatus(id: string, status: StatusPedido, extras?: Partial<Pedido>, aviso?: string) {
     mutate((d) => {
       const p = d.pedidos.find((x) => x.id === id);
       if (p) Object.assign(p, { status }, extras ?? {});
     });
     setAvisoMock(aviso ?? null);
-  }
-
-  function fechar() {
-    setSelecionado(null);
-    setAvisoMock(null);
   }
 
   return (
@@ -107,6 +114,7 @@ function PedidosConteudo() {
               onClick={() => {
                 setSelecionado(p.id);
                 setAvisoMock(null);
+                router.replace(hrefPedidos({ status: filtroStatus, pedido: p.id }), { scroll: false });
               }}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">

@@ -3,6 +3,7 @@
 // Painel inicial (requisito 45): alertas clicáveis, entregas previstas
 // e gastos do mês por fornecedor (só dono/gerente).
 
+import Link from "next/link";
 import {
   Banknote,
   CalendarClock,
@@ -164,20 +165,29 @@ export default function PainelPage() {
         ) : (
           <div className="space-y-3">
             {entregas.map((pedido) => (
-              <Card key={pedido.id} className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{nomeFornecedor(db, pedido.fornecedor_id)}</p>
-                  <p className="text-sm text-slate-600">
-                    Pedido de {dataBR(pedido.criado_em)} · {rotuloPrevisao(previsaoEntrega(db, pedido))}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  {financeiro && <span className="text-sm font-semibold">{moeda(pedido.valor_total)}</span>}
-                  <Badge cor={pedido.status === "confirmado" ? "verde" : "azul"}>
-                    {ROTULO_STATUS_PEDIDO[pedido.status]}
-                  </Badge>
-                </div>
-              </Card>
+              <Link
+                key={pedido.id}
+                href={hrefPedidos({
+                  status: pedido.status,
+                  pedido: pedido.id,
+                })}
+                className="block"
+              >
+                <Card className="flex flex-wrap items-center justify-between gap-3 transition-colors hover:border-primaria/40 hover:bg-amber-50/40">
+                  <div>
+                    <p className="font-semibold">{nomeFornecedor(db, pedido.fornecedor_id)}</p>
+                    <p className="text-sm text-slate-600">
+                      Pedido de {dataBR(pedido.criado_em)} · {rotuloPrevisao(previsaoEntrega(db, pedido))}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {financeiro && <span className="text-sm font-semibold">{moeda(pedido.valor_total)}</span>}
+                    <Badge cor={pedido.status === "confirmado" ? "verde" : "azul"}>
+                      {ROTULO_STATUS_PEDIDO[pedido.status]}
+                    </Badge>
+                  </div>
+                </Card>
+              </Link>
             ))}
           </div>
         )}

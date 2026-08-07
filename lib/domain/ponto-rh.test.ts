@@ -9,6 +9,7 @@ import {
   marcarAvisosPontoEnviados,
   montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
+  montarTextosWhatsAppAvisosPontoLote,
   registrarPropostaPonto,
   recusarPendenciasPonto,
   resumirEspelhoPonto,
@@ -170,6 +171,54 @@ describe("ponto-rh", () => {
     for (const id of ids) {
       expect(db.pendencias_ponto!.find((p) => p.id === id)!.status).toBe("aguardando_funcionario");
     }
+  });
+
+  it("monta textos de WhatsApp dos avisos em lote com cabeçalho por pessoa", () => {
+    expect(
+      montarTextosWhatsAppAvisosPontoLote([], {
+        pessoaPorId: () => undefined,
+      })
+    ).toBe("");
+
+    const db = dbBase();
+    db.pessoas[0]!.telefone = "43999990001";
+    detectarPendenciasPonto(db, { agora: "2026-08-03T15:00:00.000Z", idFactory: () => "p-lote" });
+    const pendencia = db.pendencias_ponto!.find((p) => p.id === "p-lote")!;
+    expect(pendencia.status).toBe("aguardando_aviso");
+
+    const texto = montarTextosWhatsAppAvisosPontoLote(
+      [
+        pendencia,
+        {
+          ...pendencia,
+          id: "p-vazio",
+          texto_aviso: "   ",
+          pessoa_id: "pes-x",
+        },
+        {
+          ...pendencia,
+          id: "p-2",
+          pessoa_id: "pes-2",
+          texto_aviso: "Aviso customizado da Bia.",
+        },
+      ],
+      {
+        pessoaPorId: (id) => {
+          if (id === "pes-lider") return db.pessoas[0]!;
+          if (id === "pes-2") return { nome: "Bia Extra", telefone: undefined };
+          return undefined;
+        },
+        horasAviso: 24,
+      }
+    );
+
+    expect(texto).toContain("—— João");
+    expect(texto).toContain("43999990001");
+    expect(texto).toContain("digital no relógio");
+    expect(texto).toContain("—— Bia Extra ——");
+    expect(texto).toContain("Aviso customizado da Bia.");
+    expect(texto).toContain("==========");
+    expect(texto).not.toContain("pes-x");
   });
 
   it("aprova várias propostas de ponto em lote", () => {

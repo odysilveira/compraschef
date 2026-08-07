@@ -247,6 +247,39 @@ export function montarTextoAvisoPontoWhatsApp(input: {
   ].join("\n");
 }
 
+/**
+ * Concatena avisos de WhatsApp das pendências (ex.: fila “A avisar”) com cabeçalho por pessoa.
+ * Não altera status — copiar lote ≠ marcar avisados.
+ */
+export function montarTextosWhatsAppAvisosPontoLote(
+  pendencias: PendenciaPonto[],
+  opts: {
+    pessoaPorId: (pessoaId: string) => Pick<PessoaRH, "nome" | "telefone"> | undefined;
+    horasAviso?: number;
+  }
+): string {
+  const blocos: string[] = [];
+  for (const pendencia of pendencias) {
+    const pessoa = opts.pessoaPorId(pendencia.pessoa_id);
+    const texto = (
+      pendencia.texto_aviso ??
+      (pessoa
+        ? montarTextoAvisoPontoWhatsApp({
+            pessoa,
+            pendencia,
+            horasAviso: opts.horasAviso,
+          })
+        : "")
+    ).trim();
+    if (!texto) continue;
+    const nome = (pessoa?.nome ?? pendencia.pessoa_id).trim() || pendencia.pessoa_id;
+    const telefone = pessoa?.telefone?.trim();
+    const cabecalho = telefone ? `—— ${nome} · ${telefone} ——` : `—— ${nome} ——`;
+    blocos.push(`${cabecalho}\n${texto}`);
+  }
+  return blocos.join("\n\n==========\n\n");
+}
+
 export function linkWhatsAppPonto(telefone: string | undefined, texto: string): string | null {
   const digitos = somenteDigitosTelefone(telefone ?? "");
   if (!digitos) return null;

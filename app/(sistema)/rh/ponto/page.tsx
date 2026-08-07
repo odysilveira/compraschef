@@ -20,6 +20,7 @@ import {
   marcarAvisosPontoEnviados,
   montarEspelhoPonto,
   montarTextoAvisoPontoWhatsApp,
+  montarTextosWhatsAppAvisosPontoLote,
   pendenciasPontoAbertas,
   pendenciaAbertaNoDia,
   filtrarPendenciasPonto,
@@ -495,6 +496,33 @@ function RhPontoConteudo() {
     }
   }
 
+  async function copiarAvisosWhatsAppDoLote() {
+    const alvo = lista.filter((p) => p.status === "aguardando_aviso");
+    if (alvo.length === 0) {
+      setMensagem("Nenhuma pendência a avisar neste filtro.");
+      return;
+    }
+    const texto = montarTextosWhatsAppAvisosPontoLote(alvo, {
+      pessoaPorId: (id) => db.pessoas.find((p) => p.id === id),
+      horasAviso,
+    });
+    if (!texto) {
+      setMensagem("Nenhum texto de WhatsApp para copiar neste filtro.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+      setMensagem(
+        `${alvo.length} texto(s) copiado(s). Cole no WhatsApp de cada um e depois use Marcar avisados.`
+      );
+      setErro(null);
+    } catch {
+      setErro("Não foi possível copiar o lote. Use Copiar aviso em cada pendência.");
+    }
+  }
+
   function abrirWhatsApp(pendencia: PendenciaPonto) {
     const pessoa = db.pessoas.find((p) => p.id === pendencia.pessoa_id);
     const texto = textoAviso(pendencia);
@@ -858,15 +886,26 @@ function RhPontoConteudo() {
             ))}
             {filtro === "aviso" &&
               lista.some((p) => p.status === "aguardando_aviso") && (
-                <button
-                  type="button"
-                  className="btn-primario"
-                  onClick={marcarTodosAvisosDaLista}
-                  title="Marca todos como avisados (depois de enviar os WhatsApps)"
-                >
-                  Marcar avisados (
-                  {lista.filter((p) => p.status === "aguardando_aviso").length})
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={() => void copiarAvisosWhatsAppDoLote()}
+                    title="Copia todos os textos com cabeçalho por pessoa. Não marca como avisado."
+                  >
+                    <Copy size={16} /> Copiar WhatsApps (
+                    {lista.filter((p) => p.status === "aguardando_aviso").length})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primario"
+                    onClick={marcarTodosAvisosDaLista}
+                    title="Marca todos como avisados (depois de enviar os WhatsApps)"
+                  >
+                    Marcar avisados (
+                    {lista.filter((p) => p.status === "aguardando_aviso").length})
+                  </button>
+                </>
               )}
             {filtro === "proposta" &&
               lista.some((p) => p.status === "proposta") && (

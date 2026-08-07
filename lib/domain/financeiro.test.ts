@@ -330,12 +330,16 @@ describe("helpers de contas a pagar na tela", () => {
       "/financeiro?fila=aguardando"
     );
     expect(hrefFinanceiro({ aba: "boletos", fila: "pagos" })).toBe("/financeiro?fila=pagos");
+    expect(hrefFinanceiro({ aba: "boletos", fila: "liberados" })).toBe(
+      "/financeiro?fila=liberados"
+    );
     expect(hrefFinanceiro({ aba: "contas", fila: "aguardando" })).toBe("/financeiro?aba=contas");
 
     expect(parseAbaFinanceiro("contas")).toBe("contas");
     expect(parseAbaFinanceiro("xyz")).toBe("boletos");
     expect(parseFilaAgendaFinanceiro("aguardando")).toBe("aguardando");
     expect(parseFilaAgendaFinanceiro("pagos")).toBe("pagos");
+    expect(parseFilaAgendaFinanceiro("liberados")).toBe("liberados");
     expect(parseFilaAgendaFinanceiro("x")).toBeUndefined();
     expect(parseFiltroVencimentoConta("atrasadas")).toBe("atrasadas");
     expect(parseFiltroVencimentoConta("x")).toBe("todas");

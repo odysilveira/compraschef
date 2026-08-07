@@ -1511,7 +1511,11 @@ function FinanceiroConteudo() {
     const fila = parseFilaAgendaFinanceiro(searchParams.get("fila"));
     if (aba !== "boletos" || !fila) return;
     const id =
-      fila === "aguardando" ? "financeiro-fila-aguardando" : "financeiro-fila-pagos";
+      fila === "aguardando"
+        ? "financeiro-fila-aguardando"
+        : fila === "pagos"
+          ? "financeiro-fila-pagos"
+          : "financeiro-fila-liberados";
     const timer = window.setTimeout(() => {
       document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
@@ -2559,12 +2563,21 @@ function FinanceiroConteudo() {
               </p>
               <p className="text-xl font-bold text-slate-600">{moeda(totais.travado)}</p>
             </Card>
-            <Card className="py-3">
+            <button
+              type="button"
+              className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+                parseFilaAgendaFinanceiro(searchParams.get("fila")) === "liberados"
+                  ? "border-primaria ring-1 ring-primaria"
+                  : "border-slate-200 hover:border-primaria"
+              }`}
+              onClick={() => irParaFinanceiro({ aba: "boletos", fila: "liberados" })}
+              title="Ir para as ações de boletos liberados"
+            >
               <p className="rotulo flex items-center gap-1">
                 <CircleCheck size={13} /> Liberados
               </p>
               <p className="text-xl font-bold text-primaria">{moeda(totais.liberado)}</p>
-            </Card>
+            </button>
             <button
               type="button"
               className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
@@ -2603,26 +2616,28 @@ function FinanceiroConteudo() {
             </Card>
           </div>
 
-          {boletosLiberadosElegiveis.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn-secundario"
-                onClick={() => void copiarLinhasDigitaveisDoLote()}
-                title="Copia todas as linhas digitáveis com cabeçalho por boleto. Não altera status."
-              >
-                <Copy size={16} /> Copiar linhas ({boletosLiberadosElegiveis.length})
-              </button>
-              <button
-                type="button"
-                className="btn-primario"
-                onClick={abrirInformarBoletosLote}
-                title="Informa pagamento de todos os liberados aptos com a mesma data/conta"
-              >
-                Informar pagamentos em lote ({boletosLiberadosElegiveis.length})
-              </button>
-            </div>
-          )}
+          <div id="financeiro-fila-liberados" className="scroll-mt-4 space-y-2">
+            {boletosLiberadosElegiveis.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-secundario"
+                  onClick={() => void copiarLinhasDigitaveisDoLote()}
+                  title="Copia todas as linhas digitáveis com cabeçalho por boleto. Não altera status."
+                >
+                  <Copy size={16} /> Copiar linhas ({boletosLiberadosElegiveis.length})
+                </button>
+                <button
+                  type="button"
+                  className="btn-primario"
+                  onClick={abrirInformarBoletosLote}
+                  title="Informa pagamento de todos os liberados aptos com a mesma data/conta"
+                >
+                  Informar pagamentos em lote ({boletosLiberadosElegiveis.length})
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Agenda financeira */}
           <section className="space-y-4">

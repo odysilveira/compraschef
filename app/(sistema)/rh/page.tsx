@@ -25,6 +25,12 @@ import {
   garantirChecklistDocumentos,
   rotuloCurtoAlertaDocumentos,
 } from "@/lib/domain/documentos-pessoa";
+import {
+  corBadgeMediaAvaliacao,
+  formatarMediaAvaliacao,
+  listarAvaliacoesPessoa,
+  resumirAvaliacoesPessoa,
+} from "@/lib/domain/avaliacoes-pessoa";
 import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
@@ -536,6 +542,7 @@ function RhPessoasConteudo() {
         <div className="grid gap-3">
           {lista.map((pessoa) => {
             const alertaDocs = alertaDocumentosPessoa(pessoa);
+            const resumoAvaliacoes = resumirAvaliacoesPessoa(listarAvaliacoesPessoa(db, pessoa.id));
             return (
             <Link
               key={pessoa.id}
@@ -557,6 +564,11 @@ function RhPessoasConteudo() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <BadgeTipo tipo={pessoa.tipo} />
+                    {resumoAvaliacoes.quantidade > 0 && resumoAvaliacoes.media != null && (
+                      <Badge cor={corBadgeMediaAvaliacao(resumoAvaliacoes.media)}>
+                        Média {formatarMediaAvaliacao(resumoAvaliacoes.media)}
+                      </Badge>
+                    )}
                     {alertaDocs.tem_alerta ? (
                       <Badge
                         cor={

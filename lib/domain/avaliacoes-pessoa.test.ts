@@ -3,6 +3,7 @@ import { seedDB } from "../data/seed";
 import {
   adicionarAvaliacaoPessoa,
   contarAvaliacoesPorNota,
+  corBadgeMediaAvaliacao,
   editarAvaliacaoPessoa,
   excluirAvaliacaoPessoa,
   filtrarAvaliacoesPorNota,
@@ -190,5 +191,11 @@ describe("avaliações de pessoa (RH)", () => {
     expect(filtrarAvaliacoesPorNota(lista, 5).map((a) => a.id)).toEqual(["n3", "n1"]);
     expect(filtrarAvaliacoesPorNota(lista, "todas")).toHaveLength(3);
     expect(contarAvaliacoesPorNota(lista)).toEqual({ 1: 0, 2: 0, 3: 1, 4: 0, 5: 2 });
+  });
+
+  it("escolhe cor do badge pela média arredondada", () => {
+    expect(corBadgeMediaAvaliacao(4.5)).toBe("verde");
+    expect(corBadgeMediaAvaliacao(3.2)).toBe("azul");
+    expect(corBadgeMediaAvaliacao(1.4)).toBe("laranja");
   });
 });

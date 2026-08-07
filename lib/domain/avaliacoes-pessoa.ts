@@ -40,6 +40,12 @@ export function corBadgeNotaAvaliacao(nota: NotaAvaliacaoPessoaRh): "verde" | "a
   return "laranja";
 }
 
+/** Cor do Badge pela média (arredonda para 1–5). */
+export function corBadgeMediaAvaliacao(media: number): "verde" | "azul" | "laranja" {
+  const arredondada = Math.min(5, Math.max(1, Math.round(media))) as NotaAvaliacaoPessoaRh;
+  return corBadgeNotaAvaliacao(arredondada);
+}
+
 /** Lista avaliações da pessoa (competência mais recente primeiro). */
 export function listarAvaliacoesPessoa(
   db: Pick<DB, "avaliacoes_pessoas">,

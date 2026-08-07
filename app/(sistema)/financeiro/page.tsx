@@ -2565,18 +2565,36 @@ function FinanceiroConteudo() {
               </p>
               <p className="text-xl font-bold text-primaria">{moeda(totais.liberado)}</p>
             </Card>
-            <Card className="py-3">
+            <button
+              type="button"
+              className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+                parseFilaAgendaFinanceiro(searchParams.get("fila")) === "aguardando"
+                  ? "border-primaria ring-1 ring-primaria"
+                  : "border-slate-200 hover:border-primaria"
+              }`}
+              onClick={() => irParaFinanceiro({ aba: "boletos", fila: "aguardando" })}
+              title="Ir para a fila Aguardando conciliação"
+            >
               <p className="rotulo flex items-center gap-1">
                 <Clock3 size={13} /> Aguardando conciliação
               </p>
               <p className="text-xl font-bold text-blue-700">{moeda(totais.aguardando_conciliacao)}</p>
-            </Card>
-            <Card className="py-3">
+            </button>
+            <button
+              type="button"
+              className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+                parseFilaAgendaFinanceiro(searchParams.get("fila")) === "pagos"
+                  ? "border-primaria ring-1 ring-primaria"
+                  : "border-slate-200 hover:border-primaria"
+              }`}
+              onClick={() => irParaFinanceiro({ aba: "boletos", fila: "pagos" })}
+              title="Ir para a fila Pagos"
+            >
               <p className="rotulo flex items-center gap-1">
                 <CircleCheckBig size={13} /> Pagos
               </p>
               <p className="text-xl font-bold text-primaria-escura">{moeda(totais.pago)}</p>
-            </Card>
+            </button>
             <Card className="py-3">
               <p className="rotulo flex items-center gap-1">
                 <TriangleAlert size={13} /> Suspeitos

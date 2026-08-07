@@ -2543,7 +2543,7 @@ function FinanceiroConteudo() {
               className={`rounded-card border bg-white px-4 py-3 text-left space-y-2 transition ${
                 filtroVencimentoConta === "hoje" && filtroStatusConta === "todos"
                   ? "border-primaria ring-1 ring-primaria"
-                  : "border-borda hover:border-primaria"
+                  : "border-slate-200 hover:border-primaria"
               }`}
               onClick={() =>
                 irParaFinanceiro({ aba: "contas", vencimento: "hoje", status: "todos" })
@@ -2561,7 +2561,7 @@ function FinanceiroConteudo() {
               className={`rounded-card border bg-white px-4 py-3 text-left space-y-2 transition ${
                 filtroVencimentoConta === "proximos_7_dias" && filtroStatusConta === "todos"
                   ? "border-primaria ring-1 ring-primaria"
-                  : "border-borda hover:border-primaria"
+                  : "border-slate-200 hover:border-primaria"
               }`}
               onClick={() =>
                 irParaFinanceiro({
@@ -2583,7 +2583,7 @@ function FinanceiroConteudo() {
               className={`rounded-card border bg-white px-4 py-3 text-left space-y-2 transition ${
                 filtroVencimentoConta === "atrasadas" && filtroStatusConta === "todos"
                   ? "border-primaria ring-1 ring-primaria"
-                  : "border-borda hover:border-primaria"
+                  : "border-slate-200 hover:border-primaria"
               }`}
               onClick={() =>
                 irParaFinanceiro({ aba: "contas", vencimento: "atrasadas", status: "todos" })
@@ -2601,7 +2601,7 @@ function FinanceiroConteudo() {
               className={`rounded-card border bg-white px-4 py-3 text-left space-y-2 transition ${
                 filtroStatusConta === "aguardando_conciliacao" && filtroVencimentoConta === "todas"
                   ? "border-primaria ring-1 ring-primaria"
-                  : "border-borda hover:border-primaria"
+                  : "border-slate-200 hover:border-primaria"
               }`}
               onClick={() =>
                 irParaFinanceiro({

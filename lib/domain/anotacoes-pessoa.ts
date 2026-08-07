@@ -66,3 +66,51 @@ export function adicionarAnotacaoPessoa(
   db.anotacoes_pessoas.push(anotacao);
   return { sucesso: true, erros: [], anotacao };
 }
+
+/**
+ * Atualiza texto/data de uma anotação existente.
+ * Preserva autor e criado_em; atualiza atualizado_em.
+ */
+export function editarAnotacaoPessoa(
+  db: DB,
+  anotacaoId: string,
+  dados: { texto: string; data?: string },
+  opcoes?: { agora?: string }
+): ResultadoAnotacaoPessoa {
+  const id = limparTexto(anotacaoId);
+  const lista = db.anotacoes_pessoas ?? [];
+  const indice = lista.findIndex((a) => a.id === id);
+  if (indice < 0) {
+    return { sucesso: false, erros: ["Anotação não encontrada."] };
+  }
+  const texto = limparTexto(dados.texto);
+  if (!texto) {
+    return { sucesso: false, erros: ["Escreva o texto da anotação."] };
+  }
+  const atual = lista[indice];
+  const agora = opcoes?.agora ?? new Date().toISOString();
+  const data = limparTexto(dados.data) || atual.data;
+  if (!dataIsoValida(data)) {
+    return { sucesso: false, erros: ["Informe uma data válida (AAAA-MM-DD)."] };
+  }
+  const anotacao: AnotacaoPessoaRh = {
+    ...atual,
+    data,
+    texto,
+    atualizado_em: agora,
+  };
+  lista[indice] = anotacao;
+  return { sucesso: true, erros: [], anotacao };
+}
+
+/** Remove anotação pelo id. */
+export function excluirAnotacaoPessoa(db: DB, anotacaoId: string): ResultadoAnotacaoPessoa {
+  const id = limparTexto(anotacaoId);
+  const lista = db.anotacoes_pessoas ?? [];
+  const indice = lista.findIndex((a) => a.id === id);
+  if (indice < 0) {
+    return { sucesso: false, erros: ["Anotação não encontrada."] };
+  }
+  const [removida] = lista.splice(indice, 1);
+  return { sucesso: true, erros: [], anotacao: removida };
+}

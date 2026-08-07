@@ -10,6 +10,8 @@ import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import {
   adicionarAnotacaoPessoa,
+  editarAnotacaoPessoa,
+  excluirAnotacaoPessoa,
   listarAnotacoesPessoa,
 } from "@/lib/domain/anotacoes-pessoa";
 import {
@@ -114,6 +116,7 @@ function RhPerfilConteudo() {
   const [textoAnotacao, setTextoAnotacao] = useState("");
   const [dataAnotacao, setDataAnotacao] = useState(hojeIsoLocal());
   const [erroAnotacao, setErroAnotacao] = useState<string | null>(null);
+  const [editandoAnotacaoId, setEditandoAnotacaoId] = useState<string | null>(null);
 
   const pessoa = useMemo(
     () => (db.pessoas ?? []).find((p) => p.id === params.id) ?? null,
@@ -465,28 +468,61 @@ function RhPerfilConteudo() {
     setMensagem("Pagamento conciliado e marcado como pago.");
   }
 
+  function limparFormAnotacao() {
+    setTextoAnotacao("");
+    setDataAnotacao(hojeIsoLocal());
+    setEditandoAnotacaoId(null);
+    setErroAnotacao(null);
+  }
+
+  function comecarEditarAnotacao(anotacao: { id: string; texto: string; data: string }) {
+    setEditandoAnotacaoId(anotacao.id);
+    setTextoAnotacao(anotacao.texto);
+    setDataAnotacao(anotacao.data);
+    setErroAnotacao(null);
+  }
+
   function salvarAnotacao(e: FormEvent) {
     e.preventDefault();
     if (!pessoa) return;
+    const estavaEditando = Boolean(editandoAnotacaoId);
     const proximo = structuredClone(db);
-    const r = adicionarAnotacaoPessoa(proximo, {
-      id: uid("anot"),
-      pessoa_id: pessoa.id,
-      texto: textoAnotacao,
-      data: dataAnotacao,
-      autor: "usuário local",
-    });
+    const r = editandoAnotacaoId
+      ? editarAnotacaoPessoa(proximo, editandoAnotacaoId, {
+          texto: textoAnotacao,
+          data: dataAnotacao,
+        })
+      : adicionarAnotacaoPessoa(proximo, {
+          id: uid("anot"),
+          pessoa_id: pessoa.id,
+          texto: textoAnotacao,
+          data: dataAnotacao,
+          autor: "usuário local",
+        });
     if (!r.sucesso) {
       setErroAnotacao(r.erros.join(" "));
       setMensagem(null);
       return;
     }
     mutate((atual) => Object.assign(atual, proximo));
-    setTextoAnotacao("");
-    setDataAnotacao(hojeIsoLocal());
-    setErroAnotacao(null);
+    limparFormAnotacao();
     setErro(null);
-    setMensagem("Anotação salva no histórico.");
+    setMensagem(estavaEditando ? "Anotação atualizada." : "Anotação salva no histórico.");
+  }
+
+  function excluirAnotacaoDoPerfil(anotacaoId: string) {
+    if (!window.confirm("Excluir esta anotação? Esta ação não tem volta.")) return;
+    const proximo = structuredClone(db);
+    const r = excluirAnotacaoPessoa(proximo, anotacaoId);
+    if (!r.sucesso) {
+      setErroAnotacao(r.erros.join(" "));
+      setMensagem(null);
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    if (editandoAnotacaoId === anotacaoId) limparFormAnotacao();
+    setErro(null);
+    setMensagem("Anotação excluída.");
   }
 
   function salvarDados(e: FormEvent) {
@@ -1667,7 +1703,9 @@ function RhPerfilConteudo() {
       {aba === "anotacoes" && (
         <div className="space-y-4">
           <Card className="space-y-3">
-            <h2 className="text-base font-bold">Nova anotação</h2>
+            <h2 className="text-base font-bold">
+              {editandoAnotacaoId ? "Editar anotação" : "Nova anotação"}
+            </h2>
             <p className="text-sm text-slate-600">
               Histórico livre (elogios, avisos, observações). Avaliações formais entram depois.
             </p>
@@ -1691,9 +1729,14 @@ function RhPerfilConteudo() {
                 />
               </Campo>
               {erroAnotacao && <p className="text-sm font-medium text-erro">{erroAnotacao}</p>}
-              <div className="flex justify-end">
+              <div className="flex flex-wrap justify-end gap-2">
+                {editandoAnotacaoId && (
+                  <button type="button" className="btn-secundario" onClick={limparFormAnotacao}>
+                    Cancelar
+                  </button>
+                )}
                 <button type="submit" className="btn-primario">
-                  Salvar anotação
+                  {editandoAnotacaoId ? "Salvar alterações" : "Salvar anotação"}
                 </button>
               </div>
             </form>
@@ -1708,13 +1751,37 @@ function RhPerfilConteudo() {
                 {anotacoesPessoa.map((anotacao) => (
                   <div
                     key={anotacao.id}
-                    className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                    className={`rounded-lg border px-3 py-2 ${
+                      editandoAnotacaoId === anotacao.id
+                        ? "border-primaria bg-primaria/5"
+                        : "border-stone-200 bg-stone-50"
+                    }`}
                   >
-                    <p className="text-xs text-slate-500">
-                      {dataBR(anotacao.data)}
-                      {anotacao.autor ? ` · ${anotacao.autor}` : ""}
-                    </p>
-                    <p className="whitespace-pre-wrap text-sm text-slate-900">{anotacao.texto}</p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-slate-500">
+                          {dataBR(anotacao.data)}
+                          {anotacao.autor ? ` · ${anotacao.autor}` : ""}
+                        </p>
+                        <p className="whitespace-pre-wrap text-sm text-slate-900">{anotacao.texto}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn-secundario text-sm"
+                          onClick={() => comecarEditarAnotacao(anotacao)}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secundario text-sm text-destaque"
+                          onClick={() => excluirAnotacaoDoPerfil(anotacao.id)}
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

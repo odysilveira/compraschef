@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { seedDB } from "../data/seed";
-import { adicionarAnotacaoPessoa, listarAnotacoesPessoa } from "./anotacoes-pessoa";
+import { adicionarAnotacaoPessoa, editarAnotacaoPessoa, excluirAnotacaoPessoa, listarAnotacoesPessoa } from "./anotacoes-pessoa";
 
 describe("anotações de pessoa (RH)", () => {
   it("adiciona e lista por pessoa (mais recente primeiro)", () => {
@@ -44,5 +44,34 @@ describe("anotações de pessoa (RH)", () => {
     expect(
       adicionarAnotacaoPessoa(db, { id: "x", pessoa_id: "pes-nao", texto: "ok" }).sucesso
     ).toBe(false);
+  });
+
+  it("edita e exclui anotação", () => {
+    const db = structuredClone(seedDB);
+    db.anotacoes_pessoas = [];
+    adicionarAnotacaoPessoa(
+      db,
+      { id: "anot-e1", pessoa_id: "pes-gerente", texto: "Rascunho", data: "2026-08-01" },
+      { agora: "2026-08-01T10:00:00.000Z" }
+    );
+    const edit = editarAnotacaoPessoa(
+      db,
+      "anot-e1",
+      { texto: "Texto corrigido", data: "2026-08-02" },
+      { agora: "2026-08-02T11:00:00.000Z" }
+    );
+    expect(edit.sucesso).toBe(true);
+    expect(edit.anotacao?.texto).toBe("Texto corrigido");
+    expect(edit.anotacao?.data).toBe("2026-08-02");
+    expect(edit.anotacao?.atualizado_em).toBe("2026-08-02T11:00:00.000Z");
+    expect(edit.anotacao?.criado_em).toBe("2026-08-01T10:00:00.000Z");
+
+    expect(editarAnotacaoPessoa(db, "anot-e1", { texto: "  " }).sucesso).toBe(false);
+    expect(editarAnotacaoPessoa(db, "anot-sumiu", { texto: "x" }).sucesso).toBe(false);
+
+    const rem = excluirAnotacaoPessoa(db, "anot-e1");
+    expect(rem.sucesso).toBe(true);
+    expect(listarAnotacoesPessoa(db, "pes-gerente")).toHaveLength(0);
+    expect(excluirAnotacaoPessoa(db, "anot-e1").sucesso).toBe(false);
   });
 });

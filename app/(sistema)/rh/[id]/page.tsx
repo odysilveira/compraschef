@@ -42,6 +42,7 @@ import {
   slotsDaPessoaNaJanela,
 } from "@/lib/domain/escala";
 import {
+  liberarPagamentoPessoa,
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
@@ -1262,6 +1263,26 @@ function RhPerfilConteudo() {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      {pagamento.status === "previsto" && (
+                        <button
+                          type="button"
+                          className="btn-secundario text-sm"
+                          onClick={() => {
+                            const proximo = structuredClone(db);
+                            const r = liberarPagamentoPessoa(proximo, pagamento.id);
+                            if (!r.sucesso) {
+                              setErro(r.erros.join(" "));
+                              setMensagem(null);
+                              return;
+                            }
+                            mutate((atual) => Object.assign(atual, proximo));
+                            setErro(null);
+                            setMensagem("Pagamento liberado.");
+                          }}
+                        >
+                          Liberar
+                        </button>
+                      )}
                       {(pagamento.status === "previsto" || pagamento.status === "liberado") &&
                         chavePixDaPessoa(pessoa) && (
                           <button

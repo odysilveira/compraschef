@@ -4,26 +4,55 @@
 // e análise da IA (valores escondidos de líder/caixa) e ações por status.
 // Aprovação é exclusiva do dono.
 
-import { useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, nomeFornecedor, nomePerfil, nomeProduto, siglaParaItem, useDB } from "@/lib/data";
+import {
+  FILTROS_STATUS_PEDIDO_UI,
+  filtrarPedidosPorStatus,
+  hrefPedidos,
+  parseFiltroStatusPedido,
+  type FiltroStatusPedido,
+} from "@/lib/domain/pedidos-navegacao";
 import { podeAprovar, podeVerValores, usePapel } from "@/lib/roles";
 import { dataHoraBR, moeda, qtd } from "@/lib/format";
 import { EtapasPedido } from "@/components/compras/EtapasPedido";
 import type { Pedido, StatusPedido } from "@/lib/types";
 
-export default function PedidosPage() {
+function PedidosConteudo() {
   const db = useDB();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { papel } = usePapel();
   const verValores = podeVerValores(papel);
   const donoAprova = podeAprovar(papel);
   const [selecionado, setSelecionado] = useState<string | null>(null);
   const [avisoMock, setAvisoMock] = useState<string | null>(null);
+  const [filtroStatus, setFiltroStatus] = useState<FiltroStatusPedido>(() =>
+    parseFiltroStatusPedido(searchParams.get("status"))
+  );
 
-  const pedidos = [...db.pedidos].sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+  useEffect(() => {
+    setFiltroStatus(parseFiltroStatusPedido(searchParams.get("status")));
+  }, [searchParams]);
+
+  const pedidos = useMemo(
+    () => [...db.pedidos].sort((a, b) => b.criado_em.localeCompare(a.criado_em)),
+    [db.pedidos]
+  );
+  const pedidosFiltrados = useMemo(
+    () => filtrarPedidosPorStatus(pedidos, filtroStatus),
+    [pedidos, filtroStatus]
+  );
   const pedido = db.pedidos.find((p) => p.id === selecionado);
   const itens = pedido ? db.pedido_itens.filter((i) => i.pedido_id === pedido.id) : [];
+
+  function irParaFiltroStatus(proximo: FiltroStatusPedido) {
+    setFiltroStatus(proximo);
+    router.replace(hrefPedidos({ status: proximo }), { scroll: false });
+  }
 
   function atualizarStatus(id: string, status: StatusPedido, extras?: Partial<Pedido>, aviso?: string) {
     mutate((d) => {
@@ -42,11 +71,36 @@ export default function PedidosPage() {
     <div>
       <TituloPagina titulo="Pedidos" />
 
+      {pedidos.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {FILTROS_STATUS_PEDIDO_UI.map((f) => {
+            const qtdFiltro =
+              f.id === "todos"
+                ? pedidos.length
+                : pedidos.filter((p) => p.status === f.id).length;
+            return (
+              <button
+                key={f.id}
+                type="button"
+                className={`btn-secundario text-sm ${
+                  filtroStatus === f.id ? "border-primaria bg-primaria-clara text-primaria" : ""
+                }`}
+                onClick={() => irParaFiltroStatus(f.id)}
+              >
+                {f.rotulo} ({qtdFiltro})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {pedidos.length === 0 ? (
         <Vazio mensagem="Nenhum pedido ainda. Gere um pedido a partir de uma cotação na tela de Cotações." />
+      ) : pedidosFiltrados.length === 0 ? (
+        <Vazio mensagem="Nenhum pedido neste status." />
       ) : (
         <div className="space-y-3">
-          {pedidos.map((p) => (
+          {pedidosFiltrados.map((p) => (
             <button
               key={p.id}
               className="card w-full text-left transition-shadow hover:shadow-md"
@@ -205,5 +259,20 @@ export default function PedidosPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+export default function PedidosPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="Pedidos" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando pedidos…</p>
+        </div>
+      }
+    >
+      <PedidosConteudo />
+    </Suspense>
   );
 }

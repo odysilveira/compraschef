@@ -19,6 +19,7 @@ import CartaoAlerta from "@/components/operacao/CartaoAlerta";
 import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@/lib/data";
 import { hrefFinanceiro } from "@/lib/domain/financeiro";
 import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
+import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
 import { hrefPagamentosRh, resumirOperacionalRh } from "@/lib/domain/resumo-rh";
 import { podeVerValores, usePapel, usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, diasAte, moeda } from "@/lib/format";
@@ -104,7 +105,7 @@ export default function PainelPage() {
           />
         )}
         <CartaoAlerta
-          href="/pedidos"
+          href={hrefPedidos({ status: "aguardando_aprovacao" })}
           titulo="Pedidos esperando sua aprovação"
           numero={pedidosAprovacao}
           icone={ClipboardCheck}

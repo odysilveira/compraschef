@@ -827,6 +827,22 @@ export interface AnotacaoPessoaRh {
   atualizado_em: string;
 }
 
+/** Nota formal 1–5 em avaliação periódica. */
+export type NotaAvaliacaoPessoaRh = 1 | 2 | 3 | 4 | 5;
+
+/** Avaliação formal no perfil (ciclos mensais; distinto de anotações livres). */
+export interface AvaliacaoPessoaRh {
+  id: string;
+  pessoa_id: string;
+  /** Competência YYYY-MM. */
+  competencia: string;
+  nota: NotaAvaliacaoPessoaRh;
+  comentario?: string;
+  avaliador?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
 // Banco completo em memória (camada mock)
 export interface DB {
   perfis: Perfil[];
@@ -835,6 +851,8 @@ export interface DB {
   consumos_pessoas: ConsumoPessoa[];
   /** Histórico livre no perfil (anotações). */
   anotacoes_pessoas?: AnotacaoPessoaRh[];
+  /** Avaliações formais (nota 1–5 por competência). */
+  avaliacoes_pessoas?: AvaliacaoPessoaRh[];
   escala_slots: EscalaSlot[];
   convocacoes: ConvocacaoIntermitente[];
   /** Contas de onde o restaurante paga (origem). */

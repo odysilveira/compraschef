@@ -175,6 +175,7 @@ export const ABAS_PERFIL_RH = [
   "pagamentos",
   "consumos",
   "anotacoes",
+  "avaliacoes",
 ] as const;
 
 export type AbaPerfilRh = (typeof ABAS_PERFIL_RH)[number];

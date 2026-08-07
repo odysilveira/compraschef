@@ -21,6 +21,7 @@ import {
   moverSlotParaData,
   exportarEscalaCsv,
   registrarRespostaConvocacao,
+  registrarRespostasConvocacoes,
   registrarSilencioConvocacoesVencidas,
   resumoSetoresDoDia,
   rotuloPeriodoJanela,
@@ -730,6 +731,72 @@ describe("escala domain", () => {
     const todas = marcarConvocacoesEnviadas(db, undefined, "2026-08-02T11:00:00.000Z");
     expect(todas.enviadas).toBe(0);
     expect(todas.sucesso).toBe(true);
+  });
+
+  it("aceita e recusa convocações enviadas em lote", () => {
+    const db = dbBase();
+    const a = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-05",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-a1", convocacaoId: "conv-a1", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    const b = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-06",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-a2", convocacaoId: "conv-a2", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    const c = criarSlot(
+      db,
+      {
+        pessoa_id: "pes-inter-1",
+        data: "2026-08-07",
+        hora_inicio: "18:00",
+        hora_fim: "23:00",
+        intervalo_min: 30,
+      },
+      { id: "esc-a3", convocacaoId: "conv-a3", agora: "2026-08-01T12:00:00.000Z" }
+    );
+    expect(a.sucesso && b.sucesso && c.sucesso).toBe(true);
+    marcarConvocacaoEnviada(db, "conv-a1", "2026-08-02T10:00:00.000Z");
+    marcarConvocacaoEnviada(db, "conv-a2", "2026-08-02T10:00:00.000Z");
+    marcarConvocacaoEnviada(db, "conv-a3", "2026-08-02T10:00:00.000Z");
+    registrarRespostaConvocacao(db, "conv-a3", "aceita", "2026-08-02T11:00:00.000Z");
+
+    const aceites = registrarRespostasConvocacoes(
+      db,
+      ["conv-a1", "conv-a3"],
+      "aceita",
+      "2026-08-03T10:00:00.000Z"
+    );
+    expect(aceites.atualizadas).toBe(1);
+    expect(aceites.pagamentosCriados).toBe(1);
+    expect(aceites.sucesso).toBe(false);
+    expect(aceites.erros.some((e) => e.includes("conv-a3"))).toBe(true);
+    expect(db.convocacoes.find((x) => x.id === "conv-a1")?.status).toBe("aceita");
+    expect(db.pagamentos_pessoas.some((p) => p.convocacao_id === "conv-a1")).toBe(true);
+
+    const recusas = registrarRespostasConvocacoes(
+      db,
+      ["conv-a2"],
+      "recusada",
+      "2026-08-03T11:00:00.000Z"
+    );
+    expect(recusas.sucesso).toBe(true);
+    expect(recusas.atualizadas).toBe(1);
+    expect(recusas.pagamentosCriados).toBe(0);
+    expect(db.convocacoes.find((x) => x.id === "conv-a2")?.status).toBe("recusada");
   });
 
   it("lista CLT ativos sem plantão na janela", () => {

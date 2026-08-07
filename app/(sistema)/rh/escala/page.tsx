@@ -30,6 +30,7 @@ import {
   pagamentoDaConvocacao,
   pessoaPrecisaConvocacao,
   registrarRespostaConvocacao,
+  registrarRespostasConvocacoes,
   registrarSilencioConvocacoesVencidas,
   convocacaoEnviadaSemRespostaVencida,
   resumoSetoresDoDia,
@@ -707,6 +708,32 @@ function RhEscalaConteudo() {
     if (r.avisos.length) setAviso(r.avisos.join(" "));
   }
 
+  function responderEnviadasEmLote(status: "aceita" | "recusada") {
+    const ids = convocacoesEnviadasNaJanela.map((c) => c.id);
+    if (ids.length === 0) {
+      setMensagem("Nenhuma convocação enviada neste período.");
+      return;
+    }
+    const proximo = structuredClone(db);
+    const r = registrarRespostasConvocacoes(proximo, ids, status);
+    mutate((atual) => Object.assign(atual, proximo));
+    setErro(r.erros.length ? r.erros.join(" ") : null);
+    if (status === "aceita" && r.pagamentosCriados > 0) {
+      setMensagemHrefPagamentos(hrefPagamentosRh({ filtro: "previsto" }));
+      setMensagem(
+        `${r.atualizadas} convocação(ões) aceita(s). ${r.pagamentosCriados} pagamento(s) previsto(s) criado(s).`
+      );
+    } else {
+      setMensagemHrefPagamentos(null);
+      setMensagem(
+        r.atualizadas === 0
+          ? `Nenhuma convocação ${status === "aceita" ? "aceita" : "recusada"}.`
+          : `${r.atualizadas} convocação(ões) marcada(s) como ${rotuloStatusConvocacao(status).toLowerCase()}.`
+      );
+    }
+    if (r.avisos.length) setAviso(r.avisos.join(" "));
+  }
+
   function marcarTodasRascunhoEnviadas() {
     const ids = convocacoesRascunhoNaJanela.map((c) => c.id);
     if (ids.length === 0) {
@@ -1200,6 +1227,26 @@ function RhEscalaConteudo() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              {filtroConvocacao === "enviada" && convocacoesEnviadasNaJanela.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="btn-primario text-sm"
+                    onClick={() => responderEnviadasEmLote("aceita")}
+                    title="Registra aceite de todas as enviadas deste período e cria pagamentos previstos"
+                  >
+                    Aceitar todas ({convocacoesEnviadasNaJanela.length})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secundario text-sm"
+                    onClick={() => responderEnviadasEmLote("recusada")}
+                    title="Registra recusa de todas as enviadas deste período"
+                  >
+                    Recusar todas ({convocacoesEnviadasNaJanela.length})
+                  </button>
+                </>
+              )}
               {convocacoesEnviadasVencidas.length > 0 && (
                 <button
                   type="button"
@@ -1265,7 +1312,7 @@ function RhEscalaConteudo() {
                       </Link>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {vencida && (
+                      {vencida ? (
                         <button
                           type="button"
                           className="btn-secundario text-sm"
@@ -1273,10 +1320,27 @@ function RhEscalaConteudo() {
                         >
                           Registrar silêncio
                         </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="btn-primario text-sm"
+                            onClick={() => responder(conv.id, "aceita")}
+                          >
+                            Aceita
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secundario text-sm"
+                            onClick={() => responder(conv.id, "recusada")}
+                          >
+                            Recusada
+                          </button>
+                        </>
                       )}
                       <button
                         type="button"
-                        className="btn-primario text-sm"
+                        className="btn-secundario text-sm"
                         onClick={() => setDetalheSlotId(conv.escala_slot_id)}
                       >
                         Abrir

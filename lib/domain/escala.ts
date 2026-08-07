@@ -807,6 +807,55 @@ export function registrarRespostaConvocacao(
   };
 }
 
+/**
+ * Registra aceita/recusada em várias convocações enviadas.
+ * Se `ids` for informado, só esses; senão, todas as enviadas do banco.
+ */
+export function registrarRespostasConvocacoes(
+  db: DB,
+  ids: string[] | undefined,
+  status: Extract<StatusConvocacao, "aceita" | "recusada">,
+  agora = new Date().toISOString()
+): {
+  sucesso: boolean;
+  atualizadas: number;
+  pagamentosCriados: number;
+  erros: string[];
+  avisos: string[];
+} {
+  const alvo =
+    ids && ids.length > 0
+      ? ids
+      : (db.convocacoes ?? []).filter((c) => c.status === "enviada").map((c) => c.id);
+
+  const erros: string[] = [];
+  const avisos: string[] = [];
+  let atualizadas = 0;
+  let pagamentosCriados = 0;
+
+  for (const id of alvo) {
+    const atual = db.convocacoes.find((c) => c.id === id);
+    if (!atual) {
+      erros.push(`${id}: convocação não encontrada.`);
+      continue;
+    }
+    if (atual.status !== "enviada") {
+      erros.push(`${id}: só convocações enviadas entram no lote.`);
+      continue;
+    }
+    const r = registrarRespostaConvocacao(db, id, status, agora);
+    if (r.sucesso) {
+      atualizadas += 1;
+      if (r.pagamento) pagamentosCriados += 1;
+    } else {
+      erros.push(...r.erros.map((e) => `${id}: ${e}`));
+    }
+    if (r.avisos.length) avisos.push(...r.avisos);
+  }
+
+  return { sucesso: erros.length === 0, atualizadas, pagamentosCriados, erros, avisos };
+}
+
 export function pagamentoDaConvocacao(db: DB, convocacaoId: string): PagamentoPessoa | undefined {
   return (db.pagamentos_pessoas ?? []).find((p) => p.convocacao_id === convocacaoId);
 }

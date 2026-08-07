@@ -4,8 +4,9 @@
 // Passo 1 — escolher o pedido; Passo 2 — conferência item a item com scanner,
 // foto e divergência; Finalizar — entrada no estoque, nota e boletos.
 
-import { useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Camera,
@@ -25,6 +26,7 @@ import {
   estoqueAtual,
   mutate,
   nomeFornecedor,
+  nomePerfil,
   nomeProduto,
   siglaUnidadeUso,
   uid,
@@ -34,13 +36,22 @@ import { enviarEstoqueTotal } from "@/lib/integracao";
 import { converterParaUnidadeUso, precoPorUnidadeUso } from "@/lib/domain/produtos";
 import { criarLote } from "@/lib/domain/estoque";
 import {
+  corBadgeStatusRecebimento,
+  FILTROS_RECEBIMENTO_UI,
+  filtrarRecebimentosPorStatus,
+  hrefRecebimento,
+  parseFiltroRecebimento,
+  rotuloStatusRecebimento,
+  type FiltroRecebimento,
+} from "@/lib/domain/recebimento-navegacao";
+import {
   avaliarCompletudeNotaFiscal,
   boletosNaoConferidosDaNota,
   corrigirFornecedorNotaFiscal,
   indicadorCompletudeNota,
 } from "@/lib/domain/nfe-completude";
 import { podeVerValores, usePapel } from "@/lib/roles";
-import { cnpjBR, dataBR, moeda, qtd } from "@/lib/format";
+import { cnpjBR, dataBR, dataHoraBR, moeda, qtd } from "@/lib/format";
 import type { StatusRecebimento } from "@/lib/types";
 
 interface ConferenciaItem {
@@ -93,7 +104,24 @@ function lerFotoPequena(arquivo: File): Promise<string> {
 }
 
 export default function RecebimentoPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="Recebimento" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando recebimento…</p>
+        </div>
+      }
+    >
+      <RecebimentoConteudo />
+    </Suspense>
+  );
+}
+
+function RecebimentoConteudo() {
   const db = useDB();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { papel } = usePapel();
   const verValores = podeVerValores(papel);
   const usuarioId = db.perfis.find((p) => p.papel === papel)?.id ?? "perfil-dono";
@@ -113,10 +141,31 @@ export default function RecebimentoPage() {
   const [destaqueItem, setDestaqueItem] = useState<string | null>(null);
   const [avisoScanner, setAvisoScanner] = useState<string | null>(null);
   const [resultado, setResultado] = useState<Resultado | null>(null);
+  const [filtroHistorico, setFiltroHistorico] = useState<FiltroRecebimento>(() =>
+    parseFiltroRecebimento(searchParams.get("status"))
+  );
   const timerDestaque = useRef<ReturnType<typeof setTimeout> | null>(null);
   const salvandoCorrecaoNfeRef = useRef(false);
 
+  useEffect(() => {
+    setFiltroHistorico(parseFiltroRecebimento(searchParams.get("status")));
+  }, [searchParams]);
+
   const pedidosParaReceber = db.pedidos.filter((p) => p.status === "enviado" || p.status === "confirmado");
+  const historicoRecebimentos = useMemo(
+    () =>
+      [...(db.recebimentos ?? [])].sort((a, b) => b.recebido_em.localeCompare(a.recebido_em)),
+    [db.recebimentos]
+  );
+  const historicoFiltrado = useMemo(
+    () => filtrarRecebimentosPorStatus(historicoRecebimentos, filtroHistorico),
+    [historicoRecebimentos, filtroHistorico]
+  );
+
+  function irParaFiltroHistorico(proximo: FiltroRecebimento) {
+    setFiltroHistorico(proximo);
+    router.replace(hrefRecebimento({ status: proximo }), { scroll: false });
+  }
   // DANFEs baixadas da Receita (via certificado) aguardando conferência
   const notasImportadas = db.notas_fiscais.filter(
     (n) => n.status === "aguardando_conferencia" && n.itens_importados && n.itens_importados.length > 0
@@ -658,6 +707,70 @@ export default function RecebimentoPage() {
               })}
             </div>
           )}
+
+          <section className="space-y-3">
+            <h2 className="flex items-center gap-2">
+              <TriangleAlert size={20} className="text-destaque" /> Histórico de recebimentos
+            </h2>
+            {historicoRecebimentos.length === 0 ? (
+              <Vazio mensagem="Nenhum recebimento registrado ainda." />
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {FILTROS_RECEBIMENTO_UI.map((f) => {
+                    const qtdFiltro =
+                      f.id === "todos"
+                        ? historicoRecebimentos.length
+                        : filtrarRecebimentosPorStatus(historicoRecebimentos, f.id).length;
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        className={`btn-secundario text-sm ${
+                          filtroHistorico === f.id
+                            ? "border-primaria bg-primaria-clara text-primaria"
+                            : ""
+                        }`}
+                        onClick={() => irParaFiltroHistorico(f.id)}
+                      >
+                        {f.rotulo} ({qtdFiltro})
+                      </button>
+                    );
+                  })}
+                </div>
+                {historicoFiltrado.length === 0 ? (
+                  <Vazio mensagem="Nenhum recebimento neste filtro." />
+                ) : (
+                  <div className="space-y-2">
+                    {historicoFiltrado.map((rec) => {
+                      const pedidoRec = db.pedidos.find((p) => p.id === rec.pedido_id);
+                      return (
+                        <Card
+                          key={rec.id}
+                          className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                        >
+                          <div>
+                            <p className="font-semibold">
+                              {pedidoRec
+                                ? nomeFornecedor(db, pedidoRec.fornecedor_id)
+                                : "Pedido removido"}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {dataHoraBR(rec.recebido_em)}
+                              {rec.recebido_por ? ` · ${nomePerfil(db, rec.recebido_por)}` : ""}
+                            </p>
+                          </div>
+                          <Badge cor={corBadgeStatusRecebimento(rec.status)}>
+                            {rotuloStatusRecebimento(rec.status)}
+                          </Badge>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
         </div>
 
         <Modal aberto={Boolean(notaCorrecao)} titulo="Completar ou corrigir dados da NF-e" onFechar={fecharCorrecaoNfe}>

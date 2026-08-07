@@ -228,7 +228,7 @@ export function exportarContasPagarCsv(
 export type AbaFinanceiro = "boletos" | "contas" | "notas";
 
 /** Seção da agenda de boletos (deep link a partir do RH). */
-export type FilaAgendaFinanceiro = "aguardando" | "pagos";
+export type FilaAgendaFinanceiro = "aguardando" | "pagos" | "liberados";
 
 const STATUS_CONTA_PAGAR: StatusContaPagar[] = [
   "aguardando_boleto",
@@ -250,7 +250,7 @@ export function parseAbaFinanceiro(valor: string | null | undefined): AbaFinance
 export function parseFilaAgendaFinanceiro(
   valor: string | null | undefined
 ): FilaAgendaFinanceiro | undefined {
-  if (valor === "aguardando" || valor === "pagos") return valor;
+  if (valor === "aguardando" || valor === "pagos" || valor === "liberados") return valor;
   return undefined;
 }
 

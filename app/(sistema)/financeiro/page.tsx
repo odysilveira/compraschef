@@ -78,6 +78,7 @@ import {
 } from "@/lib/domain/pagar-boleto";
 import {
   conciliarPagamentoPessoa,
+  conciliarPagamentosAguardando,
   registrarDivergenciaPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
@@ -876,6 +877,32 @@ export default function FinanceiroPage() {
     if (r.conciliados > 0) {
       setMensagemReceberBoleto(
         `${r.conciliados} boleto(s) conciliado(s) e marcado(s) como pago.`
+      );
+    }
+    if (r.erros.length) {
+      setMensagemReceberBoleto(
+        (r.conciliados > 0 ? `${r.conciliados} conciliado(s). ` : "") + r.erros.join(" ")
+      );
+    }
+  }
+
+  function conciliarTodosPagamentosRhAguardando() {
+    const ids = rhAguardandoConciliacao.map((p) => p.id);
+    if (ids.length === 0) {
+      setMensagemReceberBoleto("Nenhum pagamento de RH aguardando conciliação.");
+      return;
+    }
+    const proximo = structuredClone(db) as DB;
+    const r = conciliarPagamentosAguardando(proximo, ids, {
+      dataLiquidacao: hojeISO(),
+      responsavel: "usuário local",
+    });
+    mutate((atual) => {
+      Object.assign(atual, proximo);
+    });
+    if (r.conciliados > 0) {
+      setMensagemReceberBoleto(
+        `${r.conciliados} pagamento(s) de RH conciliado(s) e marcado(s) como pago.`
       );
     }
     if (r.erros.length) {
@@ -2288,6 +2315,16 @@ export default function FinanceiroPage() {
                       title="Marca todos os boletos desta fila como pagos com a data de hoje"
                     >
                       Conciliar todos boletos ({boletosAguardandoConciliacao.length})
+                    </button>
+                  )}
+                  {rhAguardandoConciliacao.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-primario text-sm"
+                      onClick={conciliarTodosPagamentosRhAguardando}
+                      title="Marca todos os pagamentos de RH desta fila como pagos com a data de hoje"
+                    >
+                      Conciliar todos RH ({rhAguardandoConciliacao.length})
                     </button>
                   )}
                   <Link

@@ -8,6 +8,16 @@ export type IndicadorCompletudeFinanceiro =
   | "Faltam dados de parcela"
   | "Sem boleto informado";
 
+export type FiltroCompletudeNota = "todas" | IndicadorCompletudeFinanceiro;
+
+export const INDICADORES_COMPLETUDE_FINANCEIRO: IndicadorCompletudeFinanceiro[] = [
+  "Completa",
+  "Falta fornecedor",
+  "Faltam dados fiscais",
+  "Faltam dados de parcela",
+  "Sem boleto informado",
+];
+
 export interface NotaFiscalResumoFinanceiro {
   nota: NotaFiscal;
   fornecedorNome: string;
@@ -21,7 +31,7 @@ export interface NotaFiscalResumoFinanceiro {
 
 export interface FiltroNotasFiscaisFinanceiro {
   pesquisa?: string;
-  completude?: "todas" | IndicadorCompletudeFinanceiro;
+  completude?: FiltroCompletudeNota;
 }
 
 export interface DetalhesNotaFiscalFinanceiro {
@@ -76,6 +86,28 @@ export function indicadorCompletudeFinanceiro(db: DB, nota: NotaFiscal): Indicad
   if (codigos.has("sem_duplicatas_sem_confirmacao")) return "Sem boleto informado";
 
   return "Faltam dados fiscais";
+}
+
+export function parseFiltroCompletudeNota(
+  valor: string | null | undefined
+): FiltroCompletudeNota {
+  if (valor && (INDICADORES_COMPLETUDE_FINANCEIRO as string[]).includes(valor)) {
+    return valor as IndicadorCompletudeFinanceiro;
+  }
+  return "todas";
+}
+
+/** Contagem de notas por indicador de completude (sem filtro de pesquisa). */
+export function resumirNotasFiscaisPorCompletude(
+  db: DB
+): Record<IndicadorCompletudeFinanceiro, number> {
+  const resumo = Object.fromEntries(
+    INDICADORES_COMPLETUDE_FINANCEIRO.map((indicador) => [indicador, 0])
+  ) as Record<IndicadorCompletudeFinanceiro, number>;
+  for (const nota of db.notas_fiscais) {
+    resumo[indicadorCompletudeFinanceiro(db, nota)] += 1;
+  }
+  return resumo;
 }
 
 export function montarResumoNotaFiscalFinanceiro(db: DB, nota: NotaFiscal): NotaFiscalResumoFinanceiro {

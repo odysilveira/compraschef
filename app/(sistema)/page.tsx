@@ -18,6 +18,7 @@ import { Badge, Card, Vazio } from "@/components/ui";
 import CartaoAlerta from "@/components/operacao/CartaoAlerta";
 import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@/lib/data";
 import { hrefFinanceiro } from "@/lib/domain/financeiro";
+import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
 import { hrefPagamentosRh, resumirOperacionalRh } from "@/lib/domain/resumo-rh";
 import { podeVerValores, usePapel, usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, diasAte, moeda } from "@/lib/format";
@@ -87,7 +88,7 @@ export default function PainelPage() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <CartaoAlerta
-          href="/estoque"
+          href={hrefEstoque({ alerta: "minimo" })}
           titulo="Produtos abaixo do estoque mínimo"
           numero={abaixoMinimo}
           icone={PackageX}
@@ -144,7 +145,7 @@ export default function PainelPage() {
           cor="vermelho"
         />
         <CartaoAlerta
-          href="/estoque"
+          href={hrefEstoque({ alerta: "validade", dias: 3 })}
           titulo="Caixas com validade em 3 dias"
           numero={caixasValidade}
           icone={Timer}

@@ -3,7 +3,8 @@
 // Estoque por caixas (requisitos 36–41) + Modo balanço (42–44).
 // Tela operacional: escanear o QR da caixa é o centro de tudo.
 
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowDownCircle,
   Boxes,
@@ -11,6 +12,7 @@ import {
   ClipboardList,
   MapPin,
   PackageOpen,
+  PackageX,
   Plus,
   Timer,
   TriangleAlert,
@@ -25,6 +27,7 @@ import {
   nomeLocal,
   nomePerfil,
   nomeProduto,
+  produtosAbaixoDoMinimo,
   siglaUnidadeUso,
   uid,
   useDB,
@@ -39,6 +42,10 @@ import {
   lotesPendentesDeAlocacao,
   quantidadePendenteLote,
 } from "@/lib/domain/estoque";
+import {
+  parseAlertaEstoque,
+  parseDiasVencimentoEstoque,
+} from "@/lib/domain/estoque-navegacao";
 import { usePapel } from "@/lib/roles";
 import { dataBR, diasAte, qtd, rotuloValidade } from "@/lib/format";
 import type { Caixa, DB, StatusCaixa } from "@/lib/types";
@@ -395,10 +402,13 @@ function FormRegistrarProducao({
 
 // ---------- Página ----------
 
-export default function EstoquePage() {
+function EstoqueConteudo() {
   const db = useDB();
+  const searchParams = useSearchParams();
   const { papel } = usePapel();
   const usuarioId = db.perfis.find((p) => p.papel === papel)?.id ?? "perfil-dono";
+  const alertaEstoque = parseAlertaEstoque(searchParams.get("alerta"));
+  const diasVencimentoUrl = parseDiasVencimentoEstoque(searchParams.get("dias"));
 
   const [aba, setAba] = useState<Aba>("estoque");
   const [caixaAtivaId, setCaixaAtivaId] = useState<string | null>(null);
@@ -420,7 +430,17 @@ export default function EstoquePage() {
   const loteCaixaAtiva = caixaAtiva ? loteDaCaixa(db, caixaAtiva.id) : undefined;
 
   // Janela de vencimentos configurável: atalhos (hoje/3/7/15 dias) ou data escolhida
-  const [dataAlvoVencimento, setDataAlvoVencimento] = useState(() => hojeMais(3));
+  const [dataAlvoVencimento, setDataAlvoVencimento] = useState(() =>
+    alertaEstoque === "validade" ? hojeMais(diasVencimentoUrl) : hojeMais(3)
+  );
+
+  useEffect(() => {
+    const alerta = parseAlertaEstoque(searchParams.get("alerta"));
+    const dias = parseDiasVencimentoEstoque(searchParams.get("dias"));
+    if (alerta === "validade") setDataAlvoVencimento(hojeMais(dias));
+  }, [searchParams]);
+
+  const abaixoMinimo = useMemo(() => produtosAbaixoDoMinimo(db), [db]);
   const vencendo = db.caixas
     .filter((c) => c.status !== "vazia" && c.validade && c.validade <= dataAlvoVencimento)
     .sort((a, b) => (a.validade ?? "").localeCompare(b.validade ?? ""));
@@ -778,8 +798,43 @@ export default function EstoquePage() {
             </Card>
           )}
 
+          {/* Alertas de estoque mínimo */}
+          <Card
+            className={`space-y-2 ${
+              alertaEstoque === "minimo" ? "border-destaque ring-1 ring-destaque" : ""
+            }`}
+          >
+            <p className="flex items-center gap-2 font-bold">
+              <PackageX size={20} className="text-destaque" /> Abaixo do mínimo
+              {abaixoMinimo.length > 0 ? ` (${abaixoMinimo.length})` : ""}
+            </p>
+            {abaixoMinimo.length === 0 ? (
+              <p className="py-2 text-sm text-stone-500">Nenhum produto abaixo do estoque mínimo.</p>
+            ) : (
+              abaixoMinimo.map(({ produto, estoque }) => (
+                <button
+                  key={produto.id}
+                  type="button"
+                  className="flex w-full flex-wrap items-center justify-between gap-2 rounded-card bg-slate-50 px-3 py-2 text-left hover:bg-slate-100"
+                  onClick={() => setFiltroTexto(produto.nome)}
+                  title="Filtrar caixas por este produto"
+                >
+                  <span className="text-sm font-medium">{produto.nome}</span>
+                  <Badge cor="vermelho">
+                    {qtd(estoque, siglaUnidadeUso(db, produto.id))} / mín.{" "}
+                    {qtd(produto.estoque_minimo, siglaUnidadeUso(db, produto.id))}
+                  </Badge>
+                </button>
+              ))
+            )}
+          </Card>
+
           {/* Alertas de validade — janela configurável */}
-          <Card className="space-y-2">
+          <Card
+            className={`space-y-2 ${
+              alertaEstoque === "validade" ? "border-destaque ring-1 ring-destaque" : ""
+            }`}
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="flex items-center gap-2 font-bold">
                 <Timer size={20} className="text-destaque" /> Vencimentos até {dataBR(dataAlvoVencimento)}
@@ -1081,5 +1136,20 @@ export default function EstoquePage() {
         <FormRegistrarProducao db={db} usuarioId={usuarioId} aoConcluir={() => setRegistrandoProducao(false)} />
       </Modal>
     </div>
+  );
+}
+
+export default function EstoquePage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="Estoque" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando estoque…</p>
+        </div>
+      }
+    >
+      <EstoqueConteudo />
+    </Suspense>
   );
 }

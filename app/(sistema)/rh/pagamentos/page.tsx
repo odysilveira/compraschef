@@ -928,14 +928,23 @@ function RhPagamentosConteudo() {
               </button>
             </>
           )}
-        {(filtro === "aguardando" || filtro === "pagos") && (
+        {(filtro === "aguardando" || filtro === "pagos" || filtro === "liberado") && (
           <Link
             href={hrefFinanceiro({
               aba: "boletos",
-              fila: filtro === "aguardando" ? "aguardando" : "pagos",
+              fila:
+                filtro === "aguardando"
+                  ? "aguardando"
+                  : filtro === "pagos"
+                    ? "pagos"
+                    : "liberados",
             })}
             className="btn-secundario"
-            title="Abre a agenda do Financeiro na mesma fila (boletos + RH)"
+            title={
+              filtro === "liberado"
+                ? "Abre a agenda do Financeiro nas ações de boletos liberados"
+                : "Abre a agenda do Financeiro na mesma fila (boletos + RH)"
+            }
           >
             Ver no Financeiro
           </Link>

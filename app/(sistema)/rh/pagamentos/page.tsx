@@ -44,7 +44,7 @@ import {
 import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
-import { hrefFinanceiro } from "@/lib/domain/financeiro";
+import { filaAgendaFinanceiroDeStatusPagamento, hrefFinanceiro } from "@/lib/domain/financeiro";
 import {
   hrefConsumosRh,
   hrefPagamentosRh,
@@ -932,12 +932,13 @@ function RhPagamentosConteudo() {
           <Link
             href={hrefFinanceiro({
               aba: "boletos",
-              fila:
+              fila: filaAgendaFinanceiroDeStatusPagamento(
                 filtro === "aguardando"
-                  ? "aguardando"
+                  ? "aguardando_conciliacao"
                   : filtro === "pagos"
-                    ? "pagos"
-                    : "liberados",
+                    ? "pago"
+                    : "liberado"
+              ),
             })}
             className="btn-secundario"
             title={
@@ -1042,7 +1043,9 @@ function RhPagamentosConteudo() {
         />
       ) : (
         <div className="space-y-3">
-          {lista.map((pagamento) => (
+          {lista.map((pagamento) => {
+            const filaFinanceiro = filaAgendaFinanceiroDeStatusPagamento(pagamento.status);
+            return (
             <Card key={pagamento.id} className="space-y-2">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -1078,6 +1081,18 @@ function RhPagamentosConteudo() {
                   >
                     Ver perfil
                   </Link>
+                  {filaFinanceiro && (
+                    <Link
+                      href={hrefFinanceiro({
+                        aba: "boletos",
+                        fila: filaFinanceiro,
+                      })}
+                      className="mt-1 ml-3 inline-block text-sm text-primaria-escura underline"
+                      title="Abre a agenda do Financeiro na fila deste pagamento"
+                    >
+                      Ver no Financeiro
+                    </Link>
+                  )}
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <BadgeStatusPagamento pagamento={pagamento} />
@@ -1179,7 +1194,8 @@ function RhPagamentosConteudo() {
                 )}
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 

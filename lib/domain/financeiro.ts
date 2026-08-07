@@ -1,4 +1,4 @@
-import type { ContaPagar, StatusContaPagar } from "../types";
+import type { ContaPagar, StatusContaPagar, StatusPagamentoPessoa } from "../types";
 
 export type FiltroVencimentoConta = "todas" | "hoje" | "proximos_7_dias" | "atrasadas";
 
@@ -251,6 +251,19 @@ export function parseFilaAgendaFinanceiro(
   valor: string | null | undefined
 ): FilaAgendaFinanceiro | undefined {
   if (valor === "aguardando" || valor === "pagos" || valor === "liberados") return valor;
+  return undefined;
+}
+
+/**
+ * Mapeia status de pagamento de RH para a fila da agenda Financeiro.
+ * Previsto (e demais) não têm fila dedicada.
+ */
+export function filaAgendaFinanceiroDeStatusPagamento(
+  status: StatusPagamentoPessoa
+): FilaAgendaFinanceiro | undefined {
+  if (status === "liberado") return "liberados";
+  if (status === "aguardando_conciliacao") return "aguardando";
+  if (status === "pago") return "pagos";
   return undefined;
 }
 

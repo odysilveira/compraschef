@@ -8,6 +8,7 @@ import {
   contaVenceNosProximos7Dias,
   exportarContasPagarCsv,
   filtrarContasPagar,
+  filaAgendaFinanceiroDeStatusPagamento,
   hrefFinanceiro,
   ordenarContasPagar,
   parseAbaFinanceiro,
@@ -341,6 +342,10 @@ describe("helpers de contas a pagar na tela", () => {
     expect(parseFilaAgendaFinanceiro("pagos")).toBe("pagos");
     expect(parseFilaAgendaFinanceiro("liberados")).toBe("liberados");
     expect(parseFilaAgendaFinanceiro("x")).toBeUndefined();
+    expect(filaAgendaFinanceiroDeStatusPagamento("liberado")).toBe("liberados");
+    expect(filaAgendaFinanceiroDeStatusPagamento("aguardando_conciliacao")).toBe("aguardando");
+    expect(filaAgendaFinanceiroDeStatusPagamento("pago")).toBe("pagos");
+    expect(filaAgendaFinanceiroDeStatusPagamento("previsto")).toBeUndefined();
     expect(parseFiltroVencimentoConta("atrasadas")).toBe("atrasadas");
     expect(parseFiltroVencimentoConta("x")).toBe("todas");
     expect(parseFiltroStatusConta("aguardando_conciliacao")).toBe("aguardando_conciliacao");

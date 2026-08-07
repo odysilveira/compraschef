@@ -61,7 +61,7 @@ import {
   parsePessoaPontoRh,
   type FiltroConvocacaoEscalaRh,
 } from "@/lib/domain/resumo-rh";
-import { rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
+import { liberarPagamentoPessoa, rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
 import {
   chavePixDaPessoa,
   linkWhatsAppReciboPagamento,
@@ -2155,6 +2155,26 @@ function RhEscalaConteudo() {
                     >
                       Ver no Financeiro
                     </Link>
+                  )}
+                  {detalhePagamento.status === "previsto" && (
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      onClick={() => {
+                        const proximo = structuredClone(db);
+                        const r = liberarPagamentoPessoa(proximo, detalhePagamento.id);
+                        if (!r.sucesso) {
+                          setErro(r.erros.join(" "));
+                          setMensagem(null);
+                          return;
+                        }
+                        mutate((atual) => Object.assign(atual, proximo));
+                        setErro(null);
+                        setMensagem("Pagamento liberado.");
+                      }}
+                    >
+                      Liberar
+                    </button>
                   )}
                   {(detalhePagamento.status === "previsto" ||
                     detalhePagamento.status === "liberado") &&

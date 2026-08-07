@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, FileUp, Save, Trash2, Users } from "lucide-react";
+import { ArrowLeft, Download, FileUp, Save, Trash2, Users } from "lucide-react";
 import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, useDB } from "@/lib/data";
 import {
@@ -19,6 +19,7 @@ import {
 import {
   alertaDocumentosPessoa,
   atualizarDocumentoNaLista,
+  exportarDocumentosPessoasCsv,
   garantirChecklistDocumentos,
   hojeIsoLocal,
   resumirDocumentos,
@@ -279,6 +280,27 @@ function RhPerfilConteudo() {
       };
     });
     setMensagem("Documentos salvos.");
+    setErro(null);
+  }
+
+  function baixarDocumentosCsv() {
+    if (!editando) return;
+    const csv = exportarDocumentosPessoasCsv([editando]);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug =
+      editando.nome
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || editando.id;
+    a.href = url;
+    a.download = `rh-documentos-${slug}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagem("CSV baixado (checklist desta pessoa).");
     setErro(null);
   }
 
@@ -764,11 +786,21 @@ function RhPerfilConteudo() {
               <Card className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-base font-bold">Checklist de documentos</h2>
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <Badge cor="verde">Presente ({resumo.presente})</Badge>
-                    <Badge cor="cinza">Ausente ({resumo.ausente})</Badge>
-                    <Badge cor="azul">A vencer ({resumo.a_vencer})</Badge>
-                    <Badge cor="laranja">Vencido ({resumo.vencido})</Badge>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <Badge cor="verde">Presente ({resumo.presente})</Badge>
+                      <Badge cor="cinza">Ausente ({resumo.ausente})</Badge>
+                      <Badge cor="azul">A vencer ({resumo.a_vencer})</Badge>
+                      <Badge cor="laranja">Vencido ({resumo.vencido})</Badge>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-secundario text-sm"
+                      onClick={baixarDocumentosCsv}
+                      title="Exportar checklist desta pessoa (CSV)"
+                    >
+                      <Download size={14} /> Exportar CSV
+                    </button>
                   </div>
                 </div>
                 <p className="text-sm text-slate-600">

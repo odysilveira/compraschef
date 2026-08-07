@@ -698,3 +698,71 @@ export function gerarPadraoInterleaved2of5(codigoCanonico: string): SegmentoCodi
 
   return segmentos;
 }
+
+function csvEscape(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+function formatarValorCsv(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  return n.toFixed(2).replace(".", ",");
+}
+
+/**
+ * CSV da agenda de boletos (separador `;`, UTF-8 com BOM) para Excel/pt-BR.
+ */
+export function exportarBoletosAgendaCsv(
+  boletos: Boleto[],
+  contexto: {
+    fornecedorDoBoleto: (boleto: Boleto) => string;
+    numeroNotaDoBoleto: (boleto: Boleto) => string;
+  }
+): string {
+  const cabecalho = [
+    "Fornecedor",
+    "NF-e",
+    "Parcela",
+    "Vencimento",
+    "Valor",
+    "Status",
+    "Linha digitável",
+    "CNPJ beneficiário",
+    "Data pagamento",
+    "Valor pago",
+    "Banco/conta",
+    "Responsável",
+    "Observação",
+    "Divergente",
+    "Motivo divergência",
+  ];
+  const ordenados = boletos
+    .slice()
+    .sort(
+      (a, b) =>
+        a.vencimento.localeCompare(b.vencimento) ||
+        contexto.fornecedorDoBoleto(a).localeCompare(contexto.fornecedorDoBoleto(b), "pt-BR")
+    );
+  const linhas = ordenados.map((b) =>
+    [
+      contexto.fornecedorDoBoleto(b),
+      contexto.numeroNotaDoBoleto(b),
+      b.numero_parcela ?? "",
+      b.vencimento,
+      formatarValorCsv(b.valor),
+      rotuloStatus(b.status),
+      b.linha_digitavel ?? "",
+      b.cnpj_beneficiario ?? "",
+      b.pagamento_data ?? "",
+      formatarValorCsv(b.pagamento_valor),
+      b.pagamento_banco_conta ?? "",
+      b.pagamento_responsavel ?? "",
+      b.pagamento_observacao ?? b.observacao ?? "",
+      b.conciliacao_divergente ? "sim" : "não",
+      b.conciliacao_divergencia_motivo ?? "",
+    ]
+      .map((c) => csvEscape(String(c)))
+      .join(";")
+  );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}

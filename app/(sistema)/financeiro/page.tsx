@@ -13,6 +13,7 @@ import {
   CircleCheckBig,
   Clock3,
   Copy,
+  Download,
   Lock,
   Phone,
   Plus,
@@ -74,6 +75,7 @@ import {
   linhaDigitavelParaPagamento,
   montarEstadoAgendaPagamentoBoleto,
   montarTextosLinhasDigitaveisBoletosLote,
+  exportarBoletosAgendaCsv,
   registrarDivergenciaBoleto,
   type SegmentoCodigoBarrasItf,
   type SnapshotPagamentoBoleto,
@@ -1095,6 +1097,25 @@ export default function FinanceiroPage() {
     } catch {
       setMensagemReceberBoleto("Não foi possível copiar as linhas digitáveis neste navegador.");
     }
+  }
+
+  function baixarAgendaBoletosCsv() {
+    if (boletosAtivos.length === 0) {
+      setMensagemReceberBoleto("Nenhum boleto na agenda para exportar.");
+      return;
+    }
+    const csv = exportarBoletosAgendaCsv(boletosAtivos, {
+      fornecedorDoBoleto: (boleto) => fornecedorDoBoleto(db, boleto),
+      numeroNotaDoBoleto: (boleto) => notaDoBoleto(db, boleto)?.numero ?? "",
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "financeiro-agenda-boletos.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagemReceberBoleto(`CSV baixado (${boletosAtivos.length} boleto(s)).`);
   }
 
   function atualizarCampoPagamento<K extends keyof FormPagamentoBoletoState>(
@@ -2209,6 +2230,20 @@ export default function FinanceiroPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2>Boletos a vencer</h2>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-secundario"
+                disabled={boletosAtivos.length === 0}
+                onClick={baixarAgendaBoletosCsv}
+                title={
+                  boletosAtivos.length === 0
+                    ? "Nada para exportar na agenda"
+                    : "Exportar boletos da agenda (CSV)"
+                }
+              >
+                <Download size={16} /> Exportar CSV
+                {boletosAtivos.length > 0 ? ` (${boletosAtivos.length})` : ""}
+              </button>
               <button type="button" className="btn-secundario" onClick={abrirImportarExtratoOfx}>
                 <Upload size={18} /> Importar extrato OFX
               </button>

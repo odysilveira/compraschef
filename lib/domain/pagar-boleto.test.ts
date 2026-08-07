@@ -15,6 +15,7 @@ import {
   montarEstadoAgendaPagamentoBoleto,
   montarTextosLinhasDigitaveisBoletosLote,
   obterCodigoCanonicoConfirmadoDoDocumento,
+  exportarBoletosAgendaCsv,
   registrarDivergenciaBoleto,
 } from "./pagar-boleto";
 
@@ -611,5 +612,52 @@ describe("estado da agenda de pagamento", () => {
 
     expect(desktop).toEqual(["exibir_codigo", "copiar_linha", "informar_pagamento"]);
     expect(mobile).toEqual(desktop);
+  });
+});
+
+describe("exportar CSV da agenda de boletos", () => {
+  it("exporta BOM, cabeçalho e valores em pt-BR", () => {
+    const csv = exportarBoletosAgendaCsv(
+      [
+        boletoBase({
+          id: "bol-a",
+          numero_parcela: "001",
+          valor: 1500.5,
+          vencimento: "2026-08-12",
+          linha_digitavel: "LINHA;COM;PONTOEVIRGULA",
+          pagamento_observacao: 'Obs com "aspas"',
+        }),
+        boletoBase({
+          id: "bol-b",
+          valor: 100,
+          vencimento: "2026-08-10",
+          status: "pago",
+          pagamento_data: "2026-08-09",
+          pagamento_valor: 100,
+        }),
+      ],
+      {
+        fornecedorDoBoleto: (b) => (b.id === "bol-a" ? "Alfa Distribuidora" : "Beta Alimentos"),
+        numeroNotaDoBoleto: (b) => (b.id === "bol-a" ? "1001" : "1002"),
+      }
+    );
+
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Fornecedor;NF-e;Parcela;Vencimento;Valor;Status");
+    expect(csv).toContain("Beta Alimentos");
+    expect(csv).toContain("1002");
+    expect(csv).toContain("pago");
+    expect(csv).toContain("1500,50");
+    expect(csv).toContain('"LINHA;COM;PONTOEVIRGULA"');
+    expect(csv.indexOf("Beta Alimentos")).toBeLessThan(csv.indexOf("Alfa Distribuidora"));
+  });
+
+  it("exporta lista vazia só com cabeçalho", () => {
+    const csv = exportarBoletosAgendaCsv([], {
+      fornecedorDoBoleto: () => "",
+      numeroNotaDoBoleto: () => "",
+    });
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv.trim().split(/\r?\n/).length).toBe(1);
   });
 });

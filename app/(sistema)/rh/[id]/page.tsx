@@ -26,8 +26,10 @@ import {
   corBadgeNotaAvaliacao,
   editarAvaliacaoPessoa,
   excluirAvaliacaoPessoa,
+  formatarMediaAvaliacao,
   listarAvaliacoesPessoa,
   NOTAS_AVALIACAO_PESSOA,
+  resumirAvaliacoesPessoa,
   rotuloCompetenciaAvaliacao,
 } from "@/lib/domain/avaliacoes-pessoa";
 import type { NotaAvaliacaoPessoaRh, TipoAnotacaoPessoaRh } from "@/lib/types";
@@ -182,6 +184,10 @@ function RhPerfilConteudo() {
   const avaliacoesPessoa = useMemo(
     () => (pessoa ? listarAvaliacoesPessoa(db, pessoa.id) : []),
     [db, pessoa]
+  );
+  const resumoAvaliacoes = useMemo(
+    () => resumirAvaliacoesPessoa(avaliacoesPessoa),
+    [avaliacoesPessoa]
   );
   const porDiaPessoa = useMemo(() => {
     const map = new Map<string, typeof plantaoesPessoa>();
@@ -2038,6 +2044,31 @@ function RhPerfilConteudo() {
 
           <Card className="space-y-3">
             <h2 className="text-base font-bold">Histórico formal</h2>
+            {resumoAvaliacoes.quantidade > 0 && (
+              <div className="flex flex-wrap gap-3 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm">
+                <p>
+                  <span className="text-slate-500">Média</span>{" "}
+                  <span className="font-bold text-slate-900">
+                    {formatarMediaAvaliacao(resumoAvaliacoes.media)}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-slate-500">Ciclos</span>{" "}
+                  <span className="font-bold text-slate-900">{resumoAvaliacoes.quantidade}</span>
+                </p>
+                {resumoAvaliacoes.ultimaNota != null && resumoAvaliacoes.ultimaCompetencia && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-slate-500">Última</span>
+                    <Badge cor={corBadgeNotaAvaliacao(resumoAvaliacoes.ultimaNota)}>
+                      Nota {resumoAvaliacoes.ultimaNota}
+                    </Badge>
+                    <span className="text-xs text-slate-500">
+                      {rotuloCompetenciaAvaliacao(resumoAvaliacoes.ultimaCompetencia)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
             {avaliacoesPessoa.length === 0 ? (
               <Vazio mensagem="Nenhuma avaliação neste perfil." />
             ) : (

@@ -54,6 +54,41 @@ export function listarAvaliacoesPessoa(
     });
 }
 
+export interface ResumoAvaliacoesPessoa {
+  quantidade: number;
+  /** Média aritmética das notas; null se não houver avaliações. */
+  media: number | null;
+  ultimaNota: NotaAvaliacaoPessoaRh | null;
+  ultimaCompetencia: string | null;
+}
+
+/** Agrega quantidade, média e última nota (lista já ordenada ou não). */
+export function resumirAvaliacoesPessoa(avaliacoes: AvaliacaoPessoaRh[]): ResumoAvaliacoesPessoa {
+  if (avaliacoes.length === 0) {
+    return { quantidade: 0, media: null, ultimaNota: null, ultimaCompetencia: null };
+  }
+  const ordenadas = [...avaliacoes].sort((a, b) => {
+    const porComp = b.competencia.localeCompare(a.competencia);
+    if (porComp !== 0) return porComp;
+    return b.criado_em.localeCompare(a.criado_em);
+  });
+  const soma = avaliacoes.reduce((acc, a) => acc + a.nota, 0);
+  const media = Math.round((soma / avaliacoes.length) * 10) / 10;
+  const ultima = ordenadas[0];
+  return {
+    quantidade: avaliacoes.length,
+    media,
+    ultimaNota: ultima.nota,
+    ultimaCompetencia: ultima.competencia,
+  };
+}
+
+/** Formata média com 1 casa (pt-BR). */
+export function formatarMediaAvaliacao(media: number | null): string {
+  if (media == null) return "—";
+  return media.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
 /**
  * Registra avaliação formal (nota 1–5) por competência.
  * Não altera anotações livres nem pagamentos.

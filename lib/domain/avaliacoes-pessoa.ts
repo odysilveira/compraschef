@@ -97,3 +97,56 @@ export function adicionarAvaliacaoPessoa(
   db.avaliacoes_pessoas.push(avaliacao);
   return { sucesso: true, erros: [], avaliacao };
 }
+
+/**
+ * Atualiza competência/nota/comentário de uma avaliação existente.
+ * Preserva avaliador e criado_em; atualiza atualizado_em.
+ */
+export function editarAvaliacaoPessoa(
+  db: DB,
+  avaliacaoId: string,
+  dados: {
+    competencia: string;
+    nota: number;
+    comentario?: string;
+  },
+  opcoes?: { agora?: string }
+): ResultadoAvaliacaoPessoa {
+  const id = limparTexto(avaliacaoId);
+  const lista = db.avaliacoes_pessoas ?? [];
+  const indice = lista.findIndex((a) => a.id === id);
+  if (indice < 0) {
+    return { sucesso: false, erros: ["Avaliação não encontrada."] };
+  }
+  const competencia = limparTexto(dados.competencia);
+  if (!competenciaValida(competencia)) {
+    return { sucesso: false, erros: ["Informe a competência (AAAA-MM)."] };
+  }
+  const nota = normalizarNota(dados.nota);
+  if (!nota) {
+    return { sucesso: false, erros: ["A nota deve ser de 1 a 5."] };
+  }
+  const atual = lista[indice];
+  const agora = opcoes?.agora ?? new Date().toISOString();
+  const avaliacao: AvaliacaoPessoaRh = {
+    ...atual,
+    competencia,
+    nota,
+    comentario: limparTexto(dados.comentario) || undefined,
+    atualizado_em: agora,
+  };
+  lista[indice] = avaliacao;
+  return { sucesso: true, erros: [], avaliacao };
+}
+
+/** Remove avaliação pelo id. */
+export function excluirAvaliacaoPessoa(db: DB, avaliacaoId: string): ResultadoAvaliacaoPessoa {
+  const id = limparTexto(avaliacaoId);
+  const lista = db.avaliacoes_pessoas ?? [];
+  const indice = lista.findIndex((a) => a.id === id);
+  if (indice < 0) {
+    return { sucesso: false, erros: ["Avaliação não encontrada."] };
+  }
+  const [removida] = lista.splice(indice, 1);
+  return { sucesso: true, erros: [], avaliacao: removida };
+}

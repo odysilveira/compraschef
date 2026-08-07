@@ -4,6 +4,7 @@ import type { DB, NotaFiscal } from "../types";
 import {
   abrirModalCorrecaoNfe,
   detalharNotaFiscalFinanceiro,
+  exportarNotasFiscaisFinanceiroCsv,
   listarNotasFiscaisFinanceiro,
   montarResumoNotaFiscalFinanceiro,
 } from "./nfe-financeiro";
@@ -163,5 +164,40 @@ describe("notas fiscais no financeiro", () => {
     const lista = listarNotasFiscaisFinanceiro(db, { completude: "todas" });
 
     expect(lista).toEqual([]);
+  });
+
+  it("exporta CSV das notas com BOM e valores pt-BR", () => {
+    const db = dbBase();
+    db.notas_fiscais = [
+      criarNota({
+        id: "nf-csv",
+        numero: "999",
+        chave_acesso: "CHAVE;COM;PV",
+        valor_total: 1500.5,
+        cnpj_emitente: "12.345.678/0001-99",
+        razao_social_emitente: "Emitente Teste",
+        emitida_em: "2026-07-20",
+        status: "conferida",
+      }),
+    ];
+    db.boletos = [
+      {
+        id: "bol-csv",
+        nota_id: "nf-csv",
+        valor: 1500.5,
+        vencimento: "2026-08-10",
+        status: "liberado",
+      },
+    ];
+
+    const lista = listarNotasFiscaisFinanceiro(db, { completude: "todas" });
+    const csv = exportarNotasFiscaisFinanceiroCsv(lista);
+
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("NF-e;Fornecedor vinculado;Emitente;CNPJ emitente");
+    expect(csv).toContain("999");
+    expect(csv).toContain("1500,50");
+    expect(csv).toContain("Conferida");
+    expect(csv).toContain('"CHAVE;COM;PV"');
   });
 });

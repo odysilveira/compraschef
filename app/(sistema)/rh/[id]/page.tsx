@@ -5,9 +5,13 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Copy, Download, FileUp, Save, Trash2, Users } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
-import { mutate, useDB } from "@/lib/data";
+import { mutate, uid, useDB } from "@/lib/data";
 import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
+import {
+  adicionarAnotacaoPessoa,
+  listarAnotacoesPessoa,
+} from "@/lib/domain/anotacoes-pessoa";
 import {
   validarAdiantamento,
   TETO_ADIANTAMENTO_PCT,
@@ -107,6 +111,9 @@ function RhPerfilConteudo() {
   const [conciliarId, setConciliarId] = useState<string | null>(null);
   const [dataLiquidacao, setDataLiquidacao] = useState(hojeIsoLocal());
   const [erroConciliar, setErroConciliar] = useState<string | null>(null);
+  const [textoAnotacao, setTextoAnotacao] = useState("");
+  const [dataAnotacao, setDataAnotacao] = useState(hojeIsoLocal());
+  const [erroAnotacao, setErroAnotacao] = useState<string | null>(null);
 
   const pessoa = useMemo(
     () => (db.pessoas ?? []).find((p) => p.id === params.id) ?? null,
@@ -131,6 +138,10 @@ function RhPerfilConteudo() {
       .filter((c) => c.pessoa_id === pessoa.id)
       .sort((a, b) => b.data.localeCompare(a.data));
   }, [db.consumos_pessoas, pessoa]);
+  const anotacoesPessoa = useMemo(
+    () => (pessoa ? listarAnotacoesPessoa(db, pessoa.id) : []),
+    [db, pessoa]
+  );
   const porDiaPessoa = useMemo(() => {
     const map = new Map<string, typeof plantaoesPessoa>();
     for (const dia of diasJanela) map.set(dia, []);
@@ -454,6 +465,30 @@ function RhPerfilConteudo() {
     setMensagem("Pagamento conciliado e marcado como pago.");
   }
 
+  function salvarAnotacao(e: FormEvent) {
+    e.preventDefault();
+    if (!pessoa) return;
+    const proximo = structuredClone(db);
+    const r = adicionarAnotacaoPessoa(proximo, {
+      id: uid("anot"),
+      pessoa_id: pessoa.id,
+      texto: textoAnotacao,
+      data: dataAnotacao,
+      autor: "usuário local",
+    });
+    if (!r.sucesso) {
+      setErroAnotacao(r.erros.join(" "));
+      setMensagem(null);
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setTextoAnotacao("");
+    setDataAnotacao(hojeIsoLocal());
+    setErroAnotacao(null);
+    setErro(null);
+    setMensagem("Anotação salva no histórico.");
+  }
+
   function salvarDados(e: FormEvent) {
     e.preventDefault();
     if (!editando.nome.trim()) {
@@ -658,6 +693,7 @@ function RhPerfilConteudo() {
             ["escala", "Escala"],
             ["pagamentos", "Pagamentos"],
             ["consumos", "Consumos"],
+            ["anotacoes", "Anotações"],
           ] as const satisfies ReadonlyArray<readonly [AbaPerfilRh, string]>
         ).map(([id, rotulo]) => (
           <button
@@ -1273,8 +1309,15 @@ function RhPerfilConteudo() {
           </div>
 
           <p className="text-xs text-slate-500">
-            No calendário da equipe (RH → Escala) você vê os nomes de todo mundo em cada dia. Avaliações e
-            histórico entram depois neste perfil.
+            No calendário da equipe (RH → Escala) você vê os nomes de todo mundo em cada dia.{" "}
+            <button
+              type="button"
+              className="font-medium text-primaria-escura underline"
+              onClick={() => irParaAba("anotacoes")}
+            >
+              Anotações
+            </button>{" "}
+            registram o histórico livre; avaliações formais entram depois.
           </p>
         </Card>
       )}
@@ -1619,6 +1662,65 @@ function RhPerfilConteudo() {
             </div>
           )}
         </Card>
+      )}
+
+      {aba === "anotacoes" && (
+        <div className="space-y-4">
+          <Card className="space-y-3">
+            <h2 className="text-base font-bold">Nova anotação</h2>
+            <p className="text-sm text-slate-600">
+              Histórico livre (elogios, avisos, observações). Avaliações formais entram depois.
+            </p>
+            <form onSubmit={salvarAnotacao} className="space-y-3">
+              <Campo rotulo="Data">
+                <input
+                  type="date"
+                  className="campo"
+                  required
+                  value={dataAnotacao}
+                  onChange={(e) => setDataAnotacao(e.target.value)}
+                />
+              </Campo>
+              <Campo rotulo="Texto *">
+                <textarea
+                  className="campo min-h-24"
+                  required
+                  value={textoAnotacao}
+                  onChange={(e) => setTextoAnotacao(e.target.value)}
+                  placeholder="Ex.: aviso verbal por atraso; elogio do serviço de sexta…"
+                />
+              </Campo>
+              {erroAnotacao && <p className="text-sm font-medium text-erro">{erroAnotacao}</p>}
+              <div className="flex justify-end">
+                <button type="submit" className="btn-primario">
+                  Salvar anotação
+                </button>
+              </div>
+            </form>
+          </Card>
+
+          <Card className="space-y-3">
+            <h2 className="text-base font-bold">Histórico</h2>
+            {anotacoesPessoa.length === 0 ? (
+              <Vazio mensagem="Nenhuma anotação neste perfil." />
+            ) : (
+              <div className="space-y-2">
+                {anotacoesPessoa.map((anotacao) => (
+                  <div
+                    key={anotacao.id}
+                    className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                  >
+                    <p className="text-xs text-slate-500">
+                      {dataBR(anotacao.data)}
+                      {anotacao.autor ? ` · ${anotacao.autor}` : ""}
+                    </p>
+                    <p className="whitespace-pre-wrap text-sm text-slate-900">{anotacao.texto}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
       )}
     </div>
   );

@@ -811,12 +811,26 @@ export interface PendenciaPonto {
   atualizado_em: string;
 }
 
+/** Nota livre no histórico da pessoa (faltas leves, elogios, observações). */
+export interface AnotacaoPessoaRh {
+  id: string;
+  pessoa_id: string;
+  /** Data de referência YYYY-MM-DD. */
+  data: string;
+  texto: string;
+  autor?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
 // Banco completo em memória (camada mock)
 export interface DB {
   perfis: Perfil[];
   pessoas: PessoaRH[];
   pagamentos_pessoas: PagamentoPessoa[];
   consumos_pessoas: ConsumoPessoa[];
+  /** Histórico livre no perfil (anotações). */
+  anotacoes_pessoas?: AnotacaoPessoaRh[];
   escala_slots: EscalaSlot[];
   convocacoes: ConvocacaoIntermitente[];
   /** Contas de onde o restaurante paga (origem). */

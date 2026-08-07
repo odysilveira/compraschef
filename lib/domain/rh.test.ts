@@ -66,5 +66,7 @@ describe("rh helpers", () => {
     expect(hrefPerfilRh("pes-1", { aba: "escala" })).toBe("/rh/pes-1?aba=escala");
     expect(hrefPerfilRh("pes-1", { aba: "pagamentos" })).toBe("/rh/pes-1?aba=pagamentos");
     expect(hrefPerfilRh("pes-1", { aba: "consumos" })).toBe("/rh/pes-1?aba=consumos");
+    expect(hrefPerfilRh("pes-1", { aba: "anotacoes" })).toBe("/rh/pes-1?aba=anotacoes");
+    expect(parseAbaPerfilRh("anotacoes")).toBe("anotacoes");
   });
 });

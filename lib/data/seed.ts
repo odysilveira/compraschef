@@ -428,6 +428,27 @@ export const seedDB: DB = {
     },
   ],
 
+  anotacoes_pessoas: [
+    {
+      id: "anot-1",
+      pessoa_id: "pes-gerente",
+      data: soData(diasAtras(14)),
+      texto: "Elogio da equipe — conduziu bem o serviço de sexta lotada.",
+      autor: "Ody",
+      criado_em: diasAtras(14),
+      atualizado_em: diasAtras(14),
+    },
+    {
+      id: "anot-2",
+      pessoa_id: "pes-inter-1",
+      data: soData(diasAtras(5)),
+      texto: "Aviso verbal: chegou 20 min atrasado; justificou trânsito.",
+      autor: "Gerente",
+      criado_em: diasAtras(5),
+      atualizado_em: diasAtras(5),
+    },
+  ],
+
   escala_slots: [
     {
       id: "esc-1",

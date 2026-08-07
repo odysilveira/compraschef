@@ -1,4 +1,5 @@
 import { validarBoleto } from "./boletos";
+import { dataBR, moeda } from "../format";
 import type { Boleto, DB, DocumentoBoleto, HistoricoPagamentoBoleto, StatusBoleto } from "../types";
 
 export type MotivoBloqueioPagamentoBoleto =
@@ -437,6 +438,45 @@ export function informarPagamentosBoletosLiberados(
     else erros.push(...r.erros.map((e) => `${id}: ${e}`));
   }
   return { sucesso: erros.length === 0, informados, erros };
+}
+
+/** Mesma resolução da UI da agenda (boleto → documento → canônico). */
+export function linhaDigitavelParaPagamento(
+  boleto: Boleto,
+  documento?: DocumentoBoleto
+): string | undefined {
+  const linha =
+    limparTexto(boleto.linha_digitavel) ||
+    limparTexto(documento?.linha_informada) ||
+    obterCodigoCanonicoConfirmadoDoDocumento(documento);
+  return linha || undefined;
+}
+
+/**
+ * Blocos legíveis para colar no banco (um boleto por vez).
+ * Não altera status — só monta texto.
+ */
+export function montarTextosLinhasDigitaveisBoletosLote(
+  itens: Array<{
+    boleto: Boleto;
+    documento?: DocumentoBoleto;
+    fornecedor: string;
+    numeroNota?: string;
+  }>
+): string {
+  const blocos: string[] = [];
+  for (const item of itens) {
+    const linha = linhaDigitavelParaPagamento(item.boleto, item.documento);
+    if (!linha) continue;
+    const partes = [
+      item.fornecedor.trim() || "Fornecedor",
+      item.numeroNota ? `NF-e ${item.numeroNota}` : null,
+      moeda(item.boleto.valor),
+      `venc. ${dataBR(item.boleto.vencimento)}`,
+    ].filter(Boolean);
+    blocos.push(`—— ${partes.join(" · ")} ——\n${linha}`);
+  }
+  return blocos.join("\n\n==========\n\n");
 }
 
 export function conciliarBoleto(

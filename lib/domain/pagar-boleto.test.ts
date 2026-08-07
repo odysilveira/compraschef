@@ -11,7 +11,9 @@ import {
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
   informarPagamentosBoletosLiberados,
+  linhaDigitavelParaPagamento,
   montarEstadoAgendaPagamentoBoleto,
+  montarTextosLinhasDigitaveisBoletosLote,
   obterCodigoCanonicoConfirmadoDoDocumento,
   registrarDivergenciaBoleto,
 } from "./pagar-boleto";
@@ -307,6 +309,79 @@ describe("informar pagamento do boleto", () => {
     expect(db.boletos.find((b) => b.id === "bol-b")?.pagamento_valor).toBe(200);
     expect(db.boletos.find((b) => b.id === "bol-c")?.status).toBe("aguardando_conciliacao");
     expect(db.boleto_pagamentos_historico).toHaveLength(2);
+  });
+});
+
+describe("linha digitável e lote para pagamento", () => {
+  it("resolve linha do boleto, depois documento, depois canônico", () => {
+    const boleto = {
+      ...boletoBase(),
+      linha_digitavel: "11111.11111 11111.111111 11111.111111 1 11110000003184",
+    };
+    expect(linhaDigitavelParaPagamento(boleto)).toContain("11111");
+
+    const boletoSemLinha = boletoBase({ linha_digitavel: undefined });
+    const doc = documentoBase({
+      linha_informada: "22222.22222 22222.222222 22222.222222 2 22220000003184",
+      codigo_canonico: undefined,
+      confirmado_em: undefined,
+      confirmado_por: undefined,
+    });
+    expect(linhaDigitavelParaPagamento(boletoSemLinha, doc)).toContain("22222");
+
+    const docCanonico = documentoBase({
+      linha_informada: undefined,
+    });
+    expect(linhaDigitavelParaPagamento(boletoSemLinha, docCanonico)).toBe(docCanonico.codigo_canonico);
+  });
+
+  it("monta textos de linhas digitáveis em lote com cabeçalho", () => {
+    expect(montarTextosLinhasDigitaveisBoletosLote([])).toBe("");
+
+    const texto = montarTextosLinhasDigitaveisBoletosLote([
+      {
+        boleto: {
+          ...boletoBase(),
+          id: "bol-a",
+          valor: 100,
+          vencimento: "2026-08-10",
+          linha_digitavel: "LINHA-A-123",
+        },
+        fornecedor: "Distribuidora Alfa",
+        numeroNota: "1001",
+      },
+      {
+        boleto: {
+          ...boletoBase(),
+          id: "bol-b",
+          valor: 200,
+          vencimento: "2026-08-12",
+          linha_digitavel: undefined,
+        },
+        fornecedor: "Sem linha",
+        numeroNota: "1002",
+      },
+      {
+        boleto: {
+          ...boletoBase(),
+          id: "bol-c",
+          valor: 50,
+          vencimento: "2026-08-15",
+          linha_digitavel: "LINHA-C-456",
+        },
+        fornecedor: "Beta Alimentos",
+        numeroNota: "1003",
+      },
+    ]);
+
+    expect(texto).toContain("Distribuidora Alfa");
+    expect(texto).toContain("NF-e 1001");
+    expect(texto).toContain("LINHA-A-123");
+    expect(texto).toContain("Beta Alimentos");
+    expect(texto).toContain("LINHA-C-456");
+    expect(texto).toContain("==========");
+    expect(texto).not.toContain("Sem linha");
+    expect(texto).not.toContain("LINHA-B");
   });
 });
 

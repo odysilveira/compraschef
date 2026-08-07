@@ -103,8 +103,10 @@ import {
 import { filtroPagamentosRhDeStatus, hrefPagamentosRh } from "@/lib/domain/resumo-rh";
 import { hrefPerfilRh } from "@/lib/domain/rh";
 import {
+  chavePixDaPessoa,
   montarTextoConfirmacaoRecebimento,
   montarTextoReciboPagamentoPessoa,
+  montarTextosPixPagamentosLote,
   montarTextosWhatsAppRecibosPagamentoLote,
   linkWhatsAppReciboPagamento,
 } from "@/lib/domain/recibo-pagamento-pessoa";
@@ -1171,6 +1173,46 @@ function FinanceiroConteudo() {
     }
   }
 
+  async function copiarChavePixRh(pagamento: PagamentoPessoa) {
+    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
+    const chave = chavePixDaPessoa(pessoa);
+    if (!chave) {
+      setMensagemReceberBoleto("Esta pessoa não tem chave PIX cadastrada no perfil.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(chave);
+      setMensagemReceberBoleto(`PIX de ${pessoa?.nome ?? "pessoa"} copiado.`);
+    } catch {
+      setMensagemReceberBoleto("Não foi possível copiar a chave PIX neste navegador.");
+    }
+  }
+
+  async function copiarPixRhDoLoteLiberados() {
+    if (rhLiberados.length === 0) {
+      setMensagemReceberBoleto("Nenhum pagamento RH liberado para copiar PIX.");
+      return;
+    }
+    const texto = montarTextosPixPagamentosLote(rhLiberados, {
+      pessoaPorId: (id) => db.pessoas.find((p) => p.id === id),
+    });
+    if (!texto) {
+      setMensagemReceberBoleto("Nenhuma chave PIX cadastrada nos RH liberados.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(texto);
+      const comPix = rhLiberados.filter((p) =>
+        Boolean(chavePixDaPessoa(db.pessoas.find((pessoa) => pessoa.id === p.pessoa_id)))
+      ).length;
+      setMensagemReceberBoleto(
+        `${comPix} PIX RH copiado(s) com cabeçalho. Cole no banco; o status não muda.`
+      );
+    } catch {
+      setMensagemReceberBoleto("Não foi possível copiar o lote de PIX RH neste navegador.");
+    }
+  }
+
   async function copiarLinhaAgenda(linha?: string) {
     if (!linha) {
       setMensagemReceberBoleto("Não há linha digitável disponível para cópia neste boleto.");
@@ -1216,7 +1258,7 @@ function FinanceiroConteudo() {
   }
 
   function baixarAgendaBoletosCsv() {
-    const pagamentosRhAgenda = [...rhAguardandoConciliacao, ...rhPagos];
+    const pagamentosRhAgenda = [...rhLiberados, ...rhAguardandoConciliacao, ...rhPagos];
     const total = boletosAtivos.length + pagamentosRhAgenda.length;
     if (total === 0) {
       setMensagemReceberBoleto("Nenhum título na agenda para exportar.");
@@ -1439,13 +1481,14 @@ function FinanceiroConteudo() {
     (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
   );
   const rhAguardandoConciliacao = (db.pagamentos_pessoas ?? []).filter((p) => p.status === "aguardando_conciliacao");
+  const rhLiberados = (db.pagamentos_pessoas ?? []).filter((p) => p.status === "liberado");
   const rhPagos = (db.pagamentos_pessoas ?? []).filter((p) => p.status === "pago");
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
   const boletosAVencer = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) > 0);
 
-  // Totais por status (boletos + RH na fila de conciliação / pagos)
+  // Totais por status (boletos + RH na fila de conciliação / liberados / pagos)
   const totais: Record<StatusBoleto, number> = {
     travado: 0,
     liberado: 0,
@@ -1456,6 +1499,9 @@ function FinanceiroConteudo() {
   boletosAtivos.forEach((b) => {
     totais[b.status] += b.valor;
   });
+  for (const pag of rhLiberados) {
+    totais.liberado += pag.pagamento_valor ?? pag.valor;
+  }
   for (const pag of rhAguardandoConciliacao) {
     totais.aguardando_conciliacao += pag.pagamento_valor ?? pag.valor;
   }
@@ -2327,8 +2373,20 @@ function FinanceiroConteudo() {
             </Link>
           </div>
           <div className="flex flex-col items-end gap-1">
-            <Badge cor={pagamento.status === "pago" ? "verde" : "azul"}>
-              {pagamento.status === "pago" ? "Pago" : "Aguardando conciliação"}
+            <Badge
+              cor={
+                pagamento.status === "pago"
+                  ? "verde"
+                  : pagamento.status === "liberado"
+                    ? "laranja"
+                    : "azul"
+              }
+            >
+              {pagamento.status === "pago"
+                ? "Pago"
+                : pagamento.status === "liberado"
+                  ? "Liberado · a informar"
+                  : "Aguardando conciliação"}
             </Badge>
             {pagamento.conciliacao_divergente && pagamento.status === "aguardando_conciliacao" && (
               <Badge cor="laranja">
@@ -2337,6 +2395,33 @@ function FinanceiroConteudo() {
             )}
           </div>
         </div>
+
+        {pagamento.status === "liberado" && (
+          <div className="flex flex-wrap gap-2">
+            {chavePixDaPessoa(db.pessoas.find((p) => p.id === pagamento.pessoa_id)) && (
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={() => void copiarChavePixRh(pagamento)}
+                title="Copia a chave PIX para colar no banco. Informe o pagamento na lista de RH."
+              >
+                <Copy size={16} /> Copiar PIX
+              </button>
+            )}
+            <Link
+              href={hrefPagamentosRh({
+                filtro: "liberado",
+                pessoa: pagamento.pessoa_id,
+                competencia: pagamento.competencia || undefined,
+                tipo: pagamento.tipo,
+              })}
+              className="btn-primario"
+              title="Informar pagamento na lista de RH"
+            >
+              Informar na lista RH
+            </Link>
+          </div>
+        )}
 
         {pagamento.status === "aguardando_conciliacao" && (
           <div className="rounded-card border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
@@ -2504,17 +2589,36 @@ function FinanceiroConteudo() {
               <button
                 type="button"
                 className="btn-secundario"
-                disabled={boletosAtivos.length + rhAguardandoConciliacao.length + rhPagos.length === 0}
+                disabled={
+                  boletosAtivos.length +
+                    rhLiberados.length +
+                    rhAguardandoConciliacao.length +
+                    rhPagos.length ===
+                  0
+                }
                 onClick={baixarAgendaBoletosCsv}
                 title={
-                  boletosAtivos.length + rhAguardandoConciliacao.length + rhPagos.length === 0
+                  boletosAtivos.length +
+                    rhLiberados.length +
+                    rhAguardandoConciliacao.length +
+                    rhPagos.length ===
+                  0
                     ? "Nada para exportar na agenda"
                     : "Exportar agenda (boletos + RH) em CSV"
                 }
               >
                 <Download size={16} /> Exportar CSV
-                {boletosAtivos.length + rhAguardandoConciliacao.length + rhPagos.length > 0
-                  ? ` (${boletosAtivos.length + rhAguardandoConciliacao.length + rhPagos.length})`
+                {boletosAtivos.length +
+                  rhLiberados.length +
+                  rhAguardandoConciliacao.length +
+                  rhPagos.length >
+                0
+                  ? ` (${
+                      boletosAtivos.length +
+                      rhLiberados.length +
+                      rhAguardandoConciliacao.length +
+                      rhPagos.length
+                    })`
                   : ""}
               </button>
               <button type="button" className="btn-secundario" onClick={abrirImportarExtratoOfx}>
@@ -2617,25 +2721,53 @@ function FinanceiroConteudo() {
           </div>
 
           <div id="financeiro-fila-liberados" className="scroll-mt-4 space-y-2">
-            {boletosLiberadosElegiveis.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="btn-secundario"
-                  onClick={() => void copiarLinhasDigitaveisDoLote()}
-                  title="Copia todas as linhas digitáveis com cabeçalho por boleto. Não altera status."
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="rotulo text-primaria">Liberados</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {boletosLiberadosElegiveis.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-secundario text-sm"
+                      onClick={() => void copiarLinhasDigitaveisDoLote()}
+                      title="Copia todas as linhas digitáveis com cabeçalho por boleto. Não altera status."
+                    >
+                      <Copy size={14} /> Copiar linhas ({boletosLiberadosElegiveis.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-primario text-sm"
+                      onClick={abrirInformarBoletosLote}
+                      title="Informa pagamento de todos os liberados aptos com a mesma data/conta"
+                    >
+                      Informar boletos em lote ({boletosLiberadosElegiveis.length})
+                    </button>
+                  </>
+                )}
+                {rhLiberados.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-secundario text-sm"
+                    onClick={() => void copiarPixRhDoLoteLiberados()}
+                    title="Copia chaves PIX dos RH liberados com cabeçalho. Não altera status."
+                  >
+                    <Copy size={14} /> Copiar PIXs RH ({rhLiberados.length})
+                  </button>
+                )}
+                <Link
+                  href={hrefPagamentosRh("liberado")}
+                  className="text-xs font-medium text-primaria-escura underline-offset-2 hover:underline"
                 >
-                  <Copy size={16} /> Copiar linhas ({boletosLiberadosElegiveis.length})
-                </button>
-                <button
-                  type="button"
-                  className="btn-primario"
-                  onClick={abrirInformarBoletosLote}
-                  title="Informa pagamento de todos os liberados aptos com a mesma data/conta"
-                >
-                  Informar pagamentos em lote ({boletosLiberadosElegiveis.length})
-                </button>
+                  Ver pagamentos de RH
+                </Link>
               </div>
+            </div>
+            {rhLiberados.length === 0 ? (
+              <Vazio mensagem="Nenhum pagamento de RH liberado. Boletos liberados seguem na agenda por vencimento." />
+            ) : (
+              [...rhLiberados]
+                .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                .map((pagamento) => <CartaoPagamentoRh key={pagamento.id} pagamento={pagamento} />)
             )}
           </div>
 

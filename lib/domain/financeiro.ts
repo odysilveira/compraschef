@@ -227,6 +227,9 @@ export function exportarContasPagarCsv(
 
 export type AbaFinanceiro = "boletos" | "contas" | "notas";
 
+/** Seção da agenda de boletos (deep link a partir do RH). */
+export type FilaAgendaFinanceiro = "aguardando" | "pagos";
+
 const STATUS_CONTA_PAGAR: StatusContaPagar[] = [
   "aguardando_boleto",
   "boleto_recebido",
@@ -244,6 +247,13 @@ export function parseAbaFinanceiro(valor: string | null | undefined): AbaFinance
   return "boletos";
 }
 
+export function parseFilaAgendaFinanceiro(
+  valor: string | null | undefined
+): FilaAgendaFinanceiro | undefined {
+  if (valor === "aguardando" || valor === "pagos") return valor;
+  return undefined;
+}
+
 export function parseFiltroVencimentoConta(valor: string | null | undefined): FiltroVencimentoConta {
   if (valor === "hoje" || valor === "proximos_7_dias" || valor === "atrasadas") return valor;
   return "todas";
@@ -259,13 +269,14 @@ export function parseFiltroStatusConta(
 }
 
 /**
- * Deep link do Financeiro (`?aba=` + filtros Contas).
+ * Deep link do Financeiro (`?aba=` + filtros Contas + `fila` da agenda).
  * Defaults omitidos da query (aba boletos, vencimento todas, status todos).
  */
 export function hrefFinanceiro(opts?: {
   aba?: AbaFinanceiro;
   vencimento?: FiltroVencimentoConta;
   status?: StatusContaPagar | "todos";
+  fila?: FilaAgendaFinanceiro;
 }): string {
   const params = new URLSearchParams();
   const aba = opts?.aba ?? "boletos";
@@ -277,6 +288,9 @@ export function hrefFinanceiro(opts?: {
     if (opts?.status && opts.status !== "todos") {
       params.set("status", opts.status);
     }
+  }
+  if (aba === "boletos" && opts?.fila) {
+    params.set("fila", opts.fila);
   }
   const q = params.toString();
   return q ? `/financeiro?${q}` : "/financeiro";

@@ -11,6 +11,7 @@ import {
   hrefFinanceiro,
   ordenarContasPagar,
   parseAbaFinanceiro,
+  parseFilaAgendaFinanceiro,
   parseFiltroStatusConta,
   parseFiltroVencimentoConta,
 } from "./financeiro";
@@ -325,9 +326,17 @@ describe("helpers de contas a pagar na tela", () => {
       })
     ).toBe("/financeiro?aba=contas&vencimento=hoje&status=aguardando_conciliacao");
     expect(hrefFinanceiro({ aba: "notas" })).toBe("/financeiro?aba=notas");
+    expect(hrefFinanceiro({ aba: "boletos", fila: "aguardando" })).toBe(
+      "/financeiro?fila=aguardando"
+    );
+    expect(hrefFinanceiro({ aba: "boletos", fila: "pagos" })).toBe("/financeiro?fila=pagos");
+    expect(hrefFinanceiro({ aba: "contas", fila: "aguardando" })).toBe("/financeiro?aba=contas");
 
     expect(parseAbaFinanceiro("contas")).toBe("contas");
     expect(parseAbaFinanceiro("xyz")).toBe("boletos");
+    expect(parseFilaAgendaFinanceiro("aguardando")).toBe("aguardando");
+    expect(parseFilaAgendaFinanceiro("pagos")).toBe("pagos");
+    expect(parseFilaAgendaFinanceiro("x")).toBeUndefined();
     expect(parseFiltroVencimentoConta("atrasadas")).toBe("atrasadas");
     expect(parseFiltroVencimentoConta("x")).toBe("todas");
     expect(parseFiltroStatusConta("aguardando_conciliacao")).toBe("aguardando_conciliacao");

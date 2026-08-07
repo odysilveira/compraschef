@@ -43,6 +43,7 @@ import {
 import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
+import { hrefFinanceiro } from "@/lib/domain/financeiro";
 import {
   hrefConsumosRh,
   hrefPagamentosRh,
@@ -869,6 +870,18 @@ function RhPagamentosConteudo() {
               </button>
             </>
           )}
+        {(filtro === "aguardando" || filtro === "pagos") && (
+          <Link
+            href={hrefFinanceiro({
+              aba: "boletos",
+              fila: filtro === "aguardando" ? "aguardando" : "pagos",
+            })}
+            className="btn-secundario"
+            title="Abre a agenda do Financeiro na mesma fila (boletos + RH)"
+          >
+            Ver no Financeiro
+          </Link>
+        )}
         <Link href="/rh" className="btn-secundario ml-auto">
           Ver pessoas
         </Link>

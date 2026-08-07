@@ -51,6 +51,7 @@ import {
   montarTextoConfirmacaoRecebimento,
   montarTextoReciboPagamentoPessoa,
 } from "@/lib/domain/recibo-pagamento-pessoa";
+import { filaAgendaFinanceiroDeStatusPagamento, hrefFinanceiro } from "@/lib/domain/financeiro";
 import { hrefConsumosRh, hrefEscalaRh, filtroConsumosRhDeStatus, filtroPagamentosRhDeStatus, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
   FUNCOES_OPERACIONAIS,
@@ -1221,7 +1222,9 @@ function RhPerfilConteudo() {
             <Vazio mensagem="Nenhum pagamento lançado para esta pessoa." />
           ) : (
             <div className="space-y-2">
-              {pagamentosPessoa.map((pagamento) => (
+              {pagamentosPessoa.map((pagamento) => {
+                const filaFinanceiro = filaAgendaFinanceiroDeStatusPagamento(pagamento.status);
+                return (
                 <div
                   key={pagamento.id}
                   className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
@@ -1248,6 +1251,15 @@ function RhPerfilConteudo() {
                       >
                         Ver na lista
                       </Link>
+                      {filaFinanceiro && (
+                        <Link
+                          href={hrefFinanceiro({ aba: "boletos", fila: filaFinanceiro })}
+                          className="mt-1 ml-3 inline-block text-sm text-primaria-escura underline"
+                          title="Abre a agenda do Financeiro na fila deste pagamento"
+                        >
+                          Ver no Financeiro
+                        </Link>
+                      )}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {(pagamento.status === "previsto" || pagamento.status === "liberado") &&
@@ -1310,7 +1322,8 @@ function RhPerfilConteudo() {
                     {rotuloStatusPagamentoPessoa(pagamento.status)}
                   </Badge>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>

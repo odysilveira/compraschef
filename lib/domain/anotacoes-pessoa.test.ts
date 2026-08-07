@@ -5,6 +5,7 @@ import { adicionarAnotacaoPessoa, listarAnotacoesPessoa } from "./anotacoes-pess
 describe("anotações de pessoa (RH)", () => {
   it("adiciona e lista por pessoa (mais recente primeiro)", () => {
     const db = structuredClone(seedDB);
+    db.anotacoes_pessoas = [];
     const r1 = adicionarAnotacaoPessoa(
       db,
       {

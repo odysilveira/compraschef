@@ -176,3 +176,44 @@ export function montarTextosWhatsAppRecibosPagamentoLote(
   }
   return blocos.join("\n\n==========\n\n");
 }
+
+/** Chave PIX cadastrada na pessoa (trim); undefined se vazia. */
+export function chavePixDaPessoa(pessoa?: PessoaRH): string | undefined {
+  const chave = (pessoa?.chave_pix ?? "").trim();
+  return chave || undefined;
+}
+
+/**
+ * Bloco legível para colar no banco (cabeçalho + chave).
+ * Não altera status — só monta texto.
+ */
+export function montarTextoPixPagamento(input: {
+  pessoa: PessoaRH;
+  pagamento: PagamentoPessoa;
+}): string | undefined {
+  const chave = chavePixDaPessoa(input.pessoa);
+  if (!chave) return undefined;
+  const nome = input.pessoa.nome.trim() || "Pessoa";
+  const tipo = rotuloTipoPagamentoPessoa(input.pagamento.tipo);
+  const valor = moeda(input.pagamento.pagamento_valor ?? input.pagamento.valor);
+  return `—— ${nome} · ${tipo} · ${valor} ——\n${chave}`;
+}
+
+/**
+ * Concatena chaves PIX de vários pagamentos com cabeçalho por pessoa.
+ * Omite quem não tem chave. Não altera status.
+ */
+export function montarTextosPixPagamentosLote(
+  pagamentos: PagamentoPessoa[],
+  opts: { pessoaPorId: (id: string) => PessoaRH | undefined }
+): string {
+  const blocos: string[] = [];
+  for (const pagamento of pagamentos) {
+    const pessoa = opts.pessoaPorId(pagamento.pessoa_id);
+    if (!pessoa) continue;
+    const bloco = montarTextoPixPagamento({ pessoa, pagamento });
+    if (!bloco) continue;
+    blocos.push(bloco);
+  }
+  return blocos.join("\n\n==========\n\n");
+}

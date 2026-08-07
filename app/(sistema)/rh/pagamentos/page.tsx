@@ -21,8 +21,10 @@ import {
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
 import {
+  chavePixDaPessoa,
   montarTextoConfirmacaoRecebimento,
   montarTextoReciboPagamentoPessoa,
+  montarTextosPixPagamentosLote,
   montarTextosWhatsAppRecibosPagamentoLote,
 } from "@/lib/domain/recibo-pagamento-pessoa";
 import {
@@ -522,6 +524,47 @@ function RhPagamentosConteudo() {
     }
   }
 
+  async function copiarChavePix(pagamento: (typeof db.pagamentos_pessoas)[number]) {
+    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
+    const chave = chavePixDaPessoa(pessoa);
+    if (!chave) {
+      setMensagem("Esta pessoa não tem chave PIX cadastrada no perfil.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(chave);
+      setMensagem(`PIX de ${pessoa?.nome ?? "pessoa"} copiado.`);
+    } catch {
+      setMensagem("Não foi possível copiar a chave PIX neste navegador.");
+    }
+  }
+
+  async function copiarPixDoLoteLiberados() {
+    const alvo = lista.filter((p) => p.status === "liberado");
+    if (alvo.length === 0) {
+      setMensagem("Nenhum pagamento liberado neste filtro para copiar PIX.");
+      return;
+    }
+    const texto = montarTextosPixPagamentosLote(alvo, {
+      pessoaPorId: (id) => db.pessoas.find((p) => p.id === id),
+    });
+    if (!texto) {
+      setMensagem("Nenhuma chave PIX cadastrada nos liberados deste filtro.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(texto);
+      const comPix = alvo.filter((p) =>
+        Boolean(chavePixDaPessoa(db.pessoas.find((pessoa) => pessoa.id === p.pessoa_id)))
+      ).length;
+      setMensagem(
+        `${comPix} PIX copiado(s) com cabeçalho. Cole no banco; o status não muda.`
+      );
+    } catch {
+      setMensagem("Não foi possível copiar o lote de PIX neste navegador.");
+    }
+  }
+
   function abrirImportacao() {
     setImportAberto(true);
     setImportPasso("arquivo");
@@ -761,14 +804,25 @@ function RhPagamentosConteudo() {
           </button>
         )}
         {filtro === "liberado" && lista.some((p) => p.status === "liberado") && (
-          <button
-            type="button"
-            className="btn-primario"
-            onClick={abrirInformarLote}
-            title="Informa todos os liberados do filtro (valor de cada título)"
-          >
-            Informar todos ({lista.filter((p) => p.status === "liberado").length})
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={() => void copiarPixDoLoteLiberados()}
+              title="Copia chaves PIX com cabeçalho por pessoa. Não altera status."
+            >
+              <Copy size={16} /> Copiar PIXs (
+              {lista.filter((p) => p.status === "liberado").length})
+            </button>
+            <button
+              type="button"
+              className="btn-primario"
+              onClick={abrirInformarLote}
+              title="Informa todos os liberados do filtro (valor de cada título)"
+            >
+              Informar todos ({lista.filter((p) => p.status === "liberado").length})
+            </button>
+          </>
         )}
         {filtro === "aguardando" &&
           lista.some((p) => p.status === "aguardando_conciliacao") && (
@@ -971,9 +1025,21 @@ function RhPagamentosConteudo() {
                   </button>
                 )}
                 {(pagamento.status === "previsto" || pagamento.status === "liberado") && (
-                  <button type="button" className="btn-primario" onClick={() => abrirInformar(pagamento)}>
-                    Informar pagamento
-                  </button>
+                  <>
+                    {chavePixDaPessoa(db.pessoas.find((p) => p.id === pagamento.pessoa_id)) && (
+                      <button
+                        type="button"
+                        className="btn-secundario"
+                        onClick={() => void copiarChavePix(pagamento)}
+                        title="Copia só a chave PIX para colar no banco"
+                      >
+                        <Copy size={16} /> Copiar PIX
+                      </button>
+                    )}
+                    <button type="button" className="btn-primario" onClick={() => abrirInformar(pagamento)}>
+                      Informar pagamento
+                    </button>
+                  </>
                 )}
                 {pagamento.status === "aguardando_conciliacao" && (
                   <>
@@ -1163,12 +1229,23 @@ function RhPagamentosConteudo() {
             </p>
             {(() => {
               const pessoa = db.pessoas.find((p) => p.id === pagamentoInformar.pessoa_id);
-              if (!pessoa?.chave_pix) return null;
+              const chave = chavePixDaPessoa(pessoa);
+              if (!chave) return null;
               return (
-                <p className="text-xs text-slate-500">
-                  Destino (PIX da pessoa): <span className="font-medium text-slate-700">{pessoa.chave_pix}</span> — isso
-                  não substitui a conta de onde o restaurante pagou.
-                </p>
+                <div className="flex flex-wrap items-center gap-2 rounded-card border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <p className="min-w-0 flex-1">
+                    Destino (PIX da pessoa): <span className="font-medium text-slate-700">{chave}</span> — isso
+                    não substitui a conta de onde o restaurante pagou.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-secundario shrink-0"
+                    onClick={() => void copiarChavePix(pagamentoInformar)}
+                    title="Copia a chave PIX"
+                  >
+                    <Copy size={14} /> Copiar PIX
+                  </button>
+                </div>
               );
             })()}
             <div className="grid gap-3 sm:grid-cols-2">

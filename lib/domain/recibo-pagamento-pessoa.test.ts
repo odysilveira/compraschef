@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   chavePixDaPessoa,
+  linkWhatsAppReciboPagamento,
   montarTextoConfirmacaoRecebimento,
   montarTextoPixPagamento,
   montarTextoReciboPagamentoPessoa,
@@ -195,5 +196,12 @@ describe("recibo-pagamento-pessoa", () => {
     expect(lote).toContain("Carlos Extra");
     expect(lote).toContain("carlos.extra@pix");
     expect(lote).not.toContain("Bia Extra");
+  });
+
+  it("monta link wa.me do recibo com DDI 55", () => {
+    const url = linkWhatsAppReciboPagamento("(43) 98888-1000", "Olá recibo");
+    expect(url).toBe("https://wa.me/5543988881000?text=Ol%C3%A1%20recibo");
+    expect(linkWhatsAppReciboPagamento("", "x")).toBeNull();
+    expect(linkWhatsAppReciboPagamento(undefined, "x")).toBeNull();
   });
 });

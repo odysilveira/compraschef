@@ -2,7 +2,7 @@ import { dataBR, moeda } from "../format";
 import type { ConsumoPessoa, PagamentoPessoa, PessoaRH } from "../types";
 import { RAZAO_SOCIAL_PADRAO, formatDataBrLonga } from "./escala";
 import { rotuloTipoPagamentoPessoa } from "./pagamentos-pessoas";
-import { rotuloFuncao, rotuloTipoPessoa } from "./rh";
+import { rotuloFuncao, rotuloTipoPessoa, somenteDigitosTelefone } from "./rh";
 
 function fmtHoras(valor: number): string {
   return valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -216,4 +216,15 @@ export function montarTextosPixPagamentosLote(
     blocos.push(bloco);
   }
   return blocos.join("\n\n==========\n\n");
+}
+
+/** Monta link wa.me com texto do recibo/confirmação (DDI 55). */
+export function linkWhatsAppReciboPagamento(
+  telefone: string | undefined,
+  texto: string
+): string | null {
+  const digitos = somenteDigitosTelefone(telefone ?? "");
+  if (!digitos) return null;
+  const comDdi = digitos.startsWith("55") ? digitos : `55${digitos}`;
+  return `https://wa.me/${comDdi}?text=${encodeURIComponent(texto)}`;
 }

@@ -19,6 +19,7 @@ import CartaoAlerta from "@/components/operacao/CartaoAlerta";
 import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@/lib/data";
 import { hrefFinanceiro } from "@/lib/domain/financeiro";
 import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
+import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
 import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
 import { hrefPagamentosRh, resumirOperacionalRh } from "@/lib/domain/resumo-rh";
 import { podeVerValores, usePapel, usePodeAcessarModulo } from "@/lib/roles";
@@ -97,7 +98,7 @@ export default function PainelPage() {
         />
         {financeiro && (
           <CartaoAlerta
-            href="/cotacoes"
+            href={hrefCotacoes({ status: "enviada" })}
             titulo="Cotações aguardando resposta"
             numero={cotacoesAguardando}
             icone={MessageSquare}

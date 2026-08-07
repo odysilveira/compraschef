@@ -507,7 +507,14 @@ function FinanceiroConteudo() {
     parseFiltroStatusConta(searchParams.get("status"))
   );
   const [filtroVencimentoConta, setFiltroVencimentoConta] = useState<FiltroVencimentoConta>(() =>
-    parseFiltroVencimentoConta(searchParams.get("vencimento"))
+    parseAbaFinanceiro(searchParams.get("aba")) === "contas"
+      ? parseFiltroVencimentoConta(searchParams.get("vencimento"))
+      : "todas"
+  );
+  const [filtroVencimentoAgenda, setFiltroVencimentoAgenda] = useState<FiltroVencimentoConta>(() =>
+    parseAbaFinanceiro(searchParams.get("aba")) === "boletos"
+      ? parseFiltroVencimentoConta(searchParams.get("vencimento"))
+      : "todas"
   );
   const [buscaNfe, setBuscaNfe] = useState("");
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<FiltroCompletudeNota>(() =>
@@ -1493,6 +1500,10 @@ function FinanceiroConteudo() {
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
   const boletosAVencer = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) > 0);
+  const boletosProximos7Dias = boletosPendentesAgenda.filter((boleto) => {
+    const dias = diasAte(boleto.vencimento) ?? 0;
+    return dias > 0 && dias <= 7;
+  });
 
   // Totais por status (boletos + RH na fila de conciliação / liberados / pagos)
   const totais: Record<StatusBoleto, number> = {
@@ -1553,22 +1564,30 @@ function FinanceiroConteudo() {
   }
 
   useEffect(() => {
-    setAbaFinanceira(parseAbaFinanceiro(searchParams.get("aba")));
+    const aba = parseAbaFinanceiro(searchParams.get("aba"));
+    setAbaFinanceira(aba);
     setFiltroStatusConta(parseFiltroStatusConta(searchParams.get("status")));
-    setFiltroVencimentoConta(parseFiltroVencimentoConta(searchParams.get("vencimento")));
     setFiltroCompletudeNfe(parseFiltroCompletudeNota(searchParams.get("completude")));
+    if (aba === "contas") {
+      setFiltroVencimentoConta(parseFiltroVencimentoConta(searchParams.get("vencimento")));
+    } else if (aba === "boletos") {
+      setFiltroVencimentoAgenda(parseFiltroVencimentoConta(searchParams.get("vencimento")));
+    }
   }, [searchParams]);
 
   useEffect(() => {
     const aba = parseAbaFinanceiro(searchParams.get("aba"));
+    if (aba !== "boletos") return;
     const fila = parseFilaAgendaFinanceiro(searchParams.get("fila"));
-    if (aba !== "boletos" || !fila) return;
-    const id =
-      fila === "aguardando"
-        ? "financeiro-fila-aguardando"
-        : fila === "pagos"
-          ? "financeiro-fila-pagos"
-          : "financeiro-fila-liberados";
+    const vencimento = parseFiltroVencimentoConta(searchParams.get("vencimento"));
+    let id: string | undefined;
+    if (fila === "aguardando") id = "financeiro-fila-aguardando";
+    else if (fila === "pagos") id = "financeiro-fila-pagos";
+    else if (fila === "liberados") id = "financeiro-fila-liberados";
+    else if (vencimento === "atrasadas") id = "financeiro-agenda-atrasadas";
+    else if (vencimento === "hoje") id = "financeiro-agenda-hoje";
+    else if (vencimento === "proximos_7_dias") id = "financeiro-agenda-proximos-7";
+    if (!id) return;
     const timer = window.setTimeout(() => {
       document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
@@ -1583,19 +1602,32 @@ function FinanceiroConteudo() {
     completude?: FiltroCompletudeNota;
   }) {
     const aba = opts.aba ?? abaFinanceira;
-    const vencimento =
-      opts.vencimento ?? (aba === "contas" ? filtroVencimentoConta : "todas");
     const status = opts.status ?? (aba === "contas" ? filtroStatusConta : "todos");
     const completude =
       opts.completude ?? (aba === "notas" ? filtroCompletudeNfe : "todas");
+    const vencimento =
+      opts.vencimento ??
+      (aba === "contas"
+        ? filtroVencimentoConta
+        : aba === "boletos"
+          ? opts.fila
+            ? "todas"
+            : filtroVencimentoAgenda
+          : "todas");
     const fila =
       aba === "boletos"
-        ? opts.fila ?? parseFilaAgendaFinanceiro(searchParams.get("fila"))
+        ? opts.fila ??
+          (opts.vencimento && opts.vencimento !== "todas"
+            ? undefined
+            : parseFilaAgendaFinanceiro(searchParams.get("fila")))
         : undefined;
     setAbaFinanceira(aba);
     if (aba === "contas") {
       setFiltroVencimentoConta(vencimento);
       setFiltroStatusConta(status);
+    }
+    if (aba === "boletos") {
+      setFiltroVencimentoAgenda(vencimento);
     }
     if (aba === "notas") {
       setFiltroCompletudeNfe(completude);
@@ -2788,45 +2820,126 @@ function FinanceiroConteudo() {
 
           {/* Agenda financeira */}
           <section className="space-y-4">
-            <h2>Agenda financeira</h2>
-
-            <div className="space-y-2">
-              <p className="rotulo text-erro">Atrasados</p>
-              {boletosAtrasados.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto atrasado." />
-              ) : (
-                [...boletosAtrasados]
-                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
-                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2>Agenda financeira</h2>
+              {filtroVencimentoAgenda !== "todas" && (
+                <button
+                  type="button"
+                  className="btn-secundario text-sm"
+                  onClick={() => irParaFinanceiro({ aba: "boletos", vencimento: "todas" })}
+                >
+                  Limpar filtro de vencimento
+                </button>
               )}
             </div>
 
-            <div className="space-y-2">
-              <p className="rotulo">Vencendo hoje</p>
-              {boletosVencendoHoje.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto vencendo hoje." />
-              ) : (
-                [...boletosVencendoHoje]
-                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
-                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
-              )}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <button
+                type="button"
+                className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+                  filtroVencimentoAgenda === "atrasadas"
+                    ? "border-primaria ring-1 ring-primaria"
+                    : "border-slate-200 hover:border-primaria"
+                }`}
+                onClick={() =>
+                  irParaFinanceiro({ aba: "boletos", vencimento: "atrasadas" })
+                }
+                title="Ir para boletos atrasados"
+              >
+                <p className="rotulo text-erro">Atrasados</p>
+                <p className="text-2xl font-bold text-erro">{boletosAtrasados.length}</p>
+              </button>
+              <button
+                type="button"
+                className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+                  filtroVencimentoAgenda === "hoje"
+                    ? "border-primaria ring-1 ring-primaria"
+                    : "border-slate-200 hover:border-primaria"
+                }`}
+                onClick={() => irParaFinanceiro({ aba: "boletos", vencimento: "hoje" })}
+                title="Ir para boletos vencendo hoje"
+              >
+                <p className="rotulo">Vencendo hoje</p>
+                <p className="text-2xl font-bold text-slate-900">{boletosVencendoHoje.length}</p>
+              </button>
+              <button
+                type="button"
+                className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+                  filtroVencimentoAgenda === "proximos_7_dias"
+                    ? "border-primaria ring-1 ring-primaria"
+                    : "border-slate-200 hover:border-primaria"
+                }`}
+                onClick={() =>
+                  irParaFinanceiro({ aba: "boletos", vencimento: "proximos_7_dias" })
+                }
+                title="Ir para boletos dos próximos 7 dias"
+              >
+                <p className="rotulo">Próximos 7 dias</p>
+                <p className="text-2xl font-bold text-slate-900">{boletosProximos7Dias.length}</p>
+              </button>
             </div>
 
-            <div className="space-y-2">
-              <p className="rotulo">A vencer</p>
-              {boletosAVencer.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto a vencer." />
-              ) : (
-                [...boletosAVencer]
-                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
-                  .map((boleto) => (
-                    <div key={boleto.id} className="space-y-1">
-                      <p className="rotulo">{rotuloDia(boleto.vencimento)}</p>
-                      <CartaoBoleto boleto={boleto} />
-                    </div>
-                  ))
-              )}
-            </div>
+            {(filtroVencimentoAgenda === "todas" || filtroVencimentoAgenda === "atrasadas") && (
+              <div id="financeiro-agenda-atrasadas" className="space-y-2 scroll-mt-4">
+                <p className="rotulo text-erro">Atrasados</p>
+                {boletosAtrasados.length === 0 ? (
+                  <Vazio mensagem="Nenhum boleto atrasado." />
+                ) : (
+                  [...boletosAtrasados]
+                    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                    .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+                )}
+              </div>
+            )}
+
+            {(filtroVencimentoAgenda === "todas" || filtroVencimentoAgenda === "hoje") && (
+              <div id="financeiro-agenda-hoje" className="space-y-2 scroll-mt-4">
+                <p className="rotulo">Vencendo hoje</p>
+                {boletosVencendoHoje.length === 0 ? (
+                  <Vazio mensagem="Nenhum boleto vencendo hoje." />
+                ) : (
+                  [...boletosVencendoHoje]
+                    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                    .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+                )}
+              </div>
+            )}
+
+            {filtroVencimentoAgenda === "proximos_7_dias" && (
+              <div id="financeiro-agenda-proximos-7" className="space-y-2 scroll-mt-4">
+                <p className="rotulo">Próximos 7 dias</p>
+                {boletosProximos7Dias.length === 0 ? (
+                  <Vazio mensagem="Nenhum boleto vencendo nos próximos 7 dias." />
+                ) : (
+                  [...boletosProximos7Dias]
+                    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                    .map((boleto) => (
+                      <div key={boleto.id} className="space-y-1">
+                        <p className="rotulo">{rotuloDia(boleto.vencimento)}</p>
+                        <CartaoBoleto boleto={boleto} />
+                      </div>
+                    ))
+                )}
+              </div>
+            )}
+
+            {filtroVencimentoAgenda === "todas" && (
+              <div className="space-y-2">
+                <p className="rotulo">A vencer</p>
+                {boletosAVencer.length === 0 ? (
+                  <Vazio mensagem="Nenhum boleto a vencer." />
+                ) : (
+                  [...boletosAVencer]
+                    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                    .map((boleto) => (
+                      <div key={boleto.id} className="space-y-1">
+                        <p className="rotulo">{rotuloDia(boleto.vencimento)}</p>
+                        <CartaoBoleto boleto={boleto} />
+                      </div>
+                    ))
+                )}
+              </div>
+            )}
 
             <div id="financeiro-fila-aguardando" className="space-y-2 scroll-mt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">

@@ -308,13 +308,18 @@ export function hrefFinanceiro(opts?: {
       params.set("status", opts.status);
     }
   }
+  if (aba === "boletos") {
+    if (opts?.vencimento && opts.vencimento !== "todas") {
+      params.set("vencimento", opts.vencimento);
+    }
+    if (opts?.fila) {
+      params.set("fila", opts.fila);
+    }
+  }
   if (aba === "notas") {
     if (opts?.completude && opts.completude !== "todas") {
       params.set("completude", opts.completude);
     }
-  }
-  if (aba === "boletos" && opts?.fila) {
-    params.set("fila", opts.fila);
   }
   const q = params.toString();
   return q ? `/financeiro?${q}` : "/financeiro";

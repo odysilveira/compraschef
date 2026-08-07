@@ -1,4 +1,9 @@
 import type { ContaPagar, StatusContaPagar, StatusPagamentoPessoa } from "../types";
+import type { FiltroCompletudeNota } from "./nfe-financeiro";
+import { parseFiltroCompletudeNota } from "./nfe-financeiro";
+
+export type { FiltroCompletudeNota };
+export { parseFiltroCompletudeNota };
 
 export type FiltroVencimentoConta = "todas" | "hoje" | "proximos_7_dias" | "atrasadas";
 
@@ -282,14 +287,15 @@ export function parseFiltroStatusConta(
 }
 
 /**
- * Deep link do Financeiro (`?aba=` + filtros Contas + `fila` da agenda).
- * Defaults omitidos da query (aba boletos, vencimento todas, status todos).
+ * Deep link do Financeiro (`?aba=` + filtros Contas/Notas + `fila` da agenda).
+ * Defaults omitidos da query (aba boletos, vencimento todas, status todos, completude todas).
  */
 export function hrefFinanceiro(opts?: {
   aba?: AbaFinanceiro;
   vencimento?: FiltroVencimentoConta;
   status?: StatusContaPagar | "todos";
   fila?: FilaAgendaFinanceiro;
+  completude?: FiltroCompletudeNota;
 }): string {
   const params = new URLSearchParams();
   const aba = opts?.aba ?? "boletos";
@@ -300,6 +306,11 @@ export function hrefFinanceiro(opts?: {
     }
     if (opts?.status && opts.status !== "todos") {
       params.set("status", opts.status);
+    }
+  }
+  if (aba === "notas") {
+    if (opts?.completude && opts.completude !== "todas") {
+      params.set("completude", opts.completude);
     }
   }
   if (aba === "boletos" && opts?.fila) {

@@ -40,10 +40,12 @@ import {
   hrefFinanceiro,
   parseAbaFinanceiro,
   parseFilaAgendaFinanceiro,
+  parseFiltroCompletudeNota,
   parseFiltroStatusConta,
   parseFiltroVencimentoConta,
   type AbaFinanceiro,
   type FilaAgendaFinanceiro,
+  type FiltroCompletudeNota,
   type FiltroVencimentoConta,
 } from "@/lib/domain/financeiro";
 import {
@@ -67,6 +69,7 @@ import {
   detalharNotaFiscalFinanceiro,
   exportarNotasFiscaisFinanceiroCsv,
   listarNotasFiscaisFinanceiro,
+  resumirNotasFiscaisPorCompletude,
   type EstadoModalCorrecaoNfe,
   type IndicadorCompletudeFinanceiro,
 } from "@/lib/domain/nfe-financeiro";
@@ -507,7 +510,9 @@ function FinanceiroConteudo() {
     parseFiltroVencimentoConta(searchParams.get("vencimento"))
   );
   const [buscaNfe, setBuscaNfe] = useState("");
-  const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | IndicadorCompletudeFinanceiro>("todas");
+  const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<FiltroCompletudeNota>(() =>
+    parseFiltroCompletudeNota(searchParams.get("completude"))
+  );
   const [notaDetalhesId, setNotaDetalhesId] = useState<string | null>(null);
   const [estadoCorrecaoNfe, setEstadoCorrecaoNfe] = useState<EstadoModalCorrecaoNfe | null>(null);
   const [mensagemCorrecaoNfe, setMensagemCorrecaoNfe] = useState<string | null>(null);
@@ -1442,6 +1447,7 @@ function FinanceiroConteudo() {
       }),
     [db, buscaNfe, filtroCompletudeNfe]
   );
+  const resumoCompletudeNfe = useMemo(() => resumirNotasFiscaisPorCompletude(db), [db]);
   const notaDetalhes = notaDetalhesId ? detalharNotaFiscalFinanceiro(db, notaDetalhesId) ?? null : null;
   const notaCorrecao = estadoCorrecaoNfe ? db.notas_fiscais.find((nota) => nota.id === estadoCorrecaoNfe.notaId) ?? null : null;
   const correcaoSemMudanca = Boolean(
@@ -1550,6 +1556,7 @@ function FinanceiroConteudo() {
     setAbaFinanceira(parseAbaFinanceiro(searchParams.get("aba")));
     setFiltroStatusConta(parseFiltroStatusConta(searchParams.get("status")));
     setFiltroVencimentoConta(parseFiltroVencimentoConta(searchParams.get("vencimento")));
+    setFiltroCompletudeNfe(parseFiltroCompletudeNota(searchParams.get("completude")));
   }, [searchParams]);
 
   useEffect(() => {
@@ -1573,11 +1580,14 @@ function FinanceiroConteudo() {
     vencimento?: FiltroVencimentoConta;
     status?: StatusContaPagar | "todos";
     fila?: FilaAgendaFinanceiro;
+    completude?: FiltroCompletudeNota;
   }) {
     const aba = opts.aba ?? abaFinanceira;
     const vencimento =
       opts.vencimento ?? (aba === "contas" ? filtroVencimentoConta : "todas");
     const status = opts.status ?? (aba === "contas" ? filtroStatusConta : "todos");
+    const completude =
+      opts.completude ?? (aba === "notas" ? filtroCompletudeNfe : "todas");
     const fila =
       aba === "boletos"
         ? opts.fila ?? parseFilaAgendaFinanceiro(searchParams.get("fila"))
@@ -1587,7 +1597,12 @@ function FinanceiroConteudo() {
       setFiltroVencimentoConta(vencimento);
       setFiltroStatusConta(status);
     }
-    router.replace(hrefFinanceiro({ aba, vencimento, status, fila }), { scroll: false });
+    if (aba === "notas") {
+      setFiltroCompletudeNfe(completude);
+    }
+    router.replace(hrefFinanceiro({ aba, vencimento, status, fila, completude }), {
+      scroll: false,
+    });
   }
 
   function abrirNovaConta() {
@@ -3199,6 +3214,34 @@ function FinanceiroConteudo() {
             </div>
           )}
 
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {FILTRO_COMPLETUDE_NFE_OPCOES.map((opcao) => {
+              const quantidade =
+                opcao.valor === "todas"
+                  ? db.notas_fiscais.length
+                  : resumoCompletudeNfe[opcao.valor];
+              const ativo = filtroCompletudeNfe === opcao.valor;
+              return (
+                <button
+                  key={opcao.valor}
+                  type="button"
+                  className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+                    ativo
+                      ? "border-primaria ring-1 ring-primaria"
+                      : "border-slate-200 hover:border-primaria"
+                  }`}
+                  onClick={() =>
+                    irParaFinanceiro({ aba: "notas", completude: opcao.valor })
+                  }
+                  title={`Filtrar notas: ${opcao.rotulo}`}
+                >
+                  <p className="rotulo">{opcao.rotulo}</p>
+                  <p className="text-2xl font-bold text-slate-900">{quantidade}</p>
+                </button>
+              );
+            })}
+          </div>
+
           <Card className="space-y-3">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
               <label className="block">
@@ -3218,7 +3261,12 @@ function FinanceiroConteudo() {
                 <select
                   className="input w-full"
                   value={filtroCompletudeNfe}
-                  onChange={(event) => setFiltroCompletudeNfe(event.target.value as "todas" | IndicadorCompletudeFinanceiro)}
+                  onChange={(event) =>
+                    irParaFinanceiro({
+                      aba: "notas",
+                      completude: event.target.value as FiltroCompletudeNota,
+                    })
+                  }
                 >
                   {FILTRO_COMPLETUDE_NFE_OPCOES.map((opcao) => (
                     <option key={opcao.valor} value={opcao.valor}>

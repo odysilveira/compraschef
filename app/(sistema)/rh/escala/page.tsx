@@ -2203,6 +2203,20 @@ function RhEscalaConteudo() {
                       Informar na lista
                     </Link>
                   )}
+                  {detalhePagamento.status === "aguardando_conciliacao" && (
+                    <Link
+                      href={hrefPagamentosRh({
+                        filtro: "aguardando",
+                        pessoa: detalhePagamento.pessoa_id,
+                        competencia: detalhePagamento.competencia || undefined,
+                        tipo: detalhePagamento.tipo,
+                      })}
+                      className="btn-primario"
+                      title="Abre a lista de RH para conciliar o pagamento"
+                    >
+                      Conciliar na lista
+                    </Link>
+                  )}
                   {(detalhePagamento.status === "aguardando_conciliacao" ||
                     detalhePagamento.status === "pago") &&
                     detalheConv && (

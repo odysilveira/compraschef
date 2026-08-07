@@ -56,9 +56,9 @@ export default function PainelPage() {
   const cotacoesAguardando = db.cotacoes.filter((c) => c.status === "enviada").length;
   const pedidosAprovacao = db.pedidos.filter((p) => p.status === "aguardando_aprovacao").length;
   const boletosVencendo = db.boletos.filter((b) => {
-    if (b.status === "pago") return false;
+    if (b.status === "pago" || b.status === "aguardando_conciliacao") return false;
     const dias = diasAte(b.vencimento);
-    return dias !== undefined && dias <= 7;
+    return dias !== undefined && dias > 0 && dias <= 7;
   }).length;
   const divergencias = db.recebimentos.filter((r) => r.status === "divergente" || r.status === "parcial").length;
   const caixasValidade = caixasVencendo(db, 3).length;
@@ -106,7 +106,7 @@ export default function PainelPage() {
         />
         {financeiro && (
           <CartaoAlerta
-            href={hrefFinanceiro({ aba: "boletos" })}
+            href={hrefFinanceiro({ aba: "boletos", vencimento: "proximos_7_dias" })}
             titulo="Boletos que vencem em 7 dias"
             numero={boletosVencendo}
             icone={CalendarClock}

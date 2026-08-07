@@ -63,6 +63,7 @@ import { corrigirFornecedorNotaFiscal } from "@/lib/domain/nfe-completude";
 import {
   abrirModalCorrecaoNfe,
   detalharNotaFiscalFinanceiro,
+  exportarNotasFiscaisFinanceiroCsv,
   listarNotasFiscaisFinanceiro,
   type EstadoModalCorrecaoNfe,
   type IndicadorCompletudeFinanceiro,
@@ -1165,6 +1166,22 @@ function FinanceiroConteudo() {
     a.click();
     URL.revokeObjectURL(url);
     setMensagemReceberBoleto(`CSV baixado (${contasFiltradas.length} conta(s)).`);
+  }
+
+  function baixarNotasFiscaisCsv() {
+    if (notasFiscaisFinanceiro.length === 0) {
+      setMensagemReceberBoleto("Nenhuma nota no filtro atual para exportar.");
+      return;
+    }
+    const csv = exportarNotasFiscaisFinanceiroCsv(notasFiscaisFinanceiro);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "financeiro-notas-fiscais.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    setMensagemReceberBoleto(`CSV baixado (${notasFiscaisFinanceiro.length} nota(s)).`);
   }
 
   function atualizarCampoPagamento<K extends keyof FormPagamentoBoletoState>(
@@ -2767,7 +2784,27 @@ function FinanceiroConteudo() {
               <h2>Notas fiscais</h2>
               <p className="text-sm text-slate-600">Visualização completa das NF-e importadas para conferência e correção.</p>
             </div>
+            <button
+              type="button"
+              className="btn-secundario"
+              disabled={notasFiscaisFinanceiro.length === 0}
+              onClick={baixarNotasFiscaisCsv}
+              title={
+                notasFiscaisFinanceiro.length === 0
+                  ? "Nada para exportar neste filtro"
+                  : "Exportar notas do filtro atual (CSV)"
+              }
+            >
+              <Download size={16} /> Exportar CSV
+              {notasFiscaisFinanceiro.length > 0 ? ` (${notasFiscaisFinanceiro.length})` : ""}
+            </button>
           </div>
+
+          {mensagemReceberBoleto && (
+            <div className="rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
+              {mensagemReceberBoleto}
+            </div>
+          )}
 
           <Card className="space-y-3">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">

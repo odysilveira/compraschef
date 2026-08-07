@@ -150,3 +150,61 @@ export function abrirModalCorrecaoNfe(db: DB, notaId: string): EstadoModalCorrec
     justificativaCorrecao: "",
   };
 }
+
+function csvEscape(valor: string): string {
+  if (/[;"\n\r]/.test(valor)) return `"${valor.replace(/"/g, '""')}"`;
+  return valor;
+}
+
+function formatarValorCsv(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  return n.toFixed(2).replace(".", ",");
+}
+
+function rotuloStatusNota(status: NotaFiscal["status"]): string {
+  switch (status) {
+    case "aguardando_conferencia":
+      return "Aguardando conferência";
+    case "conferida":
+      return "Conferida";
+    case "divergente":
+      return "Divergente";
+  }
+}
+
+/**
+ * CSV das NF-e filtradas no Financeiro (separador `;`, UTF-8 com BOM).
+ */
+export function exportarNotasFiscaisFinanceiroCsv(resumos: NotaFiscalResumoFinanceiro[]): string {
+  const cabecalho = [
+    "NF-e",
+    "Fornecedor vinculado",
+    "Emitente",
+    "CNPJ emitente",
+    "Emissão",
+    "Total",
+    "Parcelas",
+    "Soma parcelas",
+    "Status",
+    "Completude",
+    "Chave de acesso",
+  ];
+  const linhas = resumos.map((resumo) =>
+    [
+      resumo.nota.numero || "",
+      resumo.fornecedorNome,
+      resumo.emitenteNome,
+      resumo.emitenteCnpj === "—" ? "" : resumo.emitenteCnpj,
+      (resumo.nota.emitida_em || "").slice(0, 10),
+      formatarValorCsv(resumo.nota.valor_total),
+      String(resumo.quantidadeParcelas),
+      formatarValorCsv(resumo.somaParcelas),
+      rotuloStatusNota(resumo.nota.status),
+      resumo.indicadorCompletude,
+      resumo.nota.chave_acesso || "",
+    ]
+      .map((c) => csvEscape(String(c)))
+      .join(";")
+  );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}

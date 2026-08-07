@@ -15,6 +15,7 @@ import {
 import { Badge, Card, Vazio } from "@/components/ui";
 import CartaoAlerta from "@/components/operacao/CartaoAlerta";
 import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@/lib/data";
+import { hrefFinanceiro } from "@/lib/domain/financeiro";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { dataBR, diasAte, moeda } from "@/lib/format";
 import type { DB, Pedido, StatusPedido } from "@/lib/types";
@@ -105,7 +106,7 @@ export default function PainelPage() {
         />
         {financeiro && (
           <CartaoAlerta
-            href="/financeiro"
+            href={hrefFinanceiro({ aba: "boletos" })}
             titulo="Boletos que vencem em 7 dias"
             numero={boletosVencendo}
             icone={CalendarClock}

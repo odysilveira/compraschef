@@ -8,7 +8,11 @@ import {
   contaVenceNosProximos7Dias,
   exportarContasPagarCsv,
   filtrarContasPagar,
+  hrefFinanceiro,
   ordenarContasPagar,
+  parseAbaFinanceiro,
+  parseFiltroStatusConta,
+  parseFiltroVencimentoConta,
 } from "./financeiro";
 
 describe("fundação financeira", () => {
@@ -304,5 +308,29 @@ describe("helpers de contas a pagar na tela", () => {
     expect(csv).toContain("1500,50");
     expect(csv).toContain('"Conta; com ""aspas"""');
     expect(csv.indexOf("Beta Ltda")).toBeLessThan(csv.indexOf("Alfa SA"));
+  });
+
+  it("monta e interpreta deep links do financeiro", () => {
+    expect(hrefFinanceiro()).toBe("/financeiro");
+    expect(hrefFinanceiro({ aba: "boletos" })).toBe("/financeiro");
+    expect(hrefFinanceiro({ aba: "contas" })).toBe("/financeiro?aba=contas");
+    expect(hrefFinanceiro({ aba: "contas", vencimento: "atrasadas" })).toBe(
+      "/financeiro?aba=contas&vencimento=atrasadas"
+    );
+    expect(
+      hrefFinanceiro({
+        aba: "contas",
+        vencimento: "hoje",
+        status: "aguardando_conciliacao",
+      })
+    ).toBe("/financeiro?aba=contas&vencimento=hoje&status=aguardando_conciliacao");
+    expect(hrefFinanceiro({ aba: "notas" })).toBe("/financeiro?aba=notas");
+
+    expect(parseAbaFinanceiro("contas")).toBe("contas");
+    expect(parseAbaFinanceiro("xyz")).toBe("boletos");
+    expect(parseFiltroVencimentoConta("atrasadas")).toBe("atrasadas");
+    expect(parseFiltroVencimentoConta("x")).toBe("todas");
+    expect(parseFiltroStatusConta("aguardando_conciliacao")).toBe("aguardando_conciliacao");
+    expect(parseFiltroStatusConta("nope")).toBe("todos");
   });
 });

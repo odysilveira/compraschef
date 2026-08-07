@@ -126,6 +126,13 @@ export function atualizarComNovidades(db: DB): boolean {
   if (!Array.isArray(db.anotacoes_pessoas)) {
     db.anotacoes_pessoas = [];
     mudou = true;
+  } else {
+    for (const anotacao of db.anotacoes_pessoas) {
+      if (!anotacao.tipo || !["elogio", "aviso", "observacao"].includes(anotacao.tipo)) {
+        anotacao.tipo = "observacao";
+        mudou = true;
+      }
+    }
   }
 
   if (!Array.isArray(db.escala_slots)) {

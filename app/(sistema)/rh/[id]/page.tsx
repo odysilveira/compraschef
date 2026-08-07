@@ -10,10 +10,14 @@ import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import {
   adicionarAnotacaoPessoa,
+  corBadgeTipoAnotacao,
   editarAnotacaoPessoa,
   excluirAnotacaoPessoa,
   listarAnotacoesPessoa,
+  rotuloTipoAnotacaoPessoa,
+  TIPOS_ANOTACAO_PESSOA,
 } from "@/lib/domain/anotacoes-pessoa";
+import type { TipoAnotacaoPessoaRh } from "@/lib/types";
 import {
   validarAdiantamento,
   TETO_ADIANTAMENTO_PCT,
@@ -114,6 +118,7 @@ function RhPerfilConteudo() {
   const [dataLiquidacao, setDataLiquidacao] = useState(hojeIsoLocal());
   const [erroConciliar, setErroConciliar] = useState<string | null>(null);
   const [textoAnotacao, setTextoAnotacao] = useState("");
+  const [tipoAnotacao, setTipoAnotacao] = useState<TipoAnotacaoPessoaRh>("observacao");
   const [dataAnotacao, setDataAnotacao] = useState(hojeIsoLocal());
   const [erroAnotacao, setErroAnotacao] = useState<string | null>(null);
   const [editandoAnotacaoId, setEditandoAnotacaoId] = useState<string | null>(null);
@@ -470,14 +475,21 @@ function RhPerfilConteudo() {
 
   function limparFormAnotacao() {
     setTextoAnotacao("");
+    setTipoAnotacao("observacao");
     setDataAnotacao(hojeIsoLocal());
     setEditandoAnotacaoId(null);
     setErroAnotacao(null);
   }
 
-  function comecarEditarAnotacao(anotacao: { id: string; texto: string; data: string }) {
+  function comecarEditarAnotacao(anotacao: {
+    id: string;
+    texto: string;
+    data: string;
+    tipo: TipoAnotacaoPessoaRh;
+  }) {
     setEditandoAnotacaoId(anotacao.id);
     setTextoAnotacao(anotacao.texto);
+    setTipoAnotacao(anotacao.tipo ?? "observacao");
     setDataAnotacao(anotacao.data);
     setErroAnotacao(null);
   }
@@ -491,12 +503,14 @@ function RhPerfilConteudo() {
       ? editarAnotacaoPessoa(proximo, editandoAnotacaoId, {
           texto: textoAnotacao,
           data: dataAnotacao,
+          tipo: tipoAnotacao,
         })
       : adicionarAnotacaoPessoa(proximo, {
           id: uid("anot"),
           pessoa_id: pessoa.id,
           texto: textoAnotacao,
           data: dataAnotacao,
+          tipo: tipoAnotacao,
           autor: "usuário local",
         });
     if (!r.sucesso) {
@@ -1710,15 +1724,31 @@ function RhPerfilConteudo() {
               Histórico livre (elogios, avisos, observações). Avaliações formais entram depois.
             </p>
             <form onSubmit={salvarAnotacao} className="space-y-3">
-              <Campo rotulo="Data">
-                <input
-                  type="date"
-                  className="campo"
-                  required
-                  value={dataAnotacao}
-                  onChange={(e) => setDataAnotacao(e.target.value)}
-                />
-              </Campo>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Campo rotulo="Data">
+                  <input
+                    type="date"
+                    className="campo"
+                    required
+                    value={dataAnotacao}
+                    onChange={(e) => setDataAnotacao(e.target.value)}
+                  />
+                </Campo>
+                <Campo rotulo="Tipo *">
+                  <select
+                    className="campo"
+                    required
+                    value={tipoAnotacao}
+                    onChange={(e) => setTipoAnotacao(e.target.value as TipoAnotacaoPessoaRh)}
+                  >
+                    {TIPOS_ANOTACAO_PESSOA.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.rotulo}
+                      </option>
+                    ))}
+                  </select>
+                </Campo>
+              </div>
               <Campo rotulo="Texto *">
                 <textarea
                   className="campo min-h-24"
@@ -1759,10 +1789,15 @@ function RhPerfilConteudo() {
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs text-slate-500">
-                          {dataBR(anotacao.data)}
-                          {anotacao.autor ? ` · ${anotacao.autor}` : ""}
-                        </p>
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <Badge cor={corBadgeTipoAnotacao(anotacao.tipo ?? "observacao")}>
+                            {rotuloTipoAnotacaoPessoa(anotacao.tipo ?? "observacao")}
+                          </Badge>
+                          <p className="text-xs text-slate-500">
+                            {dataBR(anotacao.data)}
+                            {anotacao.autor ? ` · ${anotacao.autor}` : ""}
+                          </p>
+                        </div>
                         <p className="whitespace-pre-wrap text-sm text-slate-900">{anotacao.texto}</p>
                       </div>
                       <div className="flex flex-wrap gap-2">

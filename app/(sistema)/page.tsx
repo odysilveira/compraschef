@@ -4,7 +4,9 @@
 // e gastos do mês por fornecedor (só dono/gerente).
 
 import {
+  Banknote,
   CalendarClock,
+  CircleCheckBig,
   ClipboardCheck,
   MessageSquare,
   PackageX,
@@ -16,7 +18,8 @@ import { Badge, Card, Vazio } from "@/components/ui";
 import CartaoAlerta from "@/components/operacao/CartaoAlerta";
 import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@/lib/data";
 import { hrefFinanceiro } from "@/lib/domain/financeiro";
-import { podeVerValores, usePapel } from "@/lib/roles";
+import { hrefPagamentosRh, resumirOperacionalRh } from "@/lib/domain/resumo-rh";
+import { podeVerValores, usePapel, usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, diasAte, moeda } from "@/lib/format";
 import type { DB, Pedido, StatusPedido } from "@/lib/types";
 
@@ -51,6 +54,8 @@ export default function PainelPage() {
   const db = useDB();
   const { papel } = usePapel();
   const financeiro = podeVerValores(papel);
+  const podeRh = usePodeAcessarModulo("rh");
+  const resumoRh = podeRh ? resumirOperacionalRh(db) : null;
 
   const abaixoMinimo = produtosAbaixoDoMinimo(db).length;
   const cotacoesAguardando = db.cotacoes.filter((c) => c.status === "enviada").length;
@@ -111,6 +116,24 @@ export default function PainelPage() {
             numero={boletosVencendo}
             icone={CalendarClock}
             cor="laranja"
+          />
+        )}
+        {podeRh && resumoRh && (
+          <CartaoAlerta
+            href={hrefPagamentosRh("liberado")}
+            titulo="Pagamentos RH liberados (a informar)"
+            numero={resumoRh.pagamentos_liberados}
+            icone={Banknote}
+            cor="laranja"
+          />
+        )}
+        {podeRh && resumoRh && (
+          <CartaoAlerta
+            href={hrefPagamentosRh("aguardando")}
+            titulo="Pagamentos RH aguardando conciliação"
+            numero={resumoRh.pagamentos_aguardando}
+            icone={CircleCheckBig}
+            cor="azul"
           />
         )}
         <CartaoAlerta

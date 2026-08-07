@@ -4,6 +4,7 @@
 // Tela operacional: escanear o QR da caixa é o centro de tudo.
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   ArrowDownCircle,
   Boxes,
@@ -659,9 +660,14 @@ export default function EstoquePage() {
       </div>
 
       {aba === "estoque" && (
-        <button className="btn-primario w-full sm:w-auto" onClick={() => setRegistrandoProducao(true)}>
-          <Plus size={18} /> Registrar produção para distribuir
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-primario w-full sm:w-auto" onClick={() => setRegistrandoProducao(true)}>
+            <Plus size={18} /> Registrar produção para distribuir
+          </button>
+          <Link className="btn-secundario w-full sm:w-auto" href="/estoque/reposicao">
+            Reposição do Box Operacional
+          </Link>
+        </div>
       )}
 
       {aba === "estoque" && lotesPendentes.length > 0 && (

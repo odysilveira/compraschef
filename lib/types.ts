@@ -122,6 +122,9 @@ export interface Caixa {
   tipo_box: TipoBox;
   posicao_fisica: PosicaoFisicaBox;
   status: StatusCaixa;
+  produto_operacional_alvo_id?: string;
+  destinacao_operacional_inicio_em?: string;
+  destinacao_operacional_responsavel_id?: string;
   produto_id?: string;
   quantidade?: number; // na unidade de uso
   data_envase?: string; // ISO date
@@ -415,14 +418,29 @@ export interface RecebimentoItem {
   foto_url?: string;
 }
 
-export type TipoMovimento = "entrada" | "baixa" | "producao" | "perda" | "ajuste_balanco";
+export type TipoMovimento =
+  | "entrada"
+  | "baixa"
+  | "producao"
+  | "perda"
+  | "ajuste_balanco"
+  | "transferencia_boxes";
 
 export interface MovimentoEstoque {
   id: string;
   produto_id: string;
   caixa_id?: string;
+  caixa_origem_id?: string;
+  caixa_destino_id?: string;
+  lote_id?: string;
   tipo: TipoMovimento;
+  motivo?: string;
   quantidade: number; // na unidade de uso; negativo = saída
+  validade?: string;
+  saldo_fisico_origem_antes?: number;
+  saldo_fisico_origem_depois?: number;
+  saldo_fisico_destino_antes?: number;
+  saldo_fisico_destino_depois?: number;
   recebimento_id?: string;
   usuario_id: string;
   criado_em: string;
@@ -444,6 +462,50 @@ export interface BalancoItem {
   caixa_id: string;
   qtd_esperada: number;
   qtd_encontrada: number;
+}
+
+export type TipoEventoOperacaoBox =
+  | "abertura"
+  | "reposicao"
+  | "fechamento"
+  | "divergencia"
+  | "ajuste_inventario"
+  | "destinacao_operacional_ativada"
+  | "destinacao_operacional_encerrada";
+
+export type StatusDivergenciaOperacaoBox = "aberta" | "justificada" | "ajustada" | "concluida";
+
+export interface EventoOperacaoBox {
+  id: string;
+  tipo: TipoEventoOperacaoBox;
+  box_id: string;
+  box_numero: number;
+  qr_code: string;
+  sessao_id: string;
+  produto_id?: string;
+  lote_id?: string;
+  validade?: string;
+  quantidade?: number;
+  quantidade_esperada?: number;
+  quantidade_contada?: number;
+  quantidade_utilizavel?: number;
+  necessidade_prevista?: number;
+  reposicao_sugerida?: number;
+  saldo_anterior?: number;
+  saldo_posterior?: number;
+  origem_box_id?: string;
+  origem_qr_code?: string;
+  destino_box_id?: string;
+  destino_qr_code?: string;
+  delta?: number;
+  motivo?: string;
+  justificativa?: string;
+  status_divergencia?: StatusDivergenciaOperacaoBox;
+  evento_referencia_id?: string;
+  higienizacao_confirmada?: boolean;
+  encerrado_por_id?: string;
+  usuario_id: string;
+  criado_em: string;
 }
 
 export interface PrecoHistorico {
@@ -495,6 +557,7 @@ export interface DB {
   movimentos_estoque: MovimentoEstoque[];
   balancos: Balanco[];
   balanco_itens: BalancoItem[];
+  eventos_box_operacional: EventoOperacaoBox[];
   precos_historico: PrecoHistorico[];
   integracao_eventos: IntegracaoEvento[];
   fichas_tecnicas_receitas?: ReceitaFichaTecnica[];

@@ -2,7 +2,7 @@
 
 // Leitor de QR/código de barras compartilhado.
 // - Câmera: usa a API BarcodeDetector do navegador quando disponível (Chrome/Edge).
-// - Leitor Bluetooth: funciona como teclado — o campo de texto captura e envia com Enter.
+// - Leitor QR USB ou Bluetooth: funciona como teclado — o campo de texto captura e envia com Enter.
 // - Sempre há entrada manual como plano B.
 
 import { useEffect, useRef, useState } from "react";
@@ -11,13 +11,14 @@ import { Camera, CameraOff, ScanLine } from "lucide-react";
 interface Props {
   rotulo?: string;
   onLeitura: (codigo: string) => void;
+  onManual?: (codigo: string) => void;
 }
 
 type DetectorDeCodigo = {
   detect: (source: CanvasImageSource) => Promise<{ rawValue: string }[]>;
 };
 
-export default function CodeScanner({ rotulo = "Escanear código", onLeitura }: Props) {
+export default function CodeScanner({ rotulo = "Escanear código", onLeitura, onManual }: Props) {
   const [cameraAtiva, setCameraAtiva] = useState(false);
   const [erroCamera, setErroCamera] = useState<string | null>(null);
   const [manual, setManual] = useState("");
@@ -41,7 +42,7 @@ export default function CodeScanner({ rotulo = "Escanear código", onLeitura }: 
     const DetectorClasse = (window as unknown as { BarcodeDetector?: new (opts?: unknown) => DetectorDeCodigo })
       .BarcodeDetector;
     if (!DetectorClasse) {
-      setErroCamera("Este navegador não lê códigos pela câmera. Use o leitor Bluetooth ou digite o código abaixo.");
+      setErroCamera("Este navegador não lê códigos pela câmera. Use o leitor QR USB ou Bluetooth. A digitação manual permite apenas localizar e conferir o box; a confirmação da operação exige leitura física.");
       return;
     }
     try {
@@ -87,7 +88,7 @@ export default function CodeScanner({ rotulo = "Escanear código", onLeitura }: 
     const codigo = manual.trim();
     if (!codigo) return;
     setManual("");
-    onLeitura(codigo);
+    (onManual ?? onLeitura)(codigo);
   }
 
   return (
@@ -116,7 +117,7 @@ export default function CodeScanner({ rotulo = "Escanear código", onLeitura }: 
       <div className="flex gap-2">
         <input
           className="campo"
-          placeholder="Ou digite / use o leitor Bluetooth aqui…"
+          placeholder="Ou digite / use o leitor QR USB ou Bluetooth aqui…"
           value={manual}
           onChange={(e) => setManual(e.target.value)}
           onKeyDown={(e) => {

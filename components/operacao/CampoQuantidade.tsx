@@ -10,12 +10,14 @@ interface Props {
   onChange: (novo: number) => void;
   passo?: number;
   min?: number;
+  casasDecimais?: number;
   disabled?: boolean;
 }
 
-export default function CampoQuantidade({ valor, onChange, passo = 1, min = 0, disabled = false }: Props) {
+export default function CampoQuantidade({ valor, onChange, passo = 1, min = 0, casasDecimais = 2, disabled = false }: Props) {
   function ajustar(delta: number) {
-    const novo = Math.max(min, Math.round((valor + delta) * 100) / 100);
+    const fator = 10 ** casasDecimais;
+    const novo = Math.max(min, Math.round((valor + delta) * fator) / fator);
     onChange(novo);
   }
 

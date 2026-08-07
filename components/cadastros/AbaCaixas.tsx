@@ -9,13 +9,17 @@ import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
 import { mutate, nomeLocal, nomeProduto, siglaUnidadeUso, uid, useDB } from "@/lib/data";
 import {
   aplicarMetadadosBox,
+  ativarDestinacaoOperacional,
   avisoIncompatibilidadeBox,
+  encerrarDestinacaoOperacional,
+  produtoOperacionalEfetivo,
   ROTULO_POSICAO_BOX,
   ROTULO_TIPO_BOX,
   type PosicaoFisicaBox,
   type TipoBox,
 } from "@/lib/domain/estoque-boxes";
-import { qtd, rotuloValidade } from "@/lib/format";
+import { alocacaoAtivaDaCaixa } from "@/lib/domain/estoque";
+import { dataHoraBR, qtd, rotuloValidade } from "@/lib/format";
 import type { Caixa, StatusCaixa } from "@/lib/types";
 import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
 
@@ -50,7 +54,7 @@ function explicacaoTipoBox(tipo: TipoBox): string {
     case "OPERACIONAL":
       return "Operacional: saldo contínuo para consumo.";
     case "QUARENTENA":
-      return "Quarentena: box identificado para isolamento. O bloqueio automático de consumo será implementado na próxima fase.";
+      return "Boxes em Quarentena são excluídos da reposição e do FEFO. A classificação não altera o saldo por si só.";
     default:
       return "Não classificado: caixa ainda não adaptada ao novo modelo.";
   }
@@ -65,6 +69,12 @@ export function AbaCaixas() {
   const [busca, setBusca] = useState("");
   const [filtroTipo, setFiltroTipo] = useState<TipoBox | "">("");
   const [form, setForm] = useState<Caixa | null>(null);
+  const [produtoAlvoId, setProdutoAlvoId] = useState("");
+  const [responsavelDestinacaoId, setResponsavelDestinacaoId] = useState(() => db.perfis.find((perfil) => perfil.ativo)?.id ?? "");
+  const [motivoDestinacao, setMotivoDestinacao] = useState("");
+  const [higienizacaoConfirmada, setHigienizacaoConfirmada] = useState(false);
+  const [confirmacaoEncerramento, setConfirmacaoEncerramento] = useState(false);
+  const [erroDestinacao, setErroDestinacao] = useState<string | null>(null);
 
   const lista = db.caixas
     .filter((c) => {
@@ -94,9 +104,108 @@ export function AbaCaixas() {
     };
   }
 
+  function abrirFormulario(caixa: Caixa) {
+    setForm({ ...caixa });
+    setProdutoAlvoId(produtoOperacionalEfetivo(caixa) ?? "");
+    setResponsavelDestinacaoId(caixa.destinacao_operacional_responsavel_id ?? db.perfis.find((perfil) => perfil.ativo)?.id ?? "");
+    setMotivoDestinacao("");
+    setHigienizacaoConfirmada(false);
+    setConfirmacaoEncerramento(false);
+    setErroDestinacao(null);
+  }
+
+  function ativarDestinacao() {
+    if (!form) return;
+    try {
+      let caixaAtualizada: Caixa | undefined;
+      mutate((banco) => {
+        ativarDestinacaoOperacional(banco, {
+          boxId: form.id,
+          produtoId: produtoAlvoId,
+          usuarioId: responsavelDestinacaoId,
+          motivo: motivoDestinacao.trim() || undefined,
+        });
+        caixaAtualizada = banco.caixas.find((caixa) => caixa.id === form.id);
+      });
+      if (caixaAtualizada) abrirFormulario(caixaAtualizada);
+    } catch (error) {
+      setErroDestinacao(error instanceof Error ? error.message : "Não foi possível ativar a destinação.");
+    }
+  }
+
+  function encerrarDestinacao() {
+    if (!form) return;
+    try {
+      let caixaAtualizada: Caixa | undefined;
+      mutate((banco) => {
+        encerrarDestinacaoOperacional(banco, {
+          boxId: form.id,
+          usuarioId: responsavelDestinacaoId,
+          higienizacaoConfirmada,
+          motivo: motivoDestinacao.trim() || undefined,
+        });
+        caixaAtualizada = banco.caixas.find((caixa) => caixa.id === form.id);
+      });
+      if (caixaAtualizada) abrirFormulario(caixaAtualizada);
+    } catch (error) {
+      setErroDestinacao(error instanceof Error ? error.message : "Não foi possível encerrar a destinação.");
+    }
+  }
+
+  const alocacaoAtivaForm = form?.id ? alocacaoAtivaDaCaixa(db, form.id) : undefined;
+  const saldoFisicoForm = form?.quantidade ?? 0;
+  const podeAlterarLocalFisico = Boolean(form) && saldoFisicoForm === 0 && !alocacaoAtivaForm;
+  const operacionalVazioSemAlocacao =
+    form?.tipo_box === "OPERACIONAL" && form.status === "vazia" && saldoFisicoForm === 0 && !alocacaoAtivaForm;
+  const podeAtivarDestinacao =
+    Boolean(form?.id) &&
+    operacionalVazioSemAlocacao &&
+    !form?.produto_operacional_alvo_id &&
+    Boolean(form?.local_id) &&
+    Boolean(produtoAlvoId) &&
+    Boolean(responsavelDestinacaoId);
+  const podeEncerrarDestinacao =
+    Boolean(form?.id) &&
+    Boolean(form?.produto_operacional_alvo_id) &&
+    saldoFisicoForm === 0 &&
+    !alocacaoAtivaForm &&
+    Boolean(responsavelDestinacaoId) &&
+    motivoDestinacao.trim().length > 0 &&
+    higienizacaoConfirmada &&
+    confirmacaoEncerramento;
+  const bloqueioEncerramento =
+    saldoFisicoForm > 0
+      ? "Encerramento bloqueado: exige saldo físico zero."
+      : alocacaoAtivaForm
+        ? "Encerramento bloqueado: existe alocação ativa."
+        : null;
+  const bloqueioAtivacao =
+    form?.tipo_box !== "OPERACIONAL"
+      ? "Destinação operacional disponível apenas para Box Operacional."
+      : form.produto_operacional_alvo_id
+        ? null
+        : saldoFisicoForm > 0
+          ? "Ativação bloqueada: exige saldo físico zero."
+          : form.status !== "vazia"
+            ? "Ativação bloqueada: o box precisa estar vazio."
+            : alocacaoAtivaForm
+              ? "Ativação bloqueada: existe alocação ativa."
+              : !form.local_id
+                ? "Local físico não definido — configure o box antes da operação."
+                : null;
+  const produtoAlvo = produtoAlvoId ? db.produtos.find((produto) => produto.id === produtoAlvoId) : undefined;
+  const responsavelDestinacao = form?.destinacao_operacional_responsavel_id
+    ? db.perfis.find((perfil) => perfil.id === form.destinacao_operacional_responsavel_id)
+    : undefined;
+
   function salvar(e: FormEvent) {
     e.preventDefault();
     if (!form) return;
+    const caixaOriginal = form.id ? db.caixas.find((caixa) => caixa.id === form.id) : undefined;
+    if (caixaOriginal && caixaOriginal.local_id !== form.local_id && !podeAlterarLocalFisico) {
+      window.alert("Alteração de local físico bloqueada: box com conteúdo ou alocação ativa deve ser movimentado por fluxo próprio.");
+      return;
+    }
     mutate((banco) => {
       if (form.id) {
         const i = banco.caixas.findIndex((c) => c.id === form.id);
@@ -106,6 +215,7 @@ export function AbaCaixas() {
             qr_code: form.qr_code,
             tipo_box: form.tipo_box,
             posicao_fisica: form.posicao_fisica,
+            local_id: form.local_id,
           });
         }
       } else {
@@ -142,7 +252,7 @@ export function AbaCaixas() {
           <a href="/etiquetas" target="_blank" rel="noopener" className="btn-secundario">
             <QrCode size={16} /> Imprimir etiquetas
           </a>
-          <button className="btn-primario" onClick={() => setForm(novaCaixa())}>
+          <button className="btn-primario" onClick={() => abrirFormulario(novaCaixa())}>
             <Plus size={16} /> Nova caixa
           </button>
         </div>
@@ -156,10 +266,10 @@ export function AbaCaixas() {
             <p className="font-semibold text-slate-800">Classificação lógica dos boxes</p>
             <p>Reserva: estoque armazenado.</p>
             <p>Operacional: saldo contínuo para consumo.</p>
-            <p>Quarentena: box identificado para isolamento. O bloqueio automático de consumo será implementado na próxima fase.</p>
+            <p>Quarentena: boxes em Quarentena são excluídos da reposição e do FEFO. A classificação não altera o saldo por si só.</p>
             <p>Não classificado: caixa ainda não adaptada ao novo modelo.</p>
             <p className="mt-2 rounded-card border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
-              Fase 1: a classificação organiza e identifica os boxes, mas ainda não altera disponibilidade, saldo, FEFO ou consumo.
+              A classificação organiza o fluxo físico. A destinação operacional define o produto alvo de um Box Operacional sem alterar saldo por si só.
             </p>
           </div>
 
@@ -169,7 +279,7 @@ export function AbaCaixas() {
               <tr
                 key={c.id}
                 className="cursor-pointer transition-colors hover:bg-slate-50"
-                onClick={() => setForm({ ...c })}
+                onClick={() => abrirFormulario(c)}
               >
                 <td className="px-3 py-2.5 font-semibold">{c.numero}</td>
                 <td className="whitespace-nowrap px-3 py-2.5">
@@ -189,7 +299,7 @@ export function AbaCaixas() {
                     ? `${nomeProduto(db, c.produto_id)} · ${qtd(c.quantidade, siglaUnidadeUso(db, c.produto_id))}`
                     : "—"}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2.5">{c.produto_id ? nomeLocal(db, c.local_id) : "—"}</td>
+                <td className="whitespace-nowrap px-3 py-2.5">{nomeLocal(db, c.local_id)}</td>
               </tr>
             ))}
             </Tabela>
@@ -238,6 +348,115 @@ export function AbaCaixas() {
                 ))}
               </select>
             </Campo>
+            <Campo rotulo="Local físico">
+              <select
+                className="campo"
+                value={form.local_id ?? ""}
+                disabled={!podeAlterarLocalFisico}
+                onChange={(e) => setForm({ ...form, local_id: e.target.value || undefined })}
+              >
+                <option value="">Sem local</option>
+                {db.locais.map((local) => (
+                  <option key={local.id} value={local.id}>{local.nome}</option>
+                ))}
+              </select>
+              {!podeAlterarLocalFisico && (
+                <p className="mt-1 text-xs text-slate-500">Box com conteúdo ou alocação ativa deve mudar de local por fluxo próprio.</p>
+              )}
+            </Campo>
+
+            {form.tipo_box === "OPERACIONAL" && (
+              <div className="rounded-card border border-primaria/30 bg-white p-3 sm:col-span-2">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="rotulo">Destinação operacional</span>
+                  <Badge cor={form.produto_operacional_alvo_id ? "verde" : "cinza"}>
+                    {form.produto_operacional_alvo_id ? "Ativa" : "Sem destinação"}
+                  </Badge>
+                </div>
+                <p className="mb-3 text-sm text-slate-600">
+                  A destinação define o produto alvo do Box Operacional. Ela não adiciona saldo, lote ou conteúdo físico.
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Campo rotulo="Produto/porcionamento alvo">
+                    <input
+                      className="campo mb-2"
+                      list="produtos-destinacao-operacional"
+                      placeholder="Pesquisar produto/porcionamento"
+                      value={produtoAlvo?.nome ?? ""}
+                      disabled={Boolean(form.produto_operacional_alvo_id)}
+                      onChange={(e) => {
+                        const produto = db.produtos.find((item) => item.nome === e.target.value);
+                        setProdutoAlvoId(produto?.id ?? "");
+                      }}
+                    />
+                    <datalist id="produtos-destinacao-operacional">
+                      {db.produtos.filter((produto) => produto.ativo).map((produto) => (
+                        <option key={produto.id} value={produto.nome} />
+                      ))}
+                    </datalist>
+                    <select className="campo" value={produtoAlvoId} disabled={Boolean(form.produto_operacional_alvo_id)} onChange={(e) => setProdutoAlvoId(e.target.value)}>
+                      <option value="">Selecione</option>
+                      {db.produtos.filter((produto) => produto.ativo).map((produto) => (
+                        <option key={produto.id} value={produto.id}>{produto.nome}</option>
+                      ))}
+                    </select>
+                  </Campo>
+                  <Campo rotulo="Unidade de uso">
+                    <input className="campo" value={produtoAlvoId ? siglaUnidadeUso(db, produtoAlvoId) : "—"} readOnly />
+                  </Campo>
+                  <Campo rotulo="Início da destinação">
+                    <input className="campo" value={dataHoraBR(form.destinacao_operacional_inicio_em)} readOnly />
+                  </Campo>
+                  <Campo rotulo="Responsável">
+                    <select className="campo" value={responsavelDestinacaoId} onChange={(e) => setResponsavelDestinacaoId(e.target.value)}>
+                      {db.perfis.filter((perfil) => perfil.ativo).map((perfil) => (
+                        <option key={perfil.id} value={perfil.id}>{perfil.nome}</option>
+                      ))}
+                    </select>
+                  </Campo>
+                </div>
+                <p className="mt-2 text-sm text-slate-600">
+                  Número permanente: {form.numero}. QR permanente: {form.qr_code}.
+                </p>
+                {form.produto_operacional_alvo_id && (
+                  <p className="mt-2 text-sm text-slate-600">
+                    Destinação ativa para {produtoAlvo ? produtoAlvo.nome : nomeProduto(db, form.produto_operacional_alvo_id)}
+                    {" "}({siglaUnidadeUso(db, form.produto_operacional_alvo_id)}). Responsável pela ativação: {responsavelDestinacao?.nome ?? "não informado"}.
+                    Fechar o box com saldo zero não encerra a destinação automaticamente.
+                  </p>
+                )}
+                <Campo rotulo="Motivo">
+                  <textarea className="campo min-h-20" value={motivoDestinacao} onChange={(e) => setMotivoDestinacao(e.target.value)} />
+                </Campo>
+                {form.produto_operacional_alvo_id && (
+                  <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" className="h-4 w-4 accent-primaria" checked={higienizacaoConfirmada} onChange={(e) => setHigienizacaoConfirmada(e.target.checked)} />
+                    Higienização confirmada para encerrar a destinação.
+                  </label>
+                )}
+                {form.produto_operacional_alvo_id && (
+                  <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" className="h-4 w-4 accent-primaria" checked={confirmacaoEncerramento} onChange={(e) => setConfirmacaoEncerramento(e.target.checked)} />
+                    Confirmação final: encerrar a destinação ativa deste box.
+                  </label>
+                )}
+                {bloqueioAtivacao && <p className="mt-2 rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">{bloqueioAtivacao}</p>}
+                {bloqueioEncerramento && <p className="mt-2 rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">{bloqueioEncerramento}</p>}
+                {erroDestinacao && <p className="mt-2 rounded-card bg-erro-clara px-3 py-2 text-sm text-erro">{erroDestinacao}</p>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {!form.produto_operacional_alvo_id ? (
+                    <button type="button" className="btn-primario" disabled={!podeAtivarDestinacao} onClick={ativarDestinacao}>
+                      Ativar destinação
+                    </button>
+                  ) : (
+                    <button type="button" className="btn-secundario" disabled={!podeEncerrarDestinacao} onClick={encerrarDestinacao}>
+                      Encerrar destinação
+                    </button>
+                  )}
+                </div>
+                {!form.produto_operacional_alvo_id && <p className="mt-2 text-sm text-slate-500">Sem destinação — configure antes da operação.</p>}
+              </div>
+            )}
 
             <div className="rounded-card border border-slate-200 bg-fundo p-3 sm:col-span-2">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -253,7 +472,7 @@ export function AbaCaixas() {
               )}
               {form.tipo_box === "QUARENTENA" && (
                 <p className="mt-2 rounded-card border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-                  Separe fisicamente este box. Nesta fase, o sistema ainda não impede automaticamente seu uso pelo fluxo de estoque.
+                  Separe fisicamente este box. Boxes em Quarentena são excluídos da reposição e do FEFO; a classificação não altera saldo por si só.
                 </p>
               )}
             </div>

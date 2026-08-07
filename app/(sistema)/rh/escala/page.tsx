@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Check, Copy, Download, Filter, GripVertical, Plus, RefreshCw } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
+import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
+import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import {
   HORARIO_PADRAO_CLT_12X36,
   LOCAL_PADRAO_ESCALA,
@@ -61,7 +63,13 @@ import {
   parsePessoaPontoRh,
   type FiltroConvocacaoEscalaRh,
 } from "@/lib/domain/resumo-rh";
-import { liberarPagamentoPessoa, rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
+import {
+  conciliarPagamentoPessoa,
+  informarPagamentoPessoa,
+  liberarPagamentoPessoa,
+  rotuloStatusPagamentoPessoa,
+  rotuloTipoPagamentoPessoa,
+} from "@/lib/domain/pagamentos-pessoas";
 import {
   chavePixDaPessoa,
   linkWhatsAppReciboPagamento,
@@ -71,7 +79,7 @@ import {
 import { hrefPerfilRh, rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
-import type { ConvocacaoIntermitente, EscalaSlot, PessoaRH, StatusConvocacao } from "@/lib/types";
+import type { ConvocacaoIntermitente, EscalaSlot, PagamentoPessoa, PessoaRH, StatusConvocacao } from "@/lib/types";
 
 function setorArrastoIntermitente(pessoa: PessoaRH): Exclude<SetorConvocacaoEscala, "motoboy"> {
   const setor = setorOperacionalDaPessoa(pessoa);
@@ -327,6 +335,17 @@ function RhEscalaConteudo() {
   const [filtroPessoa, setFiltroPessoa] = useState(() =>
     parsePessoaPontoRh(searchParams.get("pessoa"))
   );
+  const [informarId, setInformarId] = useState<string | null>(null);
+  const [formInformar, setFormInformar] = useState({
+    dataPagamento: hojeISO(),
+    valorPago: "",
+    bancoConta: "",
+    responsavel: "usuário local",
+  });
+  const [erroInformar, setErroInformar] = useState<string | null>(null);
+  const [conciliarId, setConciliarId] = useState<string | null>(null);
+  const [dataLiquidacao, setDataLiquidacao] = useState(hojeISO());
+  const [erroConciliar, setErroConciliar] = useState<string | null>(null);
   const cltSemRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -704,6 +723,62 @@ function RhEscalaConteudo() {
         ? "WhatsApp aberto com a confirmação."
         : "WhatsApp aberto com o recibo."
     );
+  }
+
+  function abrirInformarEscala(pagamento: PagamentoPessoa) {
+    setInformarId(pagamento.id);
+    setFormInformar({
+      dataPagamento: hojeISO(),
+      valorPago: pagamento.valor.toFixed(2),
+      bancoConta: contaPadraoOrigem(db),
+      responsavel: "usuário local",
+    });
+    setErroInformar(null);
+  }
+
+  function confirmarInformarEscala(e: FormEvent) {
+    e.preventDefault();
+    if (!informarId) return;
+    const valorPago = Number(formInformar.valorPago.replace(",", "."));
+    const proximo = structuredClone(db);
+    const resultado = informarPagamentoPessoa(proximo, informarId, {
+      dataPagamento: formInformar.dataPagamento,
+      valorPago,
+      bancoConta: formInformar.bancoConta,
+      responsavel: formInformar.responsavel,
+    });
+    if (!resultado.sucesso) {
+      setErroInformar(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setInformarId(null);
+    setErro(null);
+    setMensagem("Pagamento informado. Aguardando conciliação bancária.");
+  }
+
+  function abrirConciliarEscala(pagamento: PagamentoPessoa) {
+    setConciliarId(pagamento.id);
+    setDataLiquidacao(pagamento.pagamento_data || hojeISO());
+    setErroConciliar(null);
+  }
+
+  function confirmarConciliarEscala(e: FormEvent) {
+    e.preventDefault();
+    if (!conciliarId) return;
+    const proximo = structuredClone(db);
+    const resultado = conciliarPagamentoPessoa(proximo, conciliarId, {
+      dataLiquidacao,
+      responsavel: "usuário local",
+    });
+    if (!resultado.sucesso) {
+      setErroConciliar(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setConciliarId(null);
+    setErro(null);
+    setMensagem("Pagamento conciliado e marcado como pago.");
   }
 
   function abrirPadrao(pessoaId?: string) {
@@ -2190,32 +2265,24 @@ function RhEscalaConteudo() {
                       </button>
                     )}
                   {detalhePagamento.status === "liberado" && (
-                    <Link
-                      href={hrefPagamentosRh({
-                        filtro: "liberado",
-                        pessoa: detalhePagamento.pessoa_id,
-                        competencia: detalhePagamento.competencia || undefined,
-                        tipo: detalhePagamento.tipo,
-                      })}
+                    <button
+                      type="button"
                       className="btn-primario"
-                      title="Abre a lista de RH para informar o pagamento"
+                      onClick={() => abrirInformarEscala(detalhePagamento)}
+                      title="Informa o pagamento sem sair da Escala"
                     >
-                      Informar na lista
-                    </Link>
+                      Informar pagamento
+                    </button>
                   )}
                   {detalhePagamento.status === "aguardando_conciliacao" && (
-                    <Link
-                      href={hrefPagamentosRh({
-                        filtro: "aguardando",
-                        pessoa: detalhePagamento.pessoa_id,
-                        competencia: detalhePagamento.competencia || undefined,
-                        tipo: detalhePagamento.tipo,
-                      })}
+                    <button
+                      type="button"
                       className="btn-primario"
-                      title="Abre a lista de RH para conciliar o pagamento"
+                      onClick={() => abrirConciliarEscala(detalhePagamento)}
+                      title="Concilia o pagamento sem sair da Escala"
                     >
-                      Conciliar na lista
-                    </Link>
+                      Conciliar
+                    </button>
                   )}
                   {(detalhePagamento.status === "aguardando_conciliacao" ||
                     detalhePagamento.status === "pago") &&
@@ -2272,6 +2339,155 @@ function RhEscalaConteudo() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(informarId)}
+        titulo="Informar pagamento"
+        onFechar={() => setInformarId(null)}
+        fecharAoClicarFundo={false}
+      >
+        {informarId &&
+          (() => {
+            const pagamentoInformar = (db.pagamentos_pessoas ?? []).find((p) => p.id === informarId);
+            if (!pagamentoInformar) return null;
+            const pessoaInformar = db.pessoas.find((p) => p.id === pagamentoInformar.pessoa_id);
+            return (
+              <form onSubmit={confirmarInformarEscala} className="space-y-3">
+                <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+                  Informar pagamento não dá baixa final. O título fica em aguardando conciliação.
+                </div>
+                <p className="text-sm text-slate-700">
+                  {pessoaInformar?.nome ?? "Pessoa"} · {rotuloTipoPagamentoPessoa(pagamentoInformar.tipo)} ·{" "}
+                  {moeda(pagamentoInformar.valor)}
+                </p>
+                {chavePixDaPessoa(pessoaInformar) && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-card border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    <p className="min-w-0 flex-1">
+                      Destino (PIX):{" "}
+                      <span className="font-medium text-slate-700">
+                        {chavePixDaPessoa(pessoaInformar)}
+                      </span>
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-secundario shrink-0"
+                      onClick={() => {
+                        const chave = chavePixDaPessoa(pessoaInformar);
+                        if (!chave) return;
+                        void navigator.clipboard.writeText(chave).then(
+                          () => {
+                            setErro(null);
+                            setMensagem(`PIX de ${pessoaInformar?.nome ?? "pessoa"} copiado.`);
+                          },
+                          () => setErro("Não foi possível copiar a chave PIX neste navegador.")
+                        );
+                      }}
+                    >
+                      <Copy size={14} /> Copiar PIX
+                    </button>
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Campo rotulo="Data *">
+                    <input
+                      type="date"
+                      className="campo"
+                      required
+                      value={formInformar.dataPagamento}
+                      onChange={(e) =>
+                        setFormInformar({ ...formInformar, dataPagamento: e.target.value })
+                      }
+                    />
+                  </Campo>
+                  <Campo rotulo="Valor pago *">
+                    <input
+                      className="campo"
+                      required
+                      value={formInformar.valorPago}
+                      onChange={(e) =>
+                        setFormInformar({ ...formInformar, valorPago: e.target.value })
+                      }
+                    />
+                  </Campo>
+                  <div className="sm:col-span-2 space-y-2">
+                    <Campo rotulo="De qual banco/conta saiu o pagamento? *">
+                      <SeletorContaOrigem
+                        db={db}
+                        valor={formInformar.bancoConta}
+                        onChange={(bancoConta) => setFormInformar({ ...formInformar, bancoConta })}
+                        listId="contas-origem-rh-escala"
+                      />
+                    </Campo>
+                    <p className="text-xs text-slate-500">
+                      Facilita achar o débito no extrato na hora de conciliar.
+                    </p>
+                  </div>
+                  <Campo rotulo="Responsável">
+                    <input
+                      className="campo"
+                      value={formInformar.responsavel}
+                      onChange={(e) =>
+                        setFormInformar({ ...formInformar, responsavel: e.target.value })
+                      }
+                    />
+                  </Campo>
+                </div>
+                {erroInformar && <p className="text-sm font-medium text-erro">{erroInformar}</p>}
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="btn-secundario" onClick={() => setInformarId(null)}>
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn-primario">
+                    Informar pagamento
+                  </button>
+                </div>
+              </form>
+            );
+          })()}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(conciliarId)}
+        titulo="Conciliar pagamento"
+        onFechar={() => setConciliarId(null)}
+      >
+        {conciliarId &&
+          (() => {
+            const pagamentoConciliar = (db.pagamentos_pessoas ?? []).find((p) => p.id === conciliarId);
+            if (!pagamentoConciliar) return null;
+            const pessoaConciliar = db.pessoas.find((p) => p.id === pagamentoConciliar.pessoa_id);
+            return (
+              <form onSubmit={confirmarConciliarEscala} className="space-y-3">
+                <p className="text-sm text-slate-700">
+                  {pessoaConciliar?.nome ?? "Pessoa"} · {rotuloTipoPagamentoPessoa(pagamentoConciliar.tipo)} ·{" "}
+                  {moeda(pagamentoConciliar.pagamento_valor ?? pagamentoConciliar.valor)}
+                </p>
+                <Campo rotulo="Data da liquidação *">
+                  <input
+                    type="date"
+                    className="campo"
+                    required
+                    value={dataLiquidacao}
+                    onChange={(e) => setDataLiquidacao(e.target.value)}
+                  />
+                </Campo>
+                {erroConciliar && <p className="text-sm font-medium text-erro">{erroConciliar}</p>}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={() => setConciliarId(null)}
+                  >
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn-primario">
+                    Conciliar
+                  </button>
+                </div>
+              </form>
+            );
+          })()}
       </Modal>
     </div>
   );

@@ -39,9 +39,11 @@ import {
   exportarContasPagarCsv,
   hrefFinanceiro,
   parseAbaFinanceiro,
+  parseFilaAgendaFinanceiro,
   parseFiltroStatusConta,
   parseFiltroVencimentoConta,
   type AbaFinanceiro,
+  type FilaAgendaFinanceiro,
   type FiltroVencimentoConta,
 } from "@/lib/domain/financeiro";
 import {
@@ -1473,21 +1475,38 @@ function FinanceiroConteudo() {
     setFiltroVencimentoConta(parseFiltroVencimentoConta(searchParams.get("vencimento")));
   }, [searchParams]);
 
+  useEffect(() => {
+    const aba = parseAbaFinanceiro(searchParams.get("aba"));
+    const fila = parseFilaAgendaFinanceiro(searchParams.get("fila"));
+    if (aba !== "boletos" || !fila) return;
+    const id =
+      fila === "aguardando" ? "financeiro-fila-aguardando" : "financeiro-fila-pagos";
+    const timer = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [searchParams, abaFinanceira]);
+
   function irParaFinanceiro(opts: {
     aba?: AbaFinanceiro;
     vencimento?: FiltroVencimentoConta;
     status?: StatusContaPagar | "todos";
+    fila?: FilaAgendaFinanceiro;
   }) {
     const aba = opts.aba ?? abaFinanceira;
     const vencimento =
       opts.vencimento ?? (aba === "contas" ? filtroVencimentoConta : "todas");
     const status = opts.status ?? (aba === "contas" ? filtroStatusConta : "todos");
+    const fila =
+      aba === "boletos"
+        ? opts.fila ?? parseFilaAgendaFinanceiro(searchParams.get("fila"))
+        : undefined;
     setAbaFinanceira(aba);
     if (aba === "contas") {
       setFiltroVencimentoConta(vencimento);
       setFiltroStatusConta(status);
     }
-    router.replace(hrefFinanceiro({ aba, vencimento, status }), { scroll: false });
+    router.replace(hrefFinanceiro({ aba, vencimento, status, fila }), { scroll: false });
   }
 
   function abrirNovaConta() {
@@ -2566,7 +2585,7 @@ function FinanceiroConteudo() {
               )}
             </div>
 
-            <div className="space-y-2">
+            <div id="financeiro-fila-aguardando" className="space-y-2 scroll-mt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="rotulo text-blue-700">Aguardando conciliação</p>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2632,7 +2651,7 @@ function FinanceiroConteudo() {
               )}
             </div>
 
-            <div className="space-y-2">
+            <div id="financeiro-fila-pagos" className="space-y-2 scroll-mt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="rotulo text-primaria-escura">Pagos</p>
                 {rhPagos.length > 0 && (

@@ -198,3 +198,16 @@ export function hrefPerfilRh(
   if (aba === "dados") return `/rh/${pessoaId}`;
   return `/rh/${pessoaId}?aba=${aba}`;
 }
+
+/**
+ * Destino do card no hub de pessoas.
+ * Prioridade: alerta de docs → Avaliações (se houver ciclos) → Dados.
+ */
+export function abaDestinoHubPessoaRh(opts: {
+  temAlertaDocs: boolean;
+  temAvaliacoes?: boolean;
+}): AbaPerfilRh {
+  if (opts.temAlertaDocs) return "documentos";
+  if (opts.temAvaliacoes) return "avaliacoes";
+  return "dados";
+}

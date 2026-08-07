@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { seedDB } from "../data/seed";
 import {
   adicionarAvaliacaoPessoa,
+  editarAvaliacaoPessoa,
+  excluirAvaliacaoPessoa,
   listarAvaliacoesPessoa,
   rotuloCompetenciaAvaliacao,
 } from "./avaliacoes-pessoa";
@@ -81,5 +83,47 @@ describe("avaliações de pessoa (RH)", () => {
   it("formata competência", () => {
     expect(rotuloCompetenciaAvaliacao("2026-08")).toMatch(/ago\/2026/i);
     expect(rotuloCompetenciaAvaliacao("")).toBe("—");
+  });
+
+  it("edita e exclui avaliação", () => {
+    const db = structuredClone(seedDB);
+    db.avaliacoes_pessoas = [];
+    adicionarAvaliacaoPessoa(
+      db,
+      {
+        id: "aval-e1",
+        pessoa_id: "pes-gerente",
+        competencia: "2026-07",
+        nota: 3,
+        comentario: "Rascunho",
+        avaliador: "Ody",
+      },
+      { agora: "2026-07-10T10:00:00.000Z" }
+    );
+    const edit = editarAvaliacaoPessoa(
+      db,
+      "aval-e1",
+      { competencia: "2026-08", nota: 5, comentario: "Excelente mês" },
+      { agora: "2026-08-02T11:00:00.000Z" }
+    );
+    expect(edit.sucesso).toBe(true);
+    expect(edit.avaliacao?.competencia).toBe("2026-08");
+    expect(edit.avaliacao?.nota).toBe(5);
+    expect(edit.avaliacao?.comentario).toBe("Excelente mês");
+    expect(edit.avaliacao?.avaliador).toBe("Ody");
+    expect(edit.avaliacao?.criado_em).toBe("2026-07-10T10:00:00.000Z");
+    expect(edit.avaliacao?.atualizado_em).toBe("2026-08-02T11:00:00.000Z");
+
+    expect(editarAvaliacaoPessoa(db, "aval-e1", { competencia: "2026-13", nota: 4 }).sucesso).toBe(
+      false
+    );
+    expect(editarAvaliacaoPessoa(db, "aval-sumiu", { competencia: "2026-08", nota: 4 }).sucesso).toBe(
+      false
+    );
+
+    const rem = excluirAvaliacaoPessoa(db, "aval-e1");
+    expect(rem.sucesso).toBe(true);
+    expect(listarAvaliacoesPessoa(db, "pes-gerente")).toHaveLength(0);
+    expect(excluirAvaliacaoPessoa(db, "aval-e1").sucesso).toBe(false);
   });
 });

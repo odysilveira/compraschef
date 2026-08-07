@@ -24,6 +24,8 @@ import {
 import {
   adicionarAvaliacaoPessoa,
   corBadgeNotaAvaliacao,
+  editarAvaliacaoPessoa,
+  excluirAvaliacaoPessoa,
   listarAvaliacoesPessoa,
   NOTAS_AVALIACAO_PESSOA,
   rotuloCompetenciaAvaliacao,
@@ -140,6 +142,7 @@ function RhPerfilConteudo() {
   const [notaAvaliacao, setNotaAvaliacao] = useState<NotaAvaliacaoPessoaRh>(3);
   const [comentarioAvaliacao, setComentarioAvaliacao] = useState("");
   const [erroAvaliacao, setErroAvaliacao] = useState<string | null>(null);
+  const [editandoAvaliacaoId, setEditandoAvaliacaoId] = useState<string | null>(null);
 
   const pessoa = useMemo(
     () => (db.pessoas ?? []).find((p) => p.id === params.id) ?? null,
@@ -590,21 +593,42 @@ function RhPerfilConteudo() {
     setCompetenciaAvaliacao(hojeIsoLocal().slice(0, 7));
     setNotaAvaliacao(3);
     setComentarioAvaliacao("");
+    setEditandoAvaliacaoId(null);
+    setErroAvaliacao(null);
+  }
+
+  function comecarEditarAvaliacao(avaliacao: {
+    id: string;
+    competencia: string;
+    nota: NotaAvaliacaoPessoaRh;
+    comentario?: string;
+  }) {
+    setEditandoAvaliacaoId(avaliacao.id);
+    setCompetenciaAvaliacao(avaliacao.competencia);
+    setNotaAvaliacao(avaliacao.nota);
+    setComentarioAvaliacao(avaliacao.comentario ?? "");
     setErroAvaliacao(null);
   }
 
   function salvarAvaliacao(e: FormEvent) {
     e.preventDefault();
     if (!pessoa) return;
+    const estavaEditando = Boolean(editandoAvaliacaoId);
     const proximo = structuredClone(db);
-    const r = adicionarAvaliacaoPessoa(proximo, {
-      id: uid("aval"),
-      pessoa_id: pessoa.id,
-      competencia: competenciaAvaliacao,
-      nota: notaAvaliacao,
-      comentario: comentarioAvaliacao,
-      avaliador: "usuário local",
-    });
+    const r = editandoAvaliacaoId
+      ? editarAvaliacaoPessoa(proximo, editandoAvaliacaoId, {
+          competencia: competenciaAvaliacao,
+          nota: notaAvaliacao,
+          comentario: comentarioAvaliacao,
+        })
+      : adicionarAvaliacaoPessoa(proximo, {
+          id: uid("aval"),
+          pessoa_id: pessoa.id,
+          competencia: competenciaAvaliacao,
+          nota: notaAvaliacao,
+          comentario: comentarioAvaliacao,
+          avaliador: "usuário local",
+        });
     if (!r.sucesso) {
       setErroAvaliacao(r.erros.join(" "));
       setMensagem(null);
@@ -613,7 +637,22 @@ function RhPerfilConteudo() {
     mutate((atual) => Object.assign(atual, proximo));
     limparFormAvaliacao();
     setErro(null);
-    setMensagem("Avaliação registrada.");
+    setMensagem(estavaEditando ? "Avaliação atualizada." : "Avaliação registrada.");
+  }
+
+  function excluirAvaliacaoDoPerfil(avaliacaoId: string) {
+    if (!window.confirm("Excluir esta avaliação? Esta ação não tem volta.")) return;
+    const proximo = structuredClone(db);
+    const r = excluirAvaliacaoPessoa(proximo, avaliacaoId);
+    if (!r.sucesso) {
+      setErroAvaliacao(r.erros.join(" "));
+      setMensagem(null);
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    if (editandoAvaliacaoId === avaliacaoId) limparFormAvaliacao();
+    setErro(null);
+    setMensagem("Avaliação excluída.");
   }
 
   function salvarDados(e: FormEvent) {
@@ -1943,7 +1982,9 @@ function RhPerfilConteudo() {
       {aba === "avaliacoes" && (
         <div className="space-y-4">
           <Card className="space-y-3">
-            <h2 className="text-base font-bold">Nova avaliação</h2>
+            <h2 className="text-base font-bold">
+              {editandoAvaliacaoId ? "Editar avaliação" : "Nova avaliação"}
+            </h2>
             <p className="text-sm text-slate-600">
               Nota formal por competência (1 a 5). Anotações livres ficam na aba Anotações.
             </p>
@@ -1982,9 +2023,14 @@ function RhPerfilConteudo() {
                 />
               </Campo>
               {erroAvaliacao && <p className="text-sm font-medium text-erro">{erroAvaliacao}</p>}
-              <div className="flex justify-end">
+              <div className="flex flex-wrap justify-end gap-2">
+                {editandoAvaliacaoId && (
+                  <button type="button" className="btn-secundario" onClick={limparFormAvaliacao}>
+                    Cancelar
+                  </button>
+                )}
                 <button type="submit" className="btn-primario">
-                  Salvar avaliação
+                  {editandoAvaliacaoId ? "Salvar alterações" : "Salvar avaliação"}
                 </button>
               </div>
             </form>
@@ -1999,20 +2045,48 @@ function RhPerfilConteudo() {
                 {avaliacoesPessoa.map((avaliacao) => (
                   <div
                     key={avaliacao.id}
-                    className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+                    className={`rounded-lg border px-3 py-2 ${
+                      editandoAvaliacaoId === avaliacao.id
+                        ? "border-primaria bg-primaria/5"
+                        : "border-stone-200 bg-stone-50"
+                    }`}
                   >
-                    <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <Badge cor={corBadgeNotaAvaliacao(avaliacao.nota)}>Nota {avaliacao.nota}</Badge>
-                      <p className="text-xs text-slate-500">
-                        {rotuloCompetenciaAvaliacao(avaliacao.competencia)}
-                        {avaliacao.avaliador ? ` · ${avaliacao.avaliador}` : ""}
-                      </p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <Badge cor={corBadgeNotaAvaliacao(avaliacao.nota)}>
+                            Nota {avaliacao.nota}
+                          </Badge>
+                          <p className="text-xs text-slate-500">
+                            {rotuloCompetenciaAvaliacao(avaliacao.competencia)}
+                            {avaliacao.avaliador ? ` · ${avaliacao.avaliador}` : ""}
+                          </p>
+                        </div>
+                        {avaliacao.comentario ? (
+                          <p className="whitespace-pre-wrap text-sm text-slate-900">
+                            {avaliacao.comentario}
+                          </p>
+                        ) : (
+                          <p className="text-sm text-slate-500">Sem comentário.</p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn-secundario text-sm"
+                          onClick={() => comecarEditarAvaliacao(avaliacao)}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secundario text-sm text-destaque"
+                          onClick={() => excluirAvaliacaoDoPerfil(avaliacao.id)}
+                        >
+                          Excluir
+                        </button>
+                      </div>
                     </div>
-                    {avaliacao.comentario ? (
-                      <p className="whitespace-pre-wrap text-sm text-slate-900">{avaliacao.comentario}</p>
-                    ) : (
-                      <p className="text-sm text-slate-500">Sem comentário.</p>
-                    )}
                   </div>
                 ))}
               </div>

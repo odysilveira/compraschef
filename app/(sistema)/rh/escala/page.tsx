@@ -2189,6 +2189,20 @@ function RhEscalaConteudo() {
                         <Copy size={16} /> Copiar PIX
                       </button>
                     )}
+                  {detalhePagamento.status === "liberado" && (
+                    <Link
+                      href={hrefPagamentosRh({
+                        filtro: "liberado",
+                        pessoa: detalhePagamento.pessoa_id,
+                        competencia: detalhePagamento.competencia || undefined,
+                        tipo: detalhePagamento.tipo,
+                      })}
+                      className="btn-primario"
+                      title="Abre a lista de RH para informar o pagamento"
+                    >
+                      Informar na lista
+                    </Link>
+                  )}
                   {(detalhePagamento.status === "aguardando_conciliacao" ||
                     detalhePagamento.status === "pago") &&
                     detalheConv && (

@@ -1294,6 +1294,20 @@ function RhPerfilConteudo() {
                             <Copy size={14} /> Copiar PIX
                           </button>
                         )}
+                      {pagamento.status === "liberado" && (
+                        <Link
+                          href={hrefPagamentosRh({
+                            filtro: "liberado",
+                            pessoa: pessoa.id,
+                            competencia: pagamento.competencia || undefined,
+                            tipo: pagamento.tipo,
+                          })}
+                          className="btn-primario text-sm"
+                          title="Abre a lista de RH para informar o pagamento"
+                        >
+                          Informar na lista
+                        </Link>
+                      )}
                       {(pagamento.status === "aguardando_conciliacao" ||
                         pagamento.status === "pago") && (
                         <>

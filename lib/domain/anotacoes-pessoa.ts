@@ -1,9 +1,30 @@
-import type { AnotacaoPessoaRh, DB } from "../types";
+import type { AnotacaoPessoaRh, DB, TipoAnotacaoPessoaRh } from "../types";
 
 export interface ResultadoAnotacaoPessoa {
   sucesso: boolean;
   erros: string[];
   anotacao?: AnotacaoPessoaRh;
+}
+
+export const TIPOS_ANOTACAO_PESSOA: { id: TipoAnotacaoPessoaRh; rotulo: string }[] = [
+  { id: "elogio", rotulo: "Elogio" },
+  { id: "aviso", rotulo: "Aviso" },
+  { id: "observacao", rotulo: "Observação" },
+];
+
+const TIPOS_VALIDOS = new Set<string>(TIPOS_ANOTACAO_PESSOA.map((t) => t.id));
+
+export function rotuloTipoAnotacaoPessoa(tipo: TipoAnotacaoPessoaRh): string {
+  return TIPOS_ANOTACAO_PESSOA.find((t) => t.id === tipo)?.rotulo ?? tipo;
+}
+
+/** Cor do Badge: elogio=verde, aviso=laranja, observação=cinza. */
+export function corBadgeTipoAnotacao(
+  tipo: TipoAnotacaoPessoaRh
+): "verde" | "laranja" | "cinza" {
+  if (tipo === "elogio") return "verde";
+  if (tipo === "aviso") return "laranja";
+  return "cinza";
 }
 
 function limparTexto(valor?: string): string {
@@ -12,6 +33,12 @@ function limparTexto(valor?: string): string {
 
 function dataIsoValida(valor?: string): boolean {
   return Boolean(valor && /^\d{4}-\d{2}-\d{2}$/.test(valor));
+}
+
+function normalizarTipo(valor?: string): TipoAnotacaoPessoaRh | null {
+  const t = limparTexto(valor);
+  if (!TIPOS_VALIDOS.has(t)) return null;
+  return t as TipoAnotacaoPessoaRh;
 }
 
 /** Lista anotações da pessoa (mais recente primeiro). */
@@ -35,6 +62,7 @@ export function adicionarAnotacaoPessoa(
     id: string;
     pessoa_id: string;
     texto: string;
+    tipo?: TipoAnotacaoPessoaRh | string;
     data?: string;
     autor?: string;
   },
@@ -48,6 +76,10 @@ export function adicionarAnotacaoPessoa(
   if (!texto) {
     return { sucesso: false, erros: ["Escreva o texto da anotação."] };
   }
+  const tipo = normalizarTipo(dados.tipo ?? "observacao");
+  if (!tipo) {
+    return { sucesso: false, erros: ["Escolha um tipo válido (elogio, aviso ou observação)."] };
+  }
   const agora = opcoes?.agora ?? new Date().toISOString();
   const data = limparTexto(dados.data) || agora.slice(0, 10);
   if (!dataIsoValida(data)) {
@@ -57,6 +89,7 @@ export function adicionarAnotacaoPessoa(
     id: limparTexto(dados.id) || `anot-${Date.now()}`,
     pessoa_id: pessoaId,
     data,
+    tipo,
     texto,
     autor: limparTexto(dados.autor) || undefined,
     criado_em: agora,
@@ -68,13 +101,13 @@ export function adicionarAnotacaoPessoa(
 }
 
 /**
- * Atualiza texto/data de uma anotação existente.
+ * Atualiza texto/data/tipo de uma anotação existente.
  * Preserva autor e criado_em; atualiza atualizado_em.
  */
 export function editarAnotacaoPessoa(
   db: DB,
   anotacaoId: string,
-  dados: { texto: string; data?: string },
+  dados: { texto: string; data?: string; tipo?: TipoAnotacaoPessoaRh | string },
   opcoes?: { agora?: string }
 ): ResultadoAnotacaoPessoa {
   const id = limparTexto(anotacaoId);
@@ -88,6 +121,11 @@ export function editarAnotacaoPessoa(
     return { sucesso: false, erros: ["Escreva o texto da anotação."] };
   }
   const atual = lista[indice];
+  const tipo =
+    dados.tipo !== undefined ? normalizarTipo(dados.tipo) : (atual.tipo ?? "observacao");
+  if (!tipo) {
+    return { sucesso: false, erros: ["Escolha um tipo válido (elogio, aviso ou observação)."] };
+  }
   const agora = opcoes?.agora ?? new Date().toISOString();
   const data = limparTexto(dados.data) || atual.data;
   if (!dataIsoValida(data)) {
@@ -96,6 +134,7 @@ export function editarAnotacaoPessoa(
   const anotacao: AnotacaoPessoaRh = {
     ...atual,
     data,
+    tipo,
     texto,
     atualizado_em: agora,
   };

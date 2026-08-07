@@ -811,12 +811,16 @@ export interface PendenciaPonto {
   atualizado_em: string;
 }
 
+/** Categoria da anotação livre no perfil. */
+export type TipoAnotacaoPessoaRh = "elogio" | "aviso" | "observacao";
+
 /** Nota livre no histórico da pessoa (faltas leves, elogios, observações). */
 export interface AnotacaoPessoaRh {
   id: string;
   pessoa_id: string;
   /** Data de referência YYYY-MM-DD. */
   data: string;
+  tipo: TipoAnotacaoPessoaRh;
   texto: string;
   autor?: string;
   criado_em: string;

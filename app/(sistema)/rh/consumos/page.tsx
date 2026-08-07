@@ -240,18 +240,45 @@ function RhConsumosConteudo() {
       )}
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <Card className="py-3">
+        <button
+          type="button"
+          className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+            filtro === "pendentes"
+              ? "border-primaria ring-1 ring-primaria"
+              : "border-slate-200 hover:border-primaria"
+          }`}
+          onClick={() => irParaFiltro("pendentes")}
+          title="Filtrar consumos pendentes"
+        >
           <p className="rotulo">Pendente (preço cheio)</p>
           <p className="text-xl font-bold">{moeda(totais.brutoPend)}</p>
-        </Card>
-        <Card className="py-3">
+        </button>
+        <button
+          type="button"
+          className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+            filtro === "pendentes"
+              ? "border-amber-500 ring-1 ring-amber-500"
+              : "border-slate-200 hover:border-amber-500"
+          }`}
+          onClick={() => irParaFiltro("pendentes")}
+          title="Filtrar consumos pendentes (valor a descontar)"
+        >
           <p className="rotulo text-amber-800">A descontar (com {DESCONTO_CONSUMO_PADRAO}%)</p>
           <p className="text-xl font-bold text-amber-900">{moeda(totais.liquidoPend)}</p>
-        </Card>
-        <Card className="py-3">
+        </button>
+        <button
+          type="button"
+          className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+            filtro === "todos"
+              ? "border-primaria ring-1 ring-primaria"
+              : "border-slate-200 hover:border-primaria"
+          }`}
+          onClick={() => irParaFiltro("todos")}
+          title="Mostrar todos os consumos"
+        >
           <p className="rotulo">Total lançado (bruto)</p>
           <p className="text-xl font-bold">{moeda(totais.brutoTodos)}</p>
-        </Card>
+        </button>
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-2">

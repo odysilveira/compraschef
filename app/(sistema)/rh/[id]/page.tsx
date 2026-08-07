@@ -4,8 +4,10 @@ import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Copy, Download, FileUp, Save, Trash2, Users } from "lucide-react";
-import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
+import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, useDB } from "@/lib/data";
+import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
+import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import {
   validarAdiantamento,
   TETO_ADIANTAMENTO_PCT,
@@ -42,6 +44,8 @@ import {
   slotsDaPessoaNaJanela,
 } from "@/lib/domain/escala";
 import {
+  conciliarPagamentoPessoa,
+  informarPagamentoPessoa,
   liberarPagamentoPessoa,
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
@@ -92,6 +96,17 @@ function RhPerfilConteudo() {
   const [form, setForm] = useState<PessoaRH | null>(null);
   const [enviandoContrato, setEnviandoContrato] = useState(false);
   const [enviandoDocId, setEnviandoDocId] = useState<string | null>(null);
+  const [informarId, setInformarId] = useState<string | null>(null);
+  const [formInformar, setFormInformar] = useState({
+    dataPagamento: hojeIsoLocal(),
+    valorPago: "",
+    bancoConta: "",
+    responsavel: "usuário local",
+  });
+  const [erroInformar, setErroInformar] = useState<string | null>(null);
+  const [conciliarId, setConciliarId] = useState<string | null>(null);
+  const [dataLiquidacao, setDataLiquidacao] = useState(hojeIsoLocal());
+  const [erroConciliar, setErroConciliar] = useState<string | null>(null);
 
   const pessoa = useMemo(
     () => (db.pessoas ?? []).find((p) => p.id === params.id) ?? null,
@@ -381,6 +396,62 @@ function RhPerfilConteudo() {
         ? "WhatsApp aberto com a confirmação."
         : "WhatsApp aberto com o recibo."
     );
+  }
+
+  function abrirInformarPerfil(pagamento: PagamentoPessoa) {
+    setInformarId(pagamento.id);
+    setFormInformar({
+      dataPagamento: hojeIsoLocal(),
+      valorPago: pagamento.valor.toFixed(2),
+      bancoConta: contaPadraoOrigem(db),
+      responsavel: "usuário local",
+    });
+    setErroInformar(null);
+  }
+
+  function confirmarInformarPerfil(e: FormEvent) {
+    e.preventDefault();
+    if (!informarId) return;
+    const valorPago = Number(formInformar.valorPago.replace(",", "."));
+    const proximo = structuredClone(db);
+    const resultado = informarPagamentoPessoa(proximo, informarId, {
+      dataPagamento: formInformar.dataPagamento,
+      valorPago,
+      bancoConta: formInformar.bancoConta,
+      responsavel: formInformar.responsavel,
+    });
+    if (!resultado.sucesso) {
+      setErroInformar(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setInformarId(null);
+    setErro(null);
+    setMensagem("Pagamento informado. Aguardando conciliação bancária.");
+  }
+
+  function abrirConciliarPerfil(pagamento: PagamentoPessoa) {
+    setConciliarId(pagamento.id);
+    setDataLiquidacao(pagamento.pagamento_data || hojeIsoLocal());
+    setErroConciliar(null);
+  }
+
+  function confirmarConciliarPerfil(e: FormEvent) {
+    e.preventDefault();
+    if (!conciliarId) return;
+    const proximo = structuredClone(db);
+    const resultado = conciliarPagamentoPessoa(proximo, conciliarId, {
+      dataLiquidacao,
+      responsavel: "usuário local",
+    });
+    if (!resultado.sucesso) {
+      setErroConciliar(resultado.erros.join(" "));
+      return;
+    }
+    mutate((atual) => Object.assign(atual, proximo));
+    setConciliarId(null);
+    setErro(null);
+    setMensagem("Pagamento conciliado e marcado como pago.");
   }
 
   function salvarDados(e: FormEvent) {
@@ -1295,32 +1366,24 @@ function RhPerfilConteudo() {
                           </button>
                         )}
                       {pagamento.status === "liberado" && (
-                        <Link
-                          href={hrefPagamentosRh({
-                            filtro: "liberado",
-                            pessoa: pessoa.id,
-                            competencia: pagamento.competencia || undefined,
-                            tipo: pagamento.tipo,
-                          })}
+                        <button
+                          type="button"
                           className="btn-primario text-sm"
-                          title="Abre a lista de RH para informar o pagamento"
+                          onClick={() => abrirInformarPerfil(pagamento)}
+                          title="Informa o pagamento sem sair do perfil"
                         >
-                          Informar na lista
-                        </Link>
+                          Informar pagamento
+                        </button>
                       )}
                       {pagamento.status === "aguardando_conciliacao" && (
-                        <Link
-                          href={hrefPagamentosRh({
-                            filtro: "aguardando",
-                            pessoa: pessoa.id,
-                            competencia: pagamento.competencia || undefined,
-                            tipo: pagamento.tipo,
-                          })}
+                        <button
+                          type="button"
                           className="btn-primario text-sm"
-                          title="Abre a lista de RH para conciliar o pagamento"
+                          onClick={() => abrirConciliarPerfil(pagamento)}
+                          title="Concilia o pagamento sem sair do perfil"
                         >
-                          Conciliar na lista
-                        </Link>
+                          Conciliar
+                        </button>
                       )}
                       {(pagamento.status === "aguardando_conciliacao" ||
                         pagamento.status === "pago") && (
@@ -1377,6 +1440,140 @@ function RhPerfilConteudo() {
           )}
         </Card>
       )}
+
+      <Modal
+        aberto={Boolean(informarId)}
+        titulo="Informar pagamento"
+        onFechar={() => setInformarId(null)}
+        fecharAoClicarFundo={false}
+      >
+        {informarId &&
+          (() => {
+            const pagamentoInformar = pagamentosPessoa.find((p) => p.id === informarId);
+            if (!pagamentoInformar) return null;
+            return (
+              <form onSubmit={confirmarInformarPerfil} className="space-y-3">
+                <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
+                  Informar pagamento não dá baixa final. O título fica em aguardando conciliação.
+                </div>
+                <p className="text-sm text-slate-700">
+                  {rotuloTipoPagamentoPessoa(pagamentoInformar.tipo)} · {moeda(pagamentoInformar.valor)}
+                </p>
+                {chavePixDaPessoa(pessoa) && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-card border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    <p className="min-w-0 flex-1">
+                      Destino (PIX):{" "}
+                      <span className="font-medium text-slate-700">{chavePixDaPessoa(pessoa)}</span>
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-secundario shrink-0"
+                      onClick={() => void copiarChavePixPerfil()}
+                    >
+                      <Copy size={14} /> Copiar PIX
+                    </button>
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Campo rotulo="Data *">
+                    <input
+                      type="date"
+                      className="campo"
+                      required
+                      value={formInformar.dataPagamento}
+                      onChange={(e) =>
+                        setFormInformar({ ...formInformar, dataPagamento: e.target.value })
+                      }
+                    />
+                  </Campo>
+                  <Campo rotulo="Valor pago *">
+                    <input
+                      className="campo"
+                      required
+                      value={formInformar.valorPago}
+                      onChange={(e) =>
+                        setFormInformar({ ...formInformar, valorPago: e.target.value })
+                      }
+                    />
+                  </Campo>
+                  <div className="sm:col-span-2 space-y-2">
+                    <Campo rotulo="De qual banco/conta saiu o pagamento? *">
+                      <SeletorContaOrigem
+                        db={db}
+                        valor={formInformar.bancoConta}
+                        onChange={(bancoConta) => setFormInformar({ ...formInformar, bancoConta })}
+                        listId="contas-origem-rh-perfil"
+                      />
+                    </Campo>
+                    <p className="text-xs text-slate-500">
+                      Facilita achar o débito no extrato na hora de conciliar.
+                    </p>
+                  </div>
+                  <Campo rotulo="Responsável">
+                    <input
+                      className="campo"
+                      value={formInformar.responsavel}
+                      onChange={(e) =>
+                        setFormInformar({ ...formInformar, responsavel: e.target.value })
+                      }
+                    />
+                  </Campo>
+                </div>
+                {erroInformar && <p className="text-sm font-medium text-erro">{erroInformar}</p>}
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="btn-secundario" onClick={() => setInformarId(null)}>
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn-primario">
+                    Informar pagamento
+                  </button>
+                </div>
+              </form>
+            );
+          })()}
+      </Modal>
+
+      <Modal
+        aberto={Boolean(conciliarId)}
+        titulo="Conciliar pagamento"
+        onFechar={() => setConciliarId(null)}
+      >
+        {conciliarId &&
+          (() => {
+            const pagamentoConciliar = pagamentosPessoa.find((p) => p.id === conciliarId);
+            if (!pagamentoConciliar) return null;
+            return (
+              <form onSubmit={confirmarConciliarPerfil} className="space-y-3">
+                <p className="text-sm text-slate-700">
+                  {rotuloTipoPagamentoPessoa(pagamentoConciliar.tipo)} ·{" "}
+                  {moeda(pagamentoConciliar.pagamento_valor ?? pagamentoConciliar.valor)}
+                </p>
+                <Campo rotulo="Data da liquidação *">
+                  <input
+                    type="date"
+                    className="campo"
+                    required
+                    value={dataLiquidacao}
+                    onChange={(e) => setDataLiquidacao(e.target.value)}
+                  />
+                </Campo>
+                {erroConciliar && <p className="text-sm font-medium text-erro">{erroConciliar}</p>}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={() => setConciliarId(null)}
+                  >
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn-primario">
+                    Conciliar
+                  </button>
+                </div>
+              </form>
+            );
+          })()}
+      </Modal>
 
       {aba === "consumos" && (
         <Card className="space-y-3">

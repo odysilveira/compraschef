@@ -4,7 +4,7 @@
 // Tela operacional: escanear o QR da caixa é o centro de tudo.
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowDownCircle,
   Boxes,
@@ -43,8 +43,12 @@ import {
   quantidadePendenteLote,
 } from "@/lib/domain/estoque";
 import {
+  DIAS_VENCIMENTO_ESTOQUE,
+  hrefEstoque,
   parseAlertaEstoque,
+  parseDataAlvoEstoque,
   parseDiasVencimentoEstoque,
+  type DiasVencimentoEstoque,
 } from "@/lib/domain/estoque-navegacao";
 import { usePapel } from "@/lib/roles";
 import { dataBR, diasAte, qtd, rotuloValidade } from "@/lib/format";
@@ -404,11 +408,13 @@ function FormRegistrarProducao({
 
 function EstoqueConteudo() {
   const db = useDB();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { papel } = usePapel();
   const usuarioId = db.perfis.find((p) => p.papel === papel)?.id ?? "perfil-dono";
   const alertaEstoque = parseAlertaEstoque(searchParams.get("alerta"));
   const diasVencimentoUrl = parseDiasVencimentoEstoque(searchParams.get("dias"));
+  const dataAlvoUrl = parseDataAlvoEstoque(searchParams.get("ate"));
 
   const [aba, setAba] = useState<Aba>("estoque");
   const [caixaAtivaId, setCaixaAtivaId] = useState<string | null>(null);
@@ -430,15 +436,38 @@ function EstoqueConteudo() {
   const loteCaixaAtiva = caixaAtiva ? loteDaCaixa(db, caixaAtiva.id) : undefined;
 
   // Janela de vencimentos configurável: atalhos (hoje/3/7/15 dias) ou data escolhida
-  const [dataAlvoVencimento, setDataAlvoVencimento] = useState(() =>
-    alertaEstoque === "validade" ? hojeMais(diasVencimentoUrl) : hojeMais(3)
-  );
+  const [dataAlvoVencimento, setDataAlvoVencimento] = useState(() => {
+    if (alertaEstoque === "validade") {
+      return dataAlvoUrl ?? hojeMais(diasVencimentoUrl);
+    }
+    return hojeMais(3);
+  });
 
   useEffect(() => {
     const alerta = parseAlertaEstoque(searchParams.get("alerta"));
+    if (alerta !== "validade") return;
+    const ate = parseDataAlvoEstoque(searchParams.get("ate"));
+    if (ate) {
+      setDataAlvoVencimento(ate);
+      return;
+    }
     const dias = parseDiasVencimentoEstoque(searchParams.get("dias"));
-    if (alerta === "validade") setDataAlvoVencimento(hojeMais(dias));
+    setDataAlvoVencimento(hojeMais(dias));
   }, [searchParams]);
+
+  function irParaJanelaValidade(dias: DiasVencimentoEstoque) {
+    setDataAlvoVencimento(hojeMais(dias));
+    router.replace(hrefEstoque({ alerta: "validade", dias }), { scroll: false });
+  }
+
+  function irParaDataValidadeCustom(dataIso: string) {
+    setDataAlvoVencimento(dataIso);
+    router.replace(hrefEstoque({ alerta: "validade", ate: dataIso }), { scroll: false });
+  }
+
+  function irParaAlertaMinimo() {
+    router.replace(hrefEstoque({ alerta: "minimo" }), { scroll: false });
+  }
 
   const abaixoMinimo = useMemo(() => produtosAbaixoDoMinimo(db), [db]);
   const vencendo = db.caixas
@@ -816,7 +845,10 @@ function EstoqueConteudo() {
                   key={produto.id}
                   type="button"
                   className="flex w-full flex-wrap items-center justify-between gap-2 rounded-card bg-slate-50 px-3 py-2 text-left hover:bg-slate-100"
-                  onClick={() => setFiltroTexto(produto.nome)}
+                  onClick={() => {
+                    irParaAlertaMinimo();
+                    setFiltroTexto(produto.nome);
+                  }}
                   title="Filtrar caixas por este produto"
                 >
                   <span className="text-sm font-medium">{produto.nome}</span>
@@ -840,29 +872,30 @@ function EstoqueConteudo() {
                 <Timer size={20} className="text-destaque" /> Vencimentos até {dataBR(dataAlvoVencimento)}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
-                {[
-                  { rotulo: "Hoje", dias: 0 },
-                  { rotulo: "3 dias", dias: 3 },
-                  { rotulo: "7 dias", dias: 7 },
-                  { rotulo: "15 dias", dias: 15 },
-                ].map((opcao) => (
-                  <button
-                    key={opcao.dias}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                      dataAlvoVencimento === hojeMais(opcao.dias)
-                        ? "bg-primaria text-white"
-                        : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-                    }`}
-                    onClick={() => setDataAlvoVencimento(hojeMais(opcao.dias))}
-                  >
-                    {opcao.rotulo}
-                  </button>
-                ))}
+                {DIAS_VENCIMENTO_ESTOQUE.map((dias) => {
+                  const rotulo =
+                    dias === 0 ? "Hoje" : dias === 3 ? "3 dias" : dias === 7 ? "7 dias" : "15 dias";
+                  const ativo = dataAlvoVencimento === hojeMais(dias);
+                  return (
+                    <button
+                      key={dias}
+                      type="button"
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                        ativo
+                          ? "bg-primaria text-white"
+                          : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                      }`}
+                      onClick={() => irParaJanelaValidade(dias)}
+                    >
+                      {rotulo}
+                    </button>
+                  );
+                })}
                 <input
                   type="date"
                   className="rounded-full border border-stone-200 px-2 py-0.5 text-xs"
                   value={dataAlvoVencimento}
-                  onChange={(e) => e.target.value && setDataAlvoVencimento(e.target.value)}
+                  onChange={(e) => e.target.value && irParaDataValidadeCustom(e.target.value)}
                   aria-label="Escolher data limite"
                 />
               </div>

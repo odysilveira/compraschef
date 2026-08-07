@@ -25,16 +25,30 @@ export function parseDiasVencimentoEstoque(
 /**
  * Monta URL do Estoque.
  * Defaults omitidos: sem alerta → `/estoque`; validade com 3 dias → só `alerta=validade`.
+ * Data custom: `alerta=validade&ate=AAAA-MM-DD` (tem prioridade sobre `dias`).
  */
 export function hrefEstoque(opts?: {
   alerta?: AlertaEstoque;
   dias?: DiasVencimentoEstoque;
+  ate?: string;
 }): string {
   const params = new URLSearchParams();
   if (opts?.alerta) params.set("alerta", opts.alerta);
-  if (opts?.alerta === "validade" && opts.dias !== undefined && opts.dias !== 3) {
-    params.set("dias", String(opts.dias));
+  if (opts?.alerta === "validade") {
+    const ate = (opts.ate ?? "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+      params.set("ate", ate);
+    } else if (opts.dias !== undefined && opts.dias !== 3) {
+      params.set("dias", String(opts.dias));
+    }
   }
   const q = params.toString();
   return q ? `/estoque?${q}` : "/estoque";
+}
+
+/** Data custom `ate=` (YYYY-MM-DD); null se inválida/ausente. */
+export function parseDataAlvoEstoque(valor: string | null | undefined): string | null {
+  const bruto = (valor ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bruto)) return null;
+  return bruto;
 }

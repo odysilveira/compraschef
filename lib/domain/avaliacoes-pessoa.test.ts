@@ -4,7 +4,9 @@ import {
   adicionarAvaliacaoPessoa,
   editarAvaliacaoPessoa,
   excluirAvaliacaoPessoa,
+  formatarMediaAvaliacao,
   listarAvaliacoesPessoa,
+  resumirAvaliacoesPessoa,
   rotuloCompetenciaAvaliacao,
 } from "./avaliacoes-pessoa";
 
@@ -125,5 +127,36 @@ describe("avaliações de pessoa (RH)", () => {
     expect(rem.sucesso).toBe(true);
     expect(listarAvaliacoesPessoa(db, "pes-gerente")).toHaveLength(0);
     expect(excluirAvaliacaoPessoa(db, "aval-e1").sucesso).toBe(false);
+  });
+
+  it("resume média, quantidade e última nota", () => {
+    expect(resumirAvaliacoesPessoa([])).toEqual({
+      quantidade: 0,
+      media: null,
+      ultimaNota: null,
+      ultimaCompetencia: null,
+    });
+    expect(formatarMediaAvaliacao(null)).toBe("—");
+
+    const db = structuredClone(seedDB);
+    db.avaliacoes_pessoas = [];
+    adicionarAvaliacaoPessoa(db, {
+      id: "r1",
+      pessoa_id: "pes-gerente",
+      competencia: "2026-06",
+      nota: 4,
+    });
+    adicionarAvaliacaoPessoa(db, {
+      id: "r2",
+      pessoa_id: "pes-gerente",
+      competencia: "2026-08",
+      nota: 5,
+    });
+    const resumo = resumirAvaliacoesPessoa(listarAvaliacoesPessoa(db, "pes-gerente"));
+    expect(resumo.quantidade).toBe(2);
+    expect(resumo.media).toBe(4.5);
+    expect(resumo.ultimaNota).toBe(5);
+    expect(resumo.ultimaCompetencia).toBe("2026-08");
+    expect(formatarMediaAvaliacao(4.5)).toBe("4,5");
   });
 });

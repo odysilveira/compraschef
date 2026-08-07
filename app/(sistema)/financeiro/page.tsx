@@ -100,6 +100,11 @@ import {
 } from "@/lib/domain/pagamentos-pessoas";
 import { filtroPagamentosRhDeStatus, hrefPagamentosRh } from "@/lib/domain/resumo-rh";
 import { hrefPerfilRh } from "@/lib/domain/rh";
+import {
+  montarTextoConfirmacaoRecebimento,
+  montarTextoReciboPagamentoPessoa,
+  montarTextosWhatsAppRecibosPagamentoLote,
+} from "@/lib/domain/recibo-pagamento-pessoa";
 import { parseOfx } from "@/lib/domain/extrato-ofx";
 import {
   aplicarMatchesExtrato,
@@ -1073,6 +1078,64 @@ function FinanceiroConteudo() {
 
   function nomePessoaRh(pessoaId: string): string {
     return db.pessoas.find((p) => p.id === pessoaId)?.nome ?? "Pessoa";
+  }
+
+  async function copiarReciboRh(
+    pagamento: PagamentoPessoa,
+    variante: "recibo" | "confirmacao" = "recibo"
+  ) {
+    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
+    if (!pessoa) {
+      setMensagemReceberBoleto("Pessoa do pagamento RH não encontrada.");
+      return;
+    }
+    const texto =
+      variante === "confirmacao"
+        ? montarTextoConfirmacaoRecebimento({ pessoa, pagamento })
+        : montarTextoReciboPagamentoPessoa({
+            pessoa,
+            pagamento,
+            consumos: db.consumos_pessoas ?? [],
+          });
+    try {
+      await navigator.clipboard.writeText(texto);
+      setMensagemReceberBoleto(
+        variante === "confirmacao"
+          ? "Confirmação RH copiada — envie para a pessoa responder no WhatsApp."
+          : "Recibo RH copiado — pode colar no WhatsApp ou arquivar."
+      );
+    } catch {
+      setMensagemReceberBoleto("Não foi possível copiar o recibo RH neste navegador.");
+    }
+  }
+
+  async function copiarRecibosRhDoLote(
+    alvo: PagamentoPessoa[],
+    variante: "recibo" | "confirmacao" = "recibo"
+  ) {
+    if (alvo.length === 0) {
+      setMensagemReceberBoleto("Nenhum pagamento RH nesta fila para copiar.");
+      return;
+    }
+    const texto = montarTextosWhatsAppRecibosPagamentoLote(alvo, {
+      pessoaPorId: (id) => db.pessoas.find((p) => p.id === id),
+      consumos: db.consumos_pessoas ?? [],
+      variante,
+    });
+    if (!texto) {
+      setMensagemReceberBoleto("Nenhum texto de recibo RH para copiar nesta fila.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(texto);
+      setMensagemReceberBoleto(
+        variante === "confirmacao"
+          ? `${alvo.length} confirmação(ões) RH copiada(s). Cole no WhatsApp de cada pessoa.`
+          : `${alvo.length} recibo(s) RH copiado(s). Cole no WhatsApp de cada pessoa.`
+      );
+    } catch {
+      setMensagemReceberBoleto("Não foi possível copiar o lote de recibos RH neste navegador.");
+    }
   }
 
   async function copiarLinhaAgenda(linha?: string) {
@@ -2246,6 +2309,39 @@ function FinanceiroConteudo() {
             <button type="button" className="btn-secundario" onClick={() => abrirDivergenciaRh(pagamento)}>
               <TriangleAlert size={16} /> Divergente
             </button>
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={() => void copiarReciboRh(pagamento, "recibo")}
+            >
+              <Copy size={16} /> Copiar recibo
+            </button>
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={() => void copiarReciboRh(pagamento, "confirmacao")}
+            >
+              <Copy size={16} /> Confirmação
+            </button>
+          </div>
+        )}
+
+        {pagamento.status === "pago" && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={() => void copiarReciboRh(pagamento, "recibo")}
+            >
+              <Copy size={16} /> Copiar recibo
+            </button>
+            <button
+              type="button"
+              className="btn-secundario"
+              onClick={() => void copiarReciboRh(pagamento, "confirmacao")}
+            >
+              <Copy size={16} /> Confirmação
+            </button>
           </div>
         )}
       </Card>
@@ -2485,14 +2581,34 @@ function FinanceiroConteudo() {
                     </button>
                   )}
                   {rhAguardandoConciliacao.length > 0 && (
-                    <button
-                      type="button"
-                      className="btn-primario text-sm"
-                      onClick={conciliarTodosPagamentosRhAguardando}
-                      title="Marca todos os pagamentos de RH desta fila como pagos com a data de hoje"
-                    >
-                      Conciliar todos RH ({rhAguardandoConciliacao.length})
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="btn-secundario text-sm"
+                        onClick={() => void copiarRecibosRhDoLote(rhAguardandoConciliacao, "recibo")}
+                        title="Copia recibos discriminados dos RH desta fila"
+                      >
+                        <Copy size={14} /> Copiar recibos RH ({rhAguardandoConciliacao.length})
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secundario text-sm"
+                        onClick={() =>
+                          void copiarRecibosRhDoLote(rhAguardandoConciliacao, "confirmacao")
+                        }
+                        title="Copia confirmações curtas dos RH desta fila"
+                      >
+                        <Copy size={14} /> Copiar confirmações RH ({rhAguardandoConciliacao.length})
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-primario text-sm"
+                        onClick={conciliarTodosPagamentosRhAguardando}
+                        title="Marca todos os pagamentos de RH desta fila como pagos com a data de hoje"
+                      >
+                        Conciliar todos RH ({rhAguardandoConciliacao.length})
+                      </button>
+                    </>
                   )}
                   <Link
                     href={hrefPagamentosRh("aguardando")}
@@ -2517,7 +2633,29 @@ function FinanceiroConteudo() {
             </div>
 
             <div className="space-y-2">
-              <p className="rotulo text-primaria-escura">Pagos</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="rotulo text-primaria-escura">Pagos</p>
+                {rhPagos.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn-secundario text-sm"
+                      onClick={() => void copiarRecibosRhDoLote(rhPagos, "recibo")}
+                      title="Copia recibos discriminados dos RH pagos"
+                    >
+                      <Copy size={14} /> Copiar recibos RH ({rhPagos.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secundario text-sm"
+                      onClick={() => void copiarRecibosRhDoLote(rhPagos, "confirmacao")}
+                      title="Copia confirmações curtas dos RH pagos"
+                    >
+                      <Copy size={14} /> Copiar confirmações RH ({rhPagos.length})
+                    </button>
+                  </div>
+                )}
+              </div>
               {boletosPagos.length === 0 && rhPagos.length === 0 ? (
                 <Vazio mensagem="Nenhum boleto ou pagamento de RH marcado como pago." />
               ) : (

@@ -71,7 +71,9 @@ import {
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
   informarPagamentosBoletosLiberados,
+  linhaDigitavelParaPagamento,
   montarEstadoAgendaPagamentoBoleto,
+  montarTextosLinhasDigitaveisBoletosLote,
   registrarDivergenciaBoleto,
   type SegmentoCodigoBarrasItf,
   type SnapshotPagamentoBoleto,
@@ -1061,6 +1063,37 @@ export default function FinanceiroPage() {
       setMensagemReceberBoleto("Linha digitável copiada.");
     } catch {
       setMensagemReceberBoleto("Não foi possível copiar a linha digitável neste navegador.");
+    }
+  }
+
+  async function copiarLinhasDigitaveisDoLote() {
+    const itens = boletosLiberadosElegiveis.map((boleto) => {
+      const documento = boleto.documento_boleto_id
+        ? db.documentos_boleto.find((d) => d.id === boleto.documento_boleto_id)
+        : undefined;
+      const nota = notaDoBoleto(db, boleto);
+      return {
+        boleto,
+        documento,
+        fornecedor: fornecedorDoBoleto(db, boleto),
+        numeroNota: nota?.numero,
+      };
+    });
+    const texto = montarTextosLinhasDigitaveisBoletosLote(itens);
+    if (!texto) {
+      setMensagemReceberBoleto("Nenhuma linha digitável disponível nos liberados aptos.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(texto);
+      const qtd = itens.filter((item) =>
+        Boolean(linhaDigitavelParaPagamento(item.boleto, item.documento))
+      ).length;
+      setMensagemReceberBoleto(
+        `${qtd} linha(s) copiada(s) com cabeçalho. Cole no banco; o status não muda.`
+      );
+    } catch {
+      setMensagemReceberBoleto("Não foi possível copiar as linhas digitáveis neste navegador.");
     }
   }
 
@@ -2250,6 +2283,14 @@ export default function FinanceiroPage() {
 
           {boletosLiberadosElegiveis.length > 0 && (
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={() => void copiarLinhasDigitaveisDoLote()}
+                title="Copia todas as linhas digitáveis com cabeçalho por boleto. Não altera status."
+              >
+                <Copy size={16} /> Copiar linhas ({boletosLiberadosElegiveis.length})
+              </button>
               <button
                 type="button"
                 className="btn-primario"

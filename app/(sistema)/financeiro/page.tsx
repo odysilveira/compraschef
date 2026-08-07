@@ -3,8 +3,9 @@
 // Financeiro — agenda de boletos (requisitos 27–30).
 // Protegida: líder/caixa não veem nada daqui (podeVerValores).
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Ban,
   Barcode,
@@ -32,7 +33,17 @@ import { Badge, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui
 import { calcularValorFinal, criarContaManual, mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
 import { identificarFormatoBoleto, normalizarLinhaBoleto } from "@/lib/domain/boletos";
 import { calcularHashSHA256, receberBoletoContaPagar, validarArquivoDocumentoBoleto } from "@/lib/domain/documentos-boleto";
-import { filtrarContasPagar, resumirContasPagar, exportarContasPagarCsv, type FiltroVencimentoConta } from "@/lib/domain/financeiro";
+import {
+  filtrarContasPagar,
+  resumirContasPagar,
+  exportarContasPagarCsv,
+  hrefFinanceiro,
+  parseAbaFinanceiro,
+  parseFiltroStatusConta,
+  parseFiltroVencimentoConta,
+  type AbaFinanceiro,
+  type FiltroVencimentoConta,
+} from "@/lib/domain/financeiro";
 import {
   combinarTextosPdfFragmentados,
   identificarCodigoBoletoNoArquivoLocal,
@@ -467,15 +478,23 @@ function BadgeStatus({ boleto }: { boleto: Boleto }) {
   }
 }
 
-export default function FinanceiroPage() {
+function FinanceiroConteudo() {
   const db = useDB();
   const { papel } = usePapel();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
-  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas">("boletos");
+  const [abaFinanceira, setAbaFinanceira] = useState<AbaFinanceiro>(() =>
+    parseAbaFinanceiro(searchParams.get("aba"))
+  );
   const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
   const [buscaConta, setBuscaConta] = useState("");
-  const [filtroStatusConta, setFiltroStatusConta] = useState<StatusContaPagar | "todos">("todos");
-  const [filtroVencimentoConta, setFiltroVencimentoConta] = useState<FiltroVencimentoConta>("todas");
+  const [filtroStatusConta, setFiltroStatusConta] = useState<StatusContaPagar | "todos">(() =>
+    parseFiltroStatusConta(searchParams.get("status"))
+  );
+  const [filtroVencimentoConta, setFiltroVencimentoConta] = useState<FiltroVencimentoConta>(() =>
+    parseFiltroVencimentoConta(searchParams.get("vencimento"))
+  );
   const [buscaNfe, setBuscaNfe] = useState("");
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | IndicadorCompletudeFinanceiro>("todas");
   const [notaDetalhesId, setNotaDetalhesId] = useState<string | null>(null);
@@ -1357,11 +1376,34 @@ export default function FinanceiroPage() {
     }
   }
 
+  useEffect(() => {
+    setAbaFinanceira(parseAbaFinanceiro(searchParams.get("aba")));
+    setFiltroStatusConta(parseFiltroStatusConta(searchParams.get("status")));
+    setFiltroVencimentoConta(parseFiltroVencimentoConta(searchParams.get("vencimento")));
+  }, [searchParams]);
+
+  function irParaFinanceiro(opts: {
+    aba?: AbaFinanceiro;
+    vencimento?: FiltroVencimentoConta;
+    status?: StatusContaPagar | "todos";
+  }) {
+    const aba = opts.aba ?? abaFinanceira;
+    const vencimento =
+      opts.vencimento ?? (aba === "contas" ? filtroVencimentoConta : "todas");
+    const status = opts.status ?? (aba === "contas" ? filtroStatusConta : "todos");
+    setAbaFinanceira(aba);
+    if (aba === "contas") {
+      setFiltroVencimentoConta(vencimento);
+      setFiltroStatusConta(status);
+    }
+    router.replace(hrefFinanceiro({ aba, vencimento, status }), { scroll: false });
+  }
+
   function abrirNovaConta() {
     setErroFormConta(null);
     setFormConta(novaContaInicial());
     setModalNovaContaAberto(true);
-    setAbaFinanceira("contas");
+    irParaFinanceiro({ aba: "contas" });
   }
 
   function fecharNovaConta() {
@@ -1840,7 +1882,7 @@ export default function FinanceiroPage() {
     setErroFormConta(null);
     setFormConta(novaContaInicial());
     setModalNovaContaAberto(false);
-    setAbaFinanceira("contas");
+    irParaFinanceiro({ aba: "contas" });
   }
 
   function CartaoBoleto({ boleto }: { boleto: Boleto }) {
@@ -2224,21 +2266,21 @@ export default function FinanceiroPage() {
         <button
           type="button"
           className={`btn-secundario ${abaFinanceira === "boletos" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
-          onClick={() => setAbaFinanceira("boletos")}
+          onClick={() => irParaFinanceiro({ aba: "boletos" })}
         >
           Boletos
         </button>
         <button
           type="button"
           className={`btn-secundario ${abaFinanceira === "contas" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
-          onClick={() => setAbaFinanceira("contas")}
+          onClick={() => irParaFinanceiro({ aba: "contas" })}
         >
           Contas a pagar
         </button>
         <button
           type="button"
           className={`btn-secundario ${abaFinanceira === "notas" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
-          onClick={() => setAbaFinanceira("notas")}
+          onClick={() => irParaFinanceiro({ aba: "notas" })}
         >
           Notas fiscais
         </button>
@@ -2496,34 +2538,86 @@ export default function FinanceiroPage() {
           )}
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Card className="space-y-2 py-3">
+            <button
+              type="button"
+              className={`rounded-card border bg-white px-4 py-3 text-left space-y-2 transition ${
+                filtroVencimentoConta === "hoje" && filtroStatusConta === "todos"
+                  ? "border-primaria ring-1 ring-primaria"
+                  : "border-slate-200 hover:border-primaria"
+              }`}
+              onClick={() =>
+                irParaFinanceiro({ aba: "contas", vencimento: "hoje", status: "todos" })
+              }
+              title="Filtrar contas vencendo hoje"
+            >
               <p className="rotulo flex items-center gap-1">
                 <CalendarDays size={14} /> Vencendo hoje
               </p>
               <p className="text-2xl font-bold text-slate-900">{resumoContas.vencendoHoje.quantidade}</p>
               <p className="text-sm text-slate-600">{moeda(resumoContas.vencendoHoje.total)}</p>
-            </Card>
-            <Card className="space-y-2 py-3">
+            </button>
+            <button
+              type="button"
+              className={`rounded-card border bg-white px-4 py-3 text-left space-y-2 transition ${
+                filtroVencimentoConta === "proximos_7_dias" && filtroStatusConta === "todos"
+                  ? "border-primaria ring-1 ring-primaria"
+                  : "border-slate-200 hover:border-primaria"
+              }`}
+              onClick={() =>
+                irParaFinanceiro({
+                  aba: "contas",
+                  vencimento: "proximos_7_dias",
+                  status: "todos",
+                })
+              }
+              title="Filtrar contas dos próximos 7 dias"
+            >
               <p className="rotulo flex items-center gap-1">
                 <Clock3 size={14} /> Próximos 7 dias
               </p>
               <p className="text-2xl font-bold text-slate-900">{resumoContas.proximos7Dias.quantidade}</p>
               <p className="text-sm text-slate-600">{moeda(resumoContas.proximos7Dias.total)}</p>
-            </Card>
-            <Card className="space-y-2 py-3">
+            </button>
+            <button
+              type="button"
+              className={`rounded-card border bg-white px-4 py-3 text-left space-y-2 transition ${
+                filtroVencimentoConta === "atrasadas" && filtroStatusConta === "todos"
+                  ? "border-primaria ring-1 ring-primaria"
+                  : "border-slate-200 hover:border-primaria"
+              }`}
+              onClick={() =>
+                irParaFinanceiro({ aba: "contas", vencimento: "atrasadas", status: "todos" })
+              }
+              title="Filtrar contas atrasadas"
+            >
               <p className="rotulo flex items-center gap-1 text-erro">
                 <TriangleAlert size={14} /> Atrasadas
               </p>
               <p className="text-2xl font-bold text-erro">{resumoContas.atrasadas.quantidade}</p>
               <p className="text-sm text-slate-600">{moeda(resumoContas.atrasadas.total)}</p>
-            </Card>
-            <Card className="space-y-2 py-3">
+            </button>
+            <button
+              type="button"
+              className={`rounded-card border bg-white px-4 py-3 text-left space-y-2 transition ${
+                filtroStatusConta === "aguardando_conciliacao" && filtroVencimentoConta === "todas"
+                  ? "border-primaria ring-1 ring-primaria"
+                  : "border-slate-200 hover:border-primaria"
+              }`}
+              onClick={() =>
+                irParaFinanceiro({
+                  aba: "contas",
+                  vencimento: "todas",
+                  status: "aguardando_conciliacao",
+                })
+              }
+              title="Filtrar contas aguardando conciliação"
+            >
               <p className="rotulo flex items-center gap-1 text-blue-700">
                 <CircleCheckBig size={14} /> Aguardando conciliação
               </p>
               <p className="text-2xl font-bold text-blue-700">{resumoContas.aguardandoConciliacao.quantidade}</p>
               <p className="text-sm text-slate-600">{moeda(resumoContas.aguardandoConciliacao.total)}</p>
-            </Card>
+            </button>
           </div>
 
           <Card className="space-y-3">
@@ -2545,7 +2639,12 @@ export default function FinanceiroPage() {
                 <select
                   className="input w-full"
                   value={filtroStatusConta}
-                  onChange={(event) => setFiltroStatusConta(event.target.value as StatusContaPagar | "todos")}
+                  onChange={(event) =>
+                    irParaFinanceiro({
+                      aba: "contas",
+                      status: event.target.value as StatusContaPagar | "todos",
+                    })
+                  }
                 >
                   {STATUS_CONTA_OPCOES.map((opcao) => (
                     <option key={opcao.valor} value={opcao.valor}>
@@ -2559,7 +2658,12 @@ export default function FinanceiroPage() {
                 <select
                   className="input w-full"
                   value={filtroVencimentoConta}
-                  onChange={(event) => setFiltroVencimentoConta(event.target.value as FiltroVencimentoConta)}
+                  onChange={(event) =>
+                    irParaFinanceiro({
+                      aba: "contas",
+                      vencimento: event.target.value as FiltroVencimentoConta,
+                    })
+                  }
                 >
                   {FILTRO_VENCIMENTO_OPCOES.map((opcao) => (
                     <option key={opcao.valor} value={opcao.valor}>
@@ -4086,5 +4190,20 @@ export default function FinanceiroPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function FinanceiroPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-4">
+          <TituloPagina titulo="Financeiro" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando financeiro…</p>
+        </div>
+      }
+    >
+      <FinanceiroConteudo />
+    </Suspense>
   );
 }

@@ -224,3 +224,60 @@ export function exportarContasPagarCsv(
   );
   return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
 }
+
+export type AbaFinanceiro = "boletos" | "contas" | "notas";
+
+const STATUS_CONTA_PAGAR: StatusContaPagar[] = [
+  "aguardando_boleto",
+  "boleto_recebido",
+  "em_conferencia",
+  "compativel",
+  "divergente",
+  "bloqueado",
+  "aguardando_conciliacao",
+  "conciliado",
+  "cancelado",
+];
+
+export function parseAbaFinanceiro(valor: string | null | undefined): AbaFinanceiro {
+  if (valor === "contas" || valor === "notas" || valor === "boletos") return valor;
+  return "boletos";
+}
+
+export function parseFiltroVencimentoConta(valor: string | null | undefined): FiltroVencimentoConta {
+  if (valor === "hoje" || valor === "proximos_7_dias" || valor === "atrasadas") return valor;
+  return "todas";
+}
+
+export function parseFiltroStatusConta(
+  valor: string | null | undefined
+): StatusContaPagar | "todos" {
+  if (valor && (STATUS_CONTA_PAGAR as string[]).includes(valor)) {
+    return valor as StatusContaPagar;
+  }
+  return "todos";
+}
+
+/**
+ * Deep link do Financeiro (`?aba=` + filtros Contas).
+ * Defaults omitidos da query (aba boletos, vencimento todas, status todos).
+ */
+export function hrefFinanceiro(opts?: {
+  aba?: AbaFinanceiro;
+  vencimento?: FiltroVencimentoConta;
+  status?: StatusContaPagar | "todos";
+}): string {
+  const params = new URLSearchParams();
+  const aba = opts?.aba ?? "boletos";
+  if (aba !== "boletos") params.set("aba", aba);
+  if (aba === "contas") {
+    if (opts?.vencimento && opts.vencimento !== "todas") {
+      params.set("vencimento", opts.vencimento);
+    }
+    if (opts?.status && opts.status !== "todos") {
+      params.set("status", opts.status);
+    }
+  }
+  const q = params.toString();
+  return q ? `/financeiro?${q}` : "/financeiro";
+}

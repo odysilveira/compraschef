@@ -9,6 +9,7 @@ import { mutate, uid, useDB } from "@/lib/data";
 import {
   FUNCOES_OPERACIONAIS,
   TIPOS_PESSOA_RH,
+  abaDestinoHubPessoaRh,
   hrefPerfilRh,
   permissoesPorPapel,
   permissoesVazias,
@@ -546,7 +547,12 @@ function RhPessoasConteudo() {
             return (
             <Link
               key={pessoa.id}
-              href={hrefPerfilRh(pessoa.id, { temAlertaDocs: alertaDocs.tem_alerta })}
+              href={hrefPerfilRh(pessoa.id, {
+                aba: abaDestinoHubPessoaRh({
+                  temAlertaDocs: alertaDocs.tem_alerta,
+                  temAvaliacoes: resumoAvaliacoes.quantidade > 0,
+                }),
+              })}
               className="block"
             >
               <Card className="transition-colors hover:border-primaria/40 hover:bg-amber-50/40">

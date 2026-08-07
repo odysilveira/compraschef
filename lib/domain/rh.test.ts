@@ -7,6 +7,7 @@ import {
   somenteDigitosCpf,
   somenteDigitosTelefone,
   validarCpf,
+  abaDestinoHubPessoaRh,
   hrefPerfilRh,
   parseAbaPerfilRh,
 } from "./rh";
@@ -70,5 +71,16 @@ describe("rh helpers", () => {
     expect(parseAbaPerfilRh("anotacoes")).toBe("anotacoes");
     expect(hrefPerfilRh("pes-1", { aba: "avaliacoes" })).toBe("/rh/pes-1?aba=avaliacoes");
     expect(parseAbaPerfilRh("avaliacoes")).toBe("avaliacoes");
+  });
+
+  it("escolhe aba do hub: docs > avaliações > dados", () => {
+    expect(abaDestinoHubPessoaRh({ temAlertaDocs: true, temAvaliacoes: true })).toBe("documentos");
+    expect(abaDestinoHubPessoaRh({ temAlertaDocs: false, temAvaliacoes: true })).toBe("avaliacoes");
+    expect(abaDestinoHubPessoaRh({ temAlertaDocs: false, temAvaliacoes: false })).toBe("dados");
+    expect(
+      hrefPerfilRh("pes-1", {
+        aba: abaDestinoHubPessoaRh({ temAlertaDocs: false, temAvaliacoes: true }),
+      })
+    ).toBe("/rh/pes-1?aba=avaliacoes");
   });
 });

@@ -123,6 +123,11 @@ export function atualizarComNovidades(db: DB): boolean {
     mudou = true;
   }
 
+  if (!Array.isArray(db.anotacoes_pessoas)) {
+    db.anotacoes_pessoas = [];
+    mudou = true;
+  }
+
   if (!Array.isArray(db.escala_slots)) {
     db.escala_slots = [];
     mudou = true;

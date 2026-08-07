@@ -3,12 +3,19 @@
 // Cotações (requisitos 10–18): acompanhamento por fornecedor, quadro comparativo
 // em tempo real, recomendação da IA e geração de pedido. Só dono/gerente.
 
-import { useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Bell, Check, Copy, Plus, Sparkles } from "lucide-react";
 import { Badge, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, nomeFornecedor, nomeProduto, siglaParaItem, uid, useDB } from "@/lib/data";
+import {
+  FILTROS_STATUS_COTACAO_UI,
+  filtrarCotacoesPorStatus,
+  hrefCotacoes,
+  parseFiltroStatusCotacao,
+  type FiltroStatusCotacao,
+} from "@/lib/domain/cotacoes-navegacao";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { dataBR, dataHoraBR, moeda, qtd } from "@/lib/format";
 import { QuadroComparativo } from "@/components/compras/QuadroComparativo";
@@ -90,16 +97,51 @@ function BlocoFechamento({
   );
 }
 
-export default function CotacoesPage() {
+function CotacoesConteudo() {
   const db = useDB();
   const { papel } = usePapel();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [copiado, setCopiado] = useState<string | null>(null);
   const [lembretes, setLembretes] = useState<string[]>([]);
   // Escolha manual por produto: listaId → (produtoId → cotacaoId)
   const [escolhas, setEscolhas] = useState<Record<string, Record<string, string>>>({});
+  const [filtroStatus, setFiltroStatus] = useState<FiltroStatusCotacao>(() =>
+    parseFiltroStatusCotacao(searchParams.get("status"))
+  );
 
-  if (!podeVerValores(papel)) {
+  useEffect(() => {
+    setFiltroStatus(parseFiltroStatusCotacao(searchParams.get("status")));
+  }, [searchParams]);
+
+  const listas = useMemo(
+    () =>
+      db.listas_compras
+        .filter((l) => l.status === "em_cotacao")
+        .sort((a, b) => b.criada_em.localeCompare(a.criada_em)),
+    [db.listas_compras]
+  );
+
+  const contagemPorStatus = useMemo(() => {
+    const idsListas = new Set(listas.map((l) => l.id));
+    const cotacoesAtivas = db.cotacoes.filter((c) => idsListas.has(c.lista_id));
+    return {
+      todos: cotacoesAtivas.length,
+      enviada: cotacoesAtivas.filter((c) => c.status === "enviada").length,
+      respondida: cotacoesAtivas.filter((c) => c.status === "respondida").length,
+      expirada: cotacoesAtivas.filter((c) => c.status === "expirada").length,
+    };
+  }, [db.cotacoes, listas]);
+
+  const podeVer = podeVerValores(papel);
+  const mostrarFechamento = filtroStatus === "todos" || filtroStatus === "respondida";
+
+  function irParaFiltroStatus(proximo: FiltroStatusCotacao) {
+    setFiltroStatus(proximo);
+    router.replace(hrefCotacoes({ status: proximo }), { scroll: false });
+  }
+
+  if (!podeVer) {
     return (
       <div>
         <TituloPagina titulo="Cotações" />
@@ -107,10 +149,6 @@ export default function CotacoesPage() {
       </div>
     );
   }
-
-  const listas = db.listas_compras
-    .filter((l) => l.status === "em_cotacao")
-    .sort((a, b) => b.criada_em.localeCompare(a.criada_em));
 
   async function copiarLink(cotacaoId: string, token: string) {
     try {
@@ -225,8 +263,36 @@ export default function CotacoesPage() {
           </Link>
         </Card>
       ) : (
-        listas.map((lista) => {
-          const cotacoes = db.cotacoes.filter((c) => c.lista_id === lista.id);
+        <>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {FILTROS_STATUS_COTACAO_UI.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className={`btn-secundario text-sm ${
+                  filtroStatus === f.id ? "border-primaria bg-primaria-clara text-primaria" : ""
+                }`}
+                onClick={() => irParaFiltroStatus(f.id)}
+              >
+                {f.rotulo} ({contagemPorStatus[f.id]})
+              </button>
+            ))}
+          </div>
+          {listas.every(
+            (lista) =>
+              filtrarCotacoesPorStatus(
+                db.cotacoes.filter((c) => c.lista_id === lista.id),
+                filtroStatus
+              ).length === 0
+          ) ? (
+            <Vazio mensagem="Nenhuma cotação neste status." />
+          ) : (
+            listas.map((lista) => {
+          const cotacoes = filtrarCotacoesPorStatus(
+            db.cotacoes.filter((c) => c.lista_id === lista.id),
+            filtroStatus
+          );
+          if (cotacoes.length === 0) return null;
           const rec = gerarRecomendacao(db, lista.id);
           // Duas seleções independentes: a sugestão da IA e as marcações do dono
           const sugestao = Object.fromEntries(rec.itens.map((i) => [i.produto_id, i.cotacao_id]));
@@ -305,6 +371,8 @@ export default function CotacoesPage() {
                 </div>
               </Card>
 
+              {mostrarFechamento && (
+                <>
               <Card>
                 <h2 className="mb-1">Quadro comparativo</h2>
                 <p className="mb-3 text-xs text-stone-500">
@@ -365,10 +433,29 @@ export default function CotacoesPage() {
                   mensagemVazio="Aguardando as primeiras respostas com preço para montar a sugestão."
                 />
               </div>
+                </>
+              )}
             </div>
           );
-        })
+            })
+          )}
+        </>
       )}
     </div>
+  );
+}
+
+export default function CotacoesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="Cotações" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando cotações…</p>
+        </div>
+      }
+    >
+      <CotacoesConteudo />
+    </Suspense>
   );
 }

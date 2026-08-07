@@ -62,6 +62,7 @@ import {
 } from "@/lib/domain/resumo-rh";
 import { rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
 import {
+  chavePixDaPessoa,
   linkWhatsAppReciboPagamento,
   montarTextoConfirmacaoRecebimento,
   montarTextoReciboPagamentoPessoa,
@@ -612,6 +613,28 @@ function RhEscalaConteudo() {
     setErro(null);
     setMensagem("Plantão excluído.");
     if (r.avisos.length) setAviso(r.avisos.join(" "));
+  }
+
+  async function copiarPixDoPagamento(convocacaoId: string) {
+    const pagamento = pagamentoDaConvocacao(db, convocacaoId);
+    if (!pagamento) {
+      setErro("Pagamento desta convocação não encontrado.");
+      return;
+    }
+    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
+    const chave = chavePixDaPessoa(pessoa);
+    if (!chave) {
+      setErro("Esta pessoa não tem chave PIX cadastrada no perfil.");
+      setMensagem(null);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(chave);
+      setErro(null);
+      setMensagem(`PIX de ${pessoa?.nome ?? "pessoa"} copiado.`);
+    } catch {
+      setErro("Não foi possível copiar a chave PIX neste navegador.");
+    }
   }
 
   async function copiarReciboDoPagamento(convocacaoId: string, variante: "recibo" | "confirmacao") {
@@ -2117,6 +2140,19 @@ function RhEscalaConteudo() {
                   >
                     Abrir pagamentos
                   </Link>
+                  {(detalhePagamento.status === "previsto" ||
+                    detalhePagamento.status === "liberado") &&
+                    detalheConv &&
+                    chavePixDaPessoa(detalhePessoa) && (
+                      <button
+                        type="button"
+                        className="btn-secundario"
+                        onClick={() => void copiarPixDoPagamento(detalheConv.id)}
+                        title="Copia a chave PIX cadastrada no perfil"
+                      >
+                        <Copy size={16} /> Copiar PIX
+                      </button>
+                    )}
                   {(detalhePagamento.status === "aguardando_conciliacao" ||
                     detalhePagamento.status === "pago") &&
                     detalheConv && (

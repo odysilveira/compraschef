@@ -796,18 +796,45 @@ function RhPagamentosConteudo() {
       )}
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <Card className="py-3">
+        <button
+          type="button"
+          className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+            filtro === "abertos"
+              ? "border-primaria ring-1 ring-primaria"
+              : "border-slate-200 hover:border-primaria"
+          }`}
+          onClick={() => irParaFiltro("abertos")}
+          title="Filtrar pagamentos abertos"
+        >
           <p className="rotulo">Abertos</p>
           <p className="text-xl font-bold">{moeda(totais.abertos)}</p>
-        </Card>
-        <Card className="py-3">
+        </button>
+        <button
+          type="button"
+          className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+            filtro === "aguardando"
+              ? "border-primaria ring-1 ring-primaria"
+              : "border-slate-200 hover:border-primaria"
+          }`}
+          onClick={() => irParaFiltro("aguardando")}
+          title="Filtrar pagamentos aguardando conciliação"
+        >
           <p className="rotulo text-blue-700">Aguardando conciliação</p>
           <p className="text-xl font-bold text-blue-700">{moeda(totais.aguardando)}</p>
-        </Card>
-        <Card className="py-3">
+        </button>
+        <button
+          type="button"
+          className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+            filtro === "pagos"
+              ? "border-primaria ring-1 ring-primaria"
+              : "border-slate-200 hover:border-primaria"
+          }`}
+          onClick={() => irParaFiltro("pagos")}
+          title="Filtrar pagamentos pagos"
+        >
           <p className="rotulo text-emerald-700">Pagos</p>
           <p className="text-xl font-bold text-emerald-700">{moeda(totais.pagos)}</p>
-        </Card>
+        </button>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">

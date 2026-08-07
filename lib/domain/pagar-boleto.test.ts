@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Boleto, DB, DocumentoBoleto } from "../types";
+import type { Boleto, DB, DocumentoBoleto, PagamentoPessoa } from "../types";
 import { seedDB } from "../data/seed";
 import {
   acoesPagamentoDisponiveisNoLayout,
@@ -16,6 +16,7 @@ import {
   montarTextosLinhasDigitaveisBoletosLote,
   obterCodigoCanonicoConfirmadoDoDocumento,
   exportarBoletosAgendaCsv,
+  exportarAgendaFinanceiraCsv,
   registrarDivergenciaBoleto,
 } from "./pagar-boleto";
 
@@ -658,6 +659,66 @@ describe("exportar CSV da agenda de boletos", () => {
       numeroNotaDoBoleto: () => "",
     });
     expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv.trim().split(/\r?\n/).length).toBe(1);
+  });
+});
+
+describe("exportar CSV da agenda unificada (boletos + RH)", () => {
+  it("mistura boletos e RH com coluna Origem", () => {
+    const pagamentoRh: PagamentoPessoa = {
+      id: "pag-1",
+      pessoa_id: "pes-1",
+      tipo: "salario",
+      descricao: "Folha agosto",
+      competencia: "2026-08",
+      vencimento: "2026-08-05",
+      valor: 2000,
+      status: "aguardando_conciliacao",
+      pagamento_data: "2026-08-04",
+      pagamento_valor: 2000,
+      criado_em: "2026-08-01T10:00:00.000Z",
+      atualizado_em: "2026-08-04T10:00:00.000Z",
+    };
+
+    const csv = exportarAgendaFinanceiraCsv(
+      {
+        boletos: [
+          boletoBase({
+            id: "bol-1",
+            valor: 100,
+            vencimento: "2026-08-10",
+            numero_parcela: "001",
+          }),
+        ],
+        pagamentosRh: [pagamentoRh],
+      },
+      {
+        fornecedorDoBoleto: () => "Alfa Distribuidora",
+        numeroNotaDoBoleto: () => "1001",
+        nomePessoaRh: () => "Maria Silva",
+      }
+    );
+
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv).toContain("Origem;Beneficiário;Referência;Vencimento;Valor;Status");
+    expect(csv).toContain("RH");
+    expect(csv).toContain("Maria Silva");
+    expect(csv).toContain("Boleto");
+    expect(csv).toContain("Alfa Distribuidora");
+    expect(csv).toContain("NF-e 1001");
+    expect(csv).toContain("Aguardando conciliação");
+    expect(csv.indexOf("Maria Silva")).toBeLessThan(csv.indexOf("Alfa Distribuidora"));
+  });
+
+  it("exporta só cabeçalho quando vazio", () => {
+    const csv = exportarAgendaFinanceiraCsv(
+      { boletos: [], pagamentosRh: [] },
+      {
+        fornecedorDoBoleto: () => "",
+        numeroNotaDoBoleto: () => "",
+        nomePessoaRh: () => "",
+      }
+    );
     expect(csv.trim().split(/\r?\n/).length).toBe(1);
   });
 });

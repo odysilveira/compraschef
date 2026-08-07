@@ -86,7 +86,7 @@ import {
   linhaDigitavelParaPagamento,
   montarEstadoAgendaPagamentoBoleto,
   montarTextosLinhasDigitaveisBoletosLote,
-  exportarBoletosAgendaCsv,
+  exportarAgendaFinanceiraCsv,
   registrarDivergenciaBoleto,
   type SegmentoCodigoBarrasItf,
   type SnapshotPagamentoBoleto,
@@ -1119,22 +1119,33 @@ function FinanceiroConteudo() {
   }
 
   function baixarAgendaBoletosCsv() {
-    if (boletosAtivos.length === 0) {
-      setMensagemReceberBoleto("Nenhum boleto na agenda para exportar.");
+    const pagamentosRhAgenda = [...rhAguardandoConciliacao, ...rhPagos];
+    const total = boletosAtivos.length + pagamentosRhAgenda.length;
+    if (total === 0) {
+      setMensagemReceberBoleto("Nenhum título na agenda para exportar.");
       return;
     }
-    const csv = exportarBoletosAgendaCsv(boletosAtivos, {
-      fornecedorDoBoleto: (boleto) => fornecedorDoBoleto(db, boleto),
-      numeroNotaDoBoleto: (boleto) => notaDoBoleto(db, boleto)?.numero ?? "",
-    });
+    const csv = exportarAgendaFinanceiraCsv(
+      {
+        boletos: boletosAtivos,
+        pagamentosRh: pagamentosRhAgenda,
+      },
+      {
+        fornecedorDoBoleto: (boleto) => fornecedorDoBoleto(db, boleto),
+        numeroNotaDoBoleto: (boleto) => notaDoBoleto(db, boleto)?.numero ?? "",
+        nomePessoaRh: (pessoaId) => nomePessoaRh(pessoaId),
+      }
+    );
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "financeiro-agenda-boletos.csv";
+    a.download = "financeiro-agenda.csv";
     a.click();
     URL.revokeObjectURL(url);
-    setMensagemReceberBoleto(`CSV baixado (${boletosAtivos.length} boleto(s)).`);
+    setMensagemReceberBoleto(
+      `CSV baixado (${boletosAtivos.length} boleto(s) + ${pagamentosRhAgenda.length} RH).`
+    );
   }
 
   function baixarContasPagarCsv() {
@@ -2294,16 +2305,18 @@ function FinanceiroConteudo() {
               <button
                 type="button"
                 className="btn-secundario"
-                disabled={boletosAtivos.length === 0}
+                disabled={boletosAtivos.length + rhAguardandoConciliacao.length + rhPagos.length === 0}
                 onClick={baixarAgendaBoletosCsv}
                 title={
-                  boletosAtivos.length === 0
+                  boletosAtivos.length + rhAguardandoConciliacao.length + rhPagos.length === 0
                     ? "Nada para exportar na agenda"
-                    : "Exportar boletos da agenda (CSV)"
+                    : "Exportar agenda (boletos + RH) em CSV"
                 }
               >
                 <Download size={16} /> Exportar CSV
-                {boletosAtivos.length > 0 ? ` (${boletosAtivos.length})` : ""}
+                {boletosAtivos.length + rhAguardandoConciliacao.length + rhPagos.length > 0
+                  ? ` (${boletosAtivos.length + rhAguardandoConciliacao.length + rhPagos.length})`
+                  : ""}
               </button>
               <button type="button" className="btn-secundario" onClick={abrirImportarExtratoOfx}>
                 <Upload size={18} /> Importar extrato OFX

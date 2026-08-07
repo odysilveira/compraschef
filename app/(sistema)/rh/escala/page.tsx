@@ -62,6 +62,7 @@ import {
 } from "@/lib/domain/resumo-rh";
 import { rotuloStatusPagamentoPessoa } from "@/lib/domain/pagamentos-pessoas";
 import {
+  linkWhatsAppReciboPagamento,
   montarTextoConfirmacaoRecebimento,
   montarTextoReciboPagamentoPessoa,
 } from "@/lib/domain/recibo-pagamento-pessoa";
@@ -643,6 +644,42 @@ function RhEscalaConteudo() {
     } catch {
       setErro("Não foi possível copiar neste navegador.");
     }
+  }
+
+  function abrirWhatsAppReciboDoPagamento(
+    convocacaoId: string,
+    variante: "recibo" | "confirmacao"
+  ) {
+    const pagamento = pagamentoDaConvocacao(db, convocacaoId);
+    if (!pagamento) {
+      setErro("Pagamento desta convocação não encontrado.");
+      return;
+    }
+    const pessoa = db.pessoas.find((p) => p.id === pagamento.pessoa_id);
+    if (!pessoa) {
+      setErro("Pessoa do pagamento não encontrada.");
+      return;
+    }
+    const texto =
+      variante === "confirmacao"
+        ? montarTextoConfirmacaoRecebimento({ pessoa, pagamento })
+        : montarTextoReciboPagamentoPessoa({
+            pessoa,
+            pagamento,
+            consumos: db.consumos_pessoas ?? [],
+          });
+    const url = linkWhatsAppReciboPagamento(pessoa.telefone, texto);
+    if (!url) {
+      setErro("Cadastre o telefone da pessoa no perfil para abrir o WhatsApp.");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    setErro(null);
+    setMensagem(
+      variante === "confirmacao"
+        ? "WhatsApp aberto com a confirmação."
+        : "WhatsApp aberto com o recibo."
+    );
   }
 
   function abrirPadrao(pessoaId?: string) {
@@ -2094,9 +2131,27 @@ function RhEscalaConteudo() {
                         <button
                           type="button"
                           className="btn-secundario"
+                          onClick={() => abrirWhatsAppReciboDoPagamento(detalheConv.id, "recibo")}
+                          title="Abre o WhatsApp com o recibo (precisa de telefone no perfil)"
+                        >
+                          WhatsApp recibo
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secundario"
                           onClick={() => void copiarReciboDoPagamento(detalheConv.id, "confirmacao")}
                         >
                           <Copy size={16} /> Confirmação
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() =>
+                            abrirWhatsAppReciboDoPagamento(detalheConv.id, "confirmacao")
+                          }
+                          title="Abre o WhatsApp com a confirmação (precisa de telefone no perfil)"
+                        >
+                          WhatsApp confirmação
                         </button>
                       </>
                     )}

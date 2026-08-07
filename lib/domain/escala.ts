@@ -1036,6 +1036,29 @@ export function listarConvocacoesRascunhoNaJanela(
     });
 }
 
+/**
+ * Concatena textos de WhatsApp das convocações (ex.: fila rascunho) com cabeçalho por pessoa.
+ * Não altera status — copiar lote ≠ marcar como enviada.
+ */
+export function montarTextosWhatsAppConvocacoesLote(
+  convocacoes: ConvocacaoIntermitente[],
+  opts: {
+    nomePorId: (pessoaId: string) => string;
+    telefonePorId?: (pessoaId: string) => string | undefined;
+  }
+): string {
+  const blocos: string[] = [];
+  for (const conv of convocacoes) {
+    const texto = (conv.texto_mensagem ?? "").trim();
+    if (!texto) continue;
+    const nome = opts.nomePorId(conv.pessoa_id).trim() || conv.pessoa_id;
+    const telefone = opts.telefonePorId?.(conv.pessoa_id)?.trim();
+    const cabecalho = telefone ? `—— ${nome} · ${telefone} ——` : `—— ${nome} ——`;
+    blocos.push(`${cabecalho}\n${texto}`);
+  }
+  return blocos.join("\n\n==========\n\n");
+}
+
 /** Padrões de escala CLT (ciclo rolante ou calendário). */
 export type PadraoEscalaClt = "6x1" | "5x2" | "4x2" | "12x36" | "seg_sex";
 

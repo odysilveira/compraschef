@@ -1,6 +1,7 @@
 import { validarBoleto } from "./boletos";
 import { dataBR, moeda } from "../format";
-import type { Boleto, DB, DocumentoBoleto, HistoricoPagamentoBoleto, StatusBoleto } from "../types";
+import type { Boleto, DB, DocumentoBoleto, HistoricoPagamentoBoleto, PagamentoPessoa, StatusBoleto } from "../types";
+import { rotuloStatusPagamentoPessoa, rotuloTipoPagamentoPessoa } from "./pagamentos-pessoas";
 
 export type MotivoBloqueioPagamentoBoleto =
   | "status_invalido"
@@ -764,5 +765,126 @@ export function exportarBoletosAgendaCsv(
       .map((c) => csvEscape(String(c)))
       .join(";")
   );
+  return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
+}
+
+type LinhaAgendaFinanceiraCsv = {
+  origem: "Boleto" | "RH";
+  beneficiario: string;
+  referencia: string;
+  vencimento: string;
+  valor: number;
+  status: string;
+  dataPagamento: string;
+  valorPago: number | undefined;
+  bancoConta: string;
+  responsavel: string;
+  observacao: string;
+  divergente: boolean;
+  motivoDivergencia: string;
+};
+
+/**
+ * CSV unificado da agenda Financeiro (boletos + pagamentos RH na fila).
+ * Separador `;`, UTF-8 com BOM.
+ */
+export function exportarAgendaFinanceiraCsv(
+  input: {
+    boletos: Boleto[];
+    pagamentosRh: PagamentoPessoa[];
+  },
+  contexto: {
+    fornecedorDoBoleto: (boleto: Boleto) => string;
+    numeroNotaDoBoleto: (boleto: Boleto) => string;
+    nomePessoaRh: (pessoaId: string) => string;
+  }
+): string {
+  const cabecalho = [
+    "Origem",
+    "Beneficiário",
+    "Referência",
+    "Vencimento",
+    "Valor",
+    "Status",
+    "Data pagamento",
+    "Valor pago",
+    "Banco/conta",
+    "Responsável",
+    "Observação",
+    "Divergente",
+    "Motivo divergência",
+  ];
+
+  const linhasBoleto: LinhaAgendaFinanceiraCsv[] = input.boletos.map((b) => {
+    const nf = contexto.numeroNotaDoBoleto(b);
+    const parcela = b.numero_parcela?.trim();
+    const partesRef = [
+      nf ? `NF-e ${nf}` : null,
+      parcela ? `parc. ${parcela}` : null,
+    ].filter(Boolean);
+    return {
+      origem: "Boleto",
+      beneficiario: contexto.fornecedorDoBoleto(b),
+      referencia: partesRef.join(" · "),
+      vencimento: b.vencimento,
+      valor: b.valor,
+      status: rotuloStatus(b.status),
+      dataPagamento: b.pagamento_data ?? "",
+      valorPago: b.pagamento_valor,
+      bancoConta: b.pagamento_banco_conta ?? "",
+      responsavel: b.pagamento_responsavel ?? "",
+      observacao: b.pagamento_observacao ?? b.observacao ?? "",
+      divergente: Boolean(b.conciliacao_divergente),
+      motivoDivergencia: b.conciliacao_divergencia_motivo ?? "",
+    };
+  });
+
+  const linhasRh: LinhaAgendaFinanceiraCsv[] = input.pagamentosRh.map((p) => {
+    const tipo = rotuloTipoPagamentoPessoa(p.tipo);
+    const partesRef = [tipo, p.descricao?.trim() || null, p.competencia?.trim() || null].filter(Boolean);
+    return {
+      origem: "RH",
+      beneficiario: contexto.nomePessoaRh(p.pessoa_id),
+      referencia: partesRef.join(" · "),
+      vencimento: p.vencimento,
+      valor: p.valor,
+      status: rotuloStatusPagamentoPessoa(p.status),
+      dataPagamento: p.pagamento_data ?? "",
+      valorPago: p.pagamento_valor,
+      bancoConta: p.pagamento_banco_conta ?? "",
+      responsavel: p.pagamento_responsavel ?? "",
+      observacao: p.pagamento_observacao ?? "",
+      divergente: Boolean(p.conciliacao_divergente),
+      motivoDivergencia: p.conciliacao_divergencia_motivo ?? "",
+    };
+  });
+
+  const ordenadas = [...linhasBoleto, ...linhasRh].sort(
+    (a, b) =>
+      a.vencimento.localeCompare(b.vencimento) ||
+      a.beneficiario.localeCompare(b.beneficiario, "pt-BR") ||
+      a.origem.localeCompare(b.origem)
+  );
+
+  const linhas = ordenadas.map((l) =>
+    [
+      l.origem,
+      l.beneficiario,
+      l.referencia,
+      l.vencimento,
+      formatarValorCsv(l.valor),
+      l.status,
+      l.dataPagamento,
+      formatarValorCsv(l.valorPago),
+      l.bancoConta,
+      l.responsavel,
+      l.observacao,
+      l.divergente ? "sim" : "não",
+      l.motivoDivergencia,
+    ]
+      .map((c) => csvEscape(String(c)))
+      .join(";")
+  );
+
   return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
 }

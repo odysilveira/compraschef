@@ -139,3 +139,40 @@ export function montarTextoConfirmacaoRecebimento(input: {
     `Nome: ${pessoa.nome} · Data: ${dataBR(new Date().toISOString().slice(0, 10))}`,
   ].join("\n");
 }
+
+/**
+ * Concatena recibos/confirmações WhatsApp de vários pagamentos com cabeçalho por pessoa.
+ * Não altera status — só monta texto para colar.
+ */
+export function montarTextosWhatsAppRecibosPagamentoLote(
+  pagamentos: PagamentoPessoa[],
+  opts: {
+    pessoaPorId: (id: string) => PessoaRH | undefined;
+    consumos?: ConsumoPessoa[];
+    variante?: "recibo" | "confirmacao";
+    razaoSocial?: string;
+  }
+): string {
+  const variante = opts.variante ?? "recibo";
+  const blocos: string[] = [];
+  for (const pagamento of pagamentos) {
+    const pessoa = opts.pessoaPorId(pagamento.pessoa_id);
+    if (!pessoa) continue;
+    const texto = (
+      variante === "confirmacao"
+        ? montarTextoConfirmacaoRecebimento({ pessoa, pagamento })
+        : montarTextoReciboPagamentoPessoa({
+            pessoa,
+            pagamento,
+            consumos: opts.consumos,
+            razaoSocial: opts.razaoSocial,
+          })
+    ).trim();
+    if (!texto) continue;
+    const nome = pessoa.nome.trim() || pagamento.pessoa_id;
+    const telefone = pessoa.telefone?.trim();
+    const cabecalho = telefone ? `—— ${nome} · ${telefone} ——` : `—— ${nome} ——`;
+    blocos.push(`${cabecalho}\n${texto}`);
+  }
+  return blocos.join("\n\n==========\n\n");
+}

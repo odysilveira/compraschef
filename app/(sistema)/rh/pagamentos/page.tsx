@@ -23,6 +23,7 @@ import {
 import {
   montarTextoConfirmacaoRecebimento,
   montarTextoReciboPagamentoPessoa,
+  montarTextosWhatsAppRecibosPagamentoLote,
 } from "@/lib/domain/recibo-pagamento-pessoa";
 import {
   aplicarDescontosNoPagamento,
@@ -492,6 +493,35 @@ function RhPagamentosConteudo() {
     }
   }
 
+  async function copiarRecibosWhatsAppDoLote(variante: "recibo" | "confirmacao" = "recibo") {
+    const alvo = lista.filter(
+      (p) => p.status === "aguardando_conciliacao" || p.status === "pago"
+    );
+    if (alvo.length === 0) {
+      setMensagem("Nenhum pagamento aguardando ou pago neste filtro para copiar.");
+      return;
+    }
+    const texto = montarTextosWhatsAppRecibosPagamentoLote(alvo, {
+      pessoaPorId: (id) => db.pessoas.find((p) => p.id === id),
+      consumos: db.consumos_pessoas ?? [],
+      variante,
+    });
+    if (!texto) {
+      setMensagem("Nenhum texto de recibo para copiar neste filtro.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(texto);
+      setMensagem(
+        variante === "confirmacao"
+          ? `${alvo.length} confirmação(ões) copiada(s). Cole no WhatsApp de cada pessoa.`
+          : `${alvo.length} recibo(s) copiado(s). Cole no WhatsApp de cada pessoa.`
+      );
+    } catch {
+      setMensagem("Não foi possível copiar o lote. Use Copiar recibo em cada pagamento.");
+    }
+  }
+
   function abrirImportacao() {
     setImportAberto(true);
     setImportPasso("arquivo");
@@ -751,6 +781,39 @@ function RhPagamentosConteudo() {
               Conciliar todos (
               {lista.filter((p) => p.status === "aguardando_conciliacao").length})
             </button>
+          )}
+        {(filtro === "aguardando" || filtro === "pagos") &&
+          lista.some((p) => p.status === "aguardando_conciliacao" || p.status === "pago") && (
+            <>
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={() => void copiarRecibosWhatsAppDoLote("recibo")}
+                title="Copia recibos discriminados com cabeçalho por pessoa"
+              >
+                <Copy size={16} /> Copiar recibos (
+                {
+                  lista.filter(
+                    (p) => p.status === "aguardando_conciliacao" || p.status === "pago"
+                  ).length
+                }
+                )
+              </button>
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={() => void copiarRecibosWhatsAppDoLote("confirmacao")}
+                title="Copia textos curtos de confirmação de recebimento"
+              >
+                <Copy size={16} /> Copiar confirmações (
+                {
+                  lista.filter(
+                    (p) => p.status === "aguardando_conciliacao" || p.status === "pago"
+                  ).length
+                }
+                )
+              </button>
+            </>
           )}
         <Link href="/rh" className="btn-secundario ml-auto">
           Ver pessoas

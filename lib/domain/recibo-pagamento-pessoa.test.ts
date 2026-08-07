@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   montarTextoConfirmacaoRecebimento,
   montarTextoReciboPagamentoPessoa,
+  montarTextosWhatsAppRecibosPagamentoLote,
 } from "./recibo-pagamento-pessoa";
 import type { PagamentoPessoa, PessoaRH } from "../types";
 
@@ -109,5 +110,46 @@ describe("recibo-pagamento-pessoa", () => {
     expect(texto).toContain("Confirmo o recebimento");
     expect(texto).toContain("via PIX");
     expect(texto).toContain("Carlos Extra");
+  });
+
+  it("monta recibos WhatsApp em lote com cabeçalho por pessoa", () => {
+    expect(
+      montarTextosWhatsAppRecibosPagamentoLote([], {
+        pessoaPorId: () => undefined,
+      })
+    ).toBe("");
+
+    const carlos = pessoa({ telefone: "43999990001" });
+    const bia = pessoa({ id: "pes-2", nome: "Bia Extra", telefone: undefined, chave_pix: undefined });
+    const texto = montarTextosWhatsAppRecibosPagamentoLote(
+      [
+        pagamento({ id: "pag-1", pessoa_id: "pes-1" }),
+        pagamento({ id: "pag-2", pessoa_id: "pes-2", valor: 80, pagamento_valor: 80 }),
+        pagamento({ id: "pag-x", pessoa_id: "pes-x" }),
+      ],
+      {
+        pessoaPorId: (id) => {
+          if (id === "pes-1") return carlos;
+          if (id === "pes-2") return bia;
+          return undefined;
+        },
+      }
+    );
+
+    expect(texto).toContain("—— Carlos Extra · 43999990001 ——");
+    expect(texto).toContain("RECIBO DISCRIMINADO");
+    expect(texto).toContain("—— Bia Extra ——");
+    expect(texto).toContain("==========");
+    expect(texto).not.toContain("pes-x");
+
+    const confirmacoes = montarTextosWhatsAppRecibosPagamentoLote(
+      [pagamento({ id: "pag-1", pessoa_id: "pes-1" })],
+      {
+        pessoaPorId: () => carlos,
+        variante: "confirmacao",
+      }
+    );
+    expect(confirmacoes).toContain("Confirmo o recebimento");
+    expect(confirmacoes).toContain("—— Carlos Extra · 43999990001 ——");
   });
 });

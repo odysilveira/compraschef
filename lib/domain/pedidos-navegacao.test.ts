@@ -14,6 +14,10 @@ describe("navegação pedidos", () => {
     expect(hrefPedidos({ status: "aguardando_aprovacao" })).toBe(
       "/pedidos?status=aguardando_aprovacao"
     );
+    expect(hrefPedidos({ status: "confirmado", pedido: "ped-1" })).toBe(
+      "/pedidos?status=confirmado&pedido=ped-1"
+    );
+    expect(hrefPedidos({ pedido: "ped-1" })).toBe("/pedidos?pedido=ped-1");
   });
 
   it("filtra por status", () => {

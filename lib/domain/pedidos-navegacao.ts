@@ -32,13 +32,20 @@ export function parseFiltroStatusPedido(
 }
 
 /**
- * Deep link de Pedidos (`?status=`).
- * Default omitido: todos → `/pedidos`.
+ * Deep link de Pedidos (`?status=` + opcional `pedido=`).
+ * Defaults omitidos: todos e sem pedido → `/pedidos`.
  */
-export function hrefPedidos(opts?: { status?: FiltroStatusPedido }): string {
+export function hrefPedidos(opts?: {
+  status?: FiltroStatusPedido;
+  pedido?: string;
+}): string {
+  const params = new URLSearchParams();
   const status = opts?.status ?? "todos";
-  if (status === "todos") return "/pedidos";
-  return `/pedidos?status=${status}`;
+  if (status !== "todos") params.set("status", status);
+  const pedidoId = (opts?.pedido ?? "").trim();
+  if (pedidoId) params.set("pedido", pedidoId);
+  const q = params.toString();
+  return q ? `/pedidos?${q}` : "/pedidos";
 }
 
 export function filtrarPedidosPorStatus<T extends { status: StatusPedido }>(

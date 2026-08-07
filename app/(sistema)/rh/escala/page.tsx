@@ -48,6 +48,7 @@ import {
   type SetorArrastoEscala,
   type SetorConvocacaoEscala,
 } from "@/lib/domain/escala";
+import { filaAgendaFinanceiroDeStatusPagamento, hrefFinanceiro } from "@/lib/domain/financeiro";
 import {
   destaqueSlotFiltroConvocacao,
   filtroPagamentosRhDeStatus,
@@ -981,6 +982,9 @@ function RhEscalaConteudo() {
     ? convocacaoDoSlot(db, detalheSlot.id)
     : undefined;
   const detalhePagamento = detalheConv ? pagamentoDaConvocacao(db, detalheConv.id) : undefined;
+  const detalheFilaFinanceiro = detalhePagamento
+    ? filaAgendaFinanceiroDeStatusPagamento(detalhePagamento.status)
+    : undefined;
   const detalhePessoa = detalheSlot ? db.pessoas.find((p) => p.id === detalheSlot.pessoa_id) : undefined;
   const linkWaDetalhe =
     detalheConv && detalhePessoa
@@ -2140,6 +2144,18 @@ function RhEscalaConteudo() {
                   >
                     Abrir pagamentos
                   </Link>
+                  {detalheFilaFinanceiro && (
+                    <Link
+                      href={hrefFinanceiro({
+                        aba: "boletos",
+                        fila: detalheFilaFinanceiro,
+                      })}
+                      className="btn-secundario"
+                      title="Abre a agenda do Financeiro na fila deste pagamento"
+                    >
+                      Ver no Financeiro
+                    </Link>
+                  )}
                   {(detalhePagamento.status === "previsto" ||
                     detalhePagamento.status === "liberado") &&
                     detalheConv &&

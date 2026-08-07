@@ -2882,26 +2882,34 @@ function FinanceiroConteudo() {
             <div id="financeiro-fila-pagos" className="space-y-2 scroll-mt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="rotulo text-primaria-escura">Pagos</p>
-                {rhPagos.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      className="btn-secundario text-sm"
-                      onClick={() => void copiarRecibosRhDoLote(rhPagos, "recibo")}
-                      title="Copia recibos discriminados dos RH pagos"
-                    >
-                      <Copy size={14} /> Copiar recibos RH ({rhPagos.length})
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secundario text-sm"
-                      onClick={() => void copiarRecibosRhDoLote(rhPagos, "confirmacao")}
-                      title="Copia confirmações curtas dos RH pagos"
-                    >
-                      <Copy size={14} /> Copiar confirmações RH ({rhPagos.length})
-                    </button>
-                  </div>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {rhPagos.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn-secundario text-sm"
+                        onClick={() => void copiarRecibosRhDoLote(rhPagos, "recibo")}
+                        title="Copia recibos discriminados dos RH pagos"
+                      >
+                        <Copy size={14} /> Copiar recibos RH ({rhPagos.length})
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secundario text-sm"
+                        onClick={() => void copiarRecibosRhDoLote(rhPagos, "confirmacao")}
+                        title="Copia confirmações curtas dos RH pagos"
+                      >
+                        <Copy size={14} /> Copiar confirmações RH ({rhPagos.length})
+                      </button>
+                    </>
+                  )}
+                  <Link
+                    href={hrefPagamentosRh("pagos")}
+                    className="text-xs font-medium text-primaria-escura underline-offset-2 hover:underline"
+                  >
+                    Ver pagamentos de RH
+                  </Link>
+                </div>
               </div>
               {boletosPagos.length === 0 && rhPagos.length === 0 ? (
                 <Vazio mensagem="Nenhum boleto ou pagamento de RH marcado como pago." />

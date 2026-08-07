@@ -27,6 +27,37 @@ export function corBadgeTipoAnotacao(
   return "cinza";
 }
 
+export type FiltroTipoAnotacaoPessoa = "todas" | TipoAnotacaoPessoaRh;
+
+export function parseFiltroTipoAnotacaoPessoa(
+  valor: string | null | undefined
+): FiltroTipoAnotacaoPessoa {
+  const t = limparTexto(valor ?? undefined);
+  if (t === "elogio" || t === "aviso" || t === "observacao") return t;
+  return "todas";
+}
+
+export function filtrarAnotacoesPorTipo(
+  anotacoes: AnotacaoPessoaRh[],
+  filtro: FiltroTipoAnotacaoPessoa
+): AnotacaoPessoaRh[] {
+  if (filtro === "todas") return anotacoes;
+  return anotacoes.filter((a) => (a.tipo ?? "observacao") === filtro);
+}
+
+export function contarAnotacoesPorTipo(anotacoes: AnotacaoPessoaRh[]): Record<TipoAnotacaoPessoaRh, number> {
+  const contagem: Record<TipoAnotacaoPessoaRh, number> = {
+    elogio: 0,
+    aviso: 0,
+    observacao: 0,
+  };
+  for (const a of anotacoes) {
+    const tipo = a.tipo ?? "observacao";
+    contagem[tipo] += 1;
+  }
+  return contagem;
+}
+
 function limparTexto(valor?: string): string {
   return (valor ?? "").trim();
 }

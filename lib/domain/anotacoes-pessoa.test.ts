@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { seedDB } from "../data/seed";
 import {
   adicionarAnotacaoPessoa,
+  contarAnotacoesPorTipo,
   editarAnotacaoPessoa,
   excluirAnotacaoPessoa,
+  filtrarAnotacoesPorTipo,
   listarAnotacoesPessoa,
+  parseFiltroTipoAnotacaoPessoa,
   rotuloTipoAnotacaoPessoa,
 } from "./anotacoes-pessoa";
 
@@ -105,5 +108,37 @@ describe("anotações de pessoa (RH)", () => {
     expect(rem.sucesso).toBe(true);
     expect(listarAnotacoesPessoa(db, "pes-gerente")).toHaveLength(0);
     expect(excluirAnotacaoPessoa(db, "anot-e1").sucesso).toBe(false);
+  });
+
+  it("filtra e conta por tipo", () => {
+    const db = structuredClone(seedDB);
+    db.anotacoes_pessoas = [];
+    adicionarAnotacaoPessoa(db, {
+      id: "a1",
+      pessoa_id: "pes-gerente",
+      texto: "e",
+      tipo: "elogio",
+      data: "2026-08-01",
+    });
+    adicionarAnotacaoPessoa(db, {
+      id: "a2",
+      pessoa_id: "pes-gerente",
+      texto: "av",
+      tipo: "aviso",
+      data: "2026-08-02",
+    });
+    adicionarAnotacaoPessoa(db, {
+      id: "a3",
+      pessoa_id: "pes-gerente",
+      texto: "o",
+      tipo: "observacao",
+      data: "2026-08-03",
+    });
+    const lista = listarAnotacoesPessoa(db, "pes-gerente");
+    expect(parseFiltroTipoAnotacaoPessoa("aviso")).toBe("aviso");
+    expect(parseFiltroTipoAnotacaoPessoa("xyz")).toBe("todas");
+    expect(filtrarAnotacoesPorTipo(lista, "aviso").map((a) => a.id)).toEqual(["a2"]);
+    expect(filtrarAnotacoesPorTipo(lista, "todas")).toHaveLength(3);
+    expect(contarAnotacoesPorTipo(lista)).toEqual({ elogio: 1, aviso: 1, observacao: 1 });
   });
 });

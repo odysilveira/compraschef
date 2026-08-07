@@ -10,12 +10,16 @@ import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
 import {
   adicionarAnotacaoPessoa,
+  contarAnotacoesPorTipo,
   corBadgeTipoAnotacao,
   editarAnotacaoPessoa,
   excluirAnotacaoPessoa,
+  filtrarAnotacoesPorTipo,
   listarAnotacoesPessoa,
+  parseFiltroTipoAnotacaoPessoa,
   rotuloTipoAnotacaoPessoa,
   TIPOS_ANOTACAO_PESSOA,
+  type FiltroTipoAnotacaoPessoa,
 } from "@/lib/domain/anotacoes-pessoa";
 import type { TipoAnotacaoPessoaRh } from "@/lib/types";
 import {
@@ -101,6 +105,9 @@ function RhPerfilConteudo() {
   const db = useDB();
   const podeRh = usePodeAcessarModulo("rh");
   const [aba, setAba] = useState<AbaPerfilRh>(() => parseAbaPerfilRh(searchParams.get("aba")));
+  const [filtroTipoAnotacao, setFiltroTipoAnotacao] = useState<FiltroTipoAnotacaoPessoa>(() =>
+    parseFiltroTipoAnotacaoPessoa(searchParams.get("tipo"))
+  );
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [form, setForm] = useState<PessoaRH | null>(null);
@@ -150,6 +157,14 @@ function RhPerfilConteudo() {
     () => (pessoa ? listarAnotacoesPessoa(db, pessoa.id) : []),
     [db, pessoa]
   );
+  const contagemAnotacoesPorTipo = useMemo(
+    () => contarAnotacoesPorTipo(anotacoesPessoa),
+    [anotacoesPessoa]
+  );
+  const anotacoesFiltradas = useMemo(
+    () => filtrarAnotacoesPorTipo(anotacoesPessoa, filtroTipoAnotacao),
+    [anotacoesPessoa, filtroTipoAnotacao]
+  );
   const porDiaPessoa = useMemo(() => {
     const map = new Map<string, typeof plantaoesPessoa>();
     for (const dia of diasJanela) map.set(dia, []);
@@ -180,12 +195,29 @@ function RhPerfilConteudo() {
 
   useEffect(() => {
     setAba(parseAbaPerfilRh(searchParams.get("aba")));
+    setFiltroTipoAnotacao(parseFiltroTipoAnotacaoPessoa(searchParams.get("tipo")));
   }, [searchParams]);
+
+  function hrefAbaPerfil(proximaAba: AbaPerfilRh, filtroTipo: FiltroTipoAnotacaoPessoa = "todas") {
+    const base = `/rh/${params.id}`;
+    const q = new URLSearchParams();
+    if (proximaAba !== "dados") q.set("aba", proximaAba);
+    if (proximaAba === "anotacoes" && filtroTipo !== "todas") q.set("tipo", filtroTipo);
+    const qs = q.toString();
+    return qs ? `${base}?${qs}` : base;
+  }
 
   function irParaAba(proxima: AbaPerfilRh) {
     setAba(proxima);
-    const base = `/rh/${params.id}`;
-    router.replace(proxima === "dados" ? base : `${base}?aba=${proxima}`, { scroll: false });
+    const filtroTipo = proxima === "anotacoes" ? filtroTipoAnotacao : "todas";
+    if (proxima !== "anotacoes") setFiltroTipoAnotacao("todas");
+    router.replace(hrefAbaPerfil(proxima, filtroTipo), { scroll: false });
+  }
+
+  function irParaFiltroTipoAnotacao(proximo: FiltroTipoAnotacaoPessoa) {
+    setFiltroTipoAnotacao(proximo);
+    setAba("anotacoes");
+    router.replace(hrefAbaPerfil("anotacoes", proximo), { scroll: false });
   }
 
   if (!podeRh) {
@@ -1774,11 +1806,40 @@ function RhPerfilConteudo() {
 
           <Card className="space-y-3">
             <h2 className="text-base font-bold">Histórico</h2>
-            {anotacoesPessoa.length === 0 ? (
-              <Vazio mensagem="Nenhuma anotação neste perfil." />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={`btn-secundario text-sm ${
+                  filtroTipoAnotacao === "todas" ? "border-primaria bg-primaria-clara text-primaria" : ""
+                }`}
+                onClick={() => irParaFiltroTipoAnotacao("todas")}
+              >
+                Todas ({anotacoesPessoa.length})
+              </button>
+              {TIPOS_ANOTACAO_PESSOA.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`btn-secundario text-sm ${
+                    filtroTipoAnotacao === t.id ? "border-primaria bg-primaria-clara text-primaria" : ""
+                  }`}
+                  onClick={() => irParaFiltroTipoAnotacao(t.id)}
+                >
+                  {t.rotulo} ({contagemAnotacoesPorTipo[t.id]})
+                </button>
+              ))}
+            </div>
+            {anotacoesFiltradas.length === 0 ? (
+              <Vazio
+                mensagem={
+                  anotacoesPessoa.length === 0
+                    ? "Nenhuma anotação neste perfil."
+                    : "Nenhuma anotação neste tipo."
+                }
+              />
             ) : (
               <div className="space-y-2">
-                {anotacoesPessoa.map((anotacao) => (
+                {anotacoesFiltradas.map((anotacao) => (
                   <div
                     key={anotacao.id}
                     className={`rounded-lg border px-3 py-2 ${

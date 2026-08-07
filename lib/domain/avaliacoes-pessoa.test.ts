@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { seedDB } from "../data/seed";
 import {
   adicionarAvaliacaoPessoa,
+  contarAvaliacoesPorNota,
   editarAvaliacaoPessoa,
   excluirAvaliacaoPessoa,
+  filtrarAvaliacoesPorNota,
   formatarMediaAvaliacao,
   listarAvaliacoesPessoa,
+  parseFiltroNotaAvaliacaoPessoa,
   resumirAvaliacoesPessoa,
   rotuloCompetenciaAvaliacao,
 } from "./avaliacoes-pessoa";
@@ -158,5 +161,34 @@ describe("avaliações de pessoa (RH)", () => {
     expect(resumo.ultimaNota).toBe(5);
     expect(resumo.ultimaCompetencia).toBe("2026-08");
     expect(formatarMediaAvaliacao(4.5)).toBe("4,5");
+  });
+
+  it("filtra e conta por nota", () => {
+    const db = structuredClone(seedDB);
+    db.avaliacoes_pessoas = [];
+    adicionarAvaliacaoPessoa(db, {
+      id: "n1",
+      pessoa_id: "pes-gerente",
+      competencia: "2026-06",
+      nota: 5,
+    });
+    adicionarAvaliacaoPessoa(db, {
+      id: "n2",
+      pessoa_id: "pes-gerente",
+      competencia: "2026-07",
+      nota: 3,
+    });
+    adicionarAvaliacaoPessoa(db, {
+      id: "n3",
+      pessoa_id: "pes-gerente",
+      competencia: "2026-08",
+      nota: 5,
+    });
+    const lista = listarAvaliacoesPessoa(db, "pes-gerente");
+    expect(parseFiltroNotaAvaliacaoPessoa("5")).toBe(5);
+    expect(parseFiltroNotaAvaliacaoPessoa("9")).toBe("todas");
+    expect(filtrarAvaliacoesPorNota(lista, 5).map((a) => a.id)).toEqual(["n3", "n1"]);
+    expect(filtrarAvaliacoesPorNota(lista, "todas")).toHaveLength(3);
+    expect(contarAvaliacoesPorNota(lista)).toEqual({ 1: 0, 2: 0, 3: 1, 4: 0, 5: 2 });
   });
 });

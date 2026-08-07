@@ -23,14 +23,18 @@ import {
 } from "@/lib/domain/anotacoes-pessoa";
 import {
   adicionarAvaliacaoPessoa,
+  contarAvaliacoesPorNota,
   corBadgeNotaAvaliacao,
   editarAvaliacaoPessoa,
   excluirAvaliacaoPessoa,
+  filtrarAvaliacoesPorNota,
   formatarMediaAvaliacao,
   listarAvaliacoesPessoa,
   NOTAS_AVALIACAO_PESSOA,
+  parseFiltroNotaAvaliacaoPessoa,
   resumirAvaliacoesPessoa,
   rotuloCompetenciaAvaliacao,
+  type FiltroNotaAvaliacaoPessoa,
 } from "@/lib/domain/avaliacoes-pessoa";
 import type { NotaAvaliacaoPessoaRh, TipoAnotacaoPessoaRh } from "@/lib/types";
 import {
@@ -119,6 +123,9 @@ function RhPerfilConteudo() {
   const [filtroTipoAnotacao, setFiltroTipoAnotacao] = useState<FiltroTipoAnotacaoPessoa>(() =>
     parseFiltroTipoAnotacaoPessoa(searchParams.get("tipo"))
   );
+  const [filtroNotaAvaliacao, setFiltroNotaAvaliacao] = useState<FiltroNotaAvaliacaoPessoa>(() =>
+    parseFiltroNotaAvaliacaoPessoa(searchParams.get("nota"))
+  );
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [form, setForm] = useState<PessoaRH | null>(null);
@@ -189,6 +196,14 @@ function RhPerfilConteudo() {
     () => resumirAvaliacoesPessoa(avaliacoesPessoa),
     [avaliacoesPessoa]
   );
+  const contagemAvaliacoesPorNota = useMemo(
+    () => contarAvaliacoesPorNota(avaliacoesPessoa),
+    [avaliacoesPessoa]
+  );
+  const avaliacoesFiltradas = useMemo(
+    () => filtrarAvaliacoesPorNota(avaliacoesPessoa, filtroNotaAvaliacao),
+    [avaliacoesPessoa, filtroNotaAvaliacao]
+  );
   const porDiaPessoa = useMemo(() => {
     const map = new Map<string, typeof plantaoesPessoa>();
     for (const dia of diasJanela) map.set(dia, []);
@@ -220,13 +235,22 @@ function RhPerfilConteudo() {
   useEffect(() => {
     setAba(parseAbaPerfilRh(searchParams.get("aba")));
     setFiltroTipoAnotacao(parseFiltroTipoAnotacaoPessoa(searchParams.get("tipo")));
+    setFiltroNotaAvaliacao(parseFiltroNotaAvaliacaoPessoa(searchParams.get("nota")));
   }, [searchParams]);
 
-  function hrefAbaPerfil(proximaAba: AbaPerfilRh, filtroTipo: FiltroTipoAnotacaoPessoa = "todas") {
+  function hrefAbaPerfil(
+    proximaAba: AbaPerfilRh,
+    opts?: { tipo?: FiltroTipoAnotacaoPessoa; nota?: FiltroNotaAvaliacaoPessoa }
+  ) {
     const base = `/rh/${params.id}`;
     const q = new URLSearchParams();
     if (proximaAba !== "dados") q.set("aba", proximaAba);
-    if (proximaAba === "anotacoes" && filtroTipo !== "todas") q.set("tipo", filtroTipo);
+    if (proximaAba === "anotacoes" && opts?.tipo && opts.tipo !== "todas") {
+      q.set("tipo", opts.tipo);
+    }
+    if (proximaAba === "avaliacoes" && opts?.nota && opts.nota !== "todas") {
+      q.set("nota", String(opts.nota));
+    }
     const qs = q.toString();
     return qs ? `${base}?${qs}` : base;
   }
@@ -234,14 +258,26 @@ function RhPerfilConteudo() {
   function irParaAba(proxima: AbaPerfilRh) {
     setAba(proxima);
     const filtroTipo = proxima === "anotacoes" ? filtroTipoAnotacao : "todas";
+    const filtroNota = proxima === "avaliacoes" ? filtroNotaAvaliacao : "todas";
     if (proxima !== "anotacoes") setFiltroTipoAnotacao("todas");
-    router.replace(hrefAbaPerfil(proxima, filtroTipo), { scroll: false });
+    if (proxima !== "avaliacoes") setFiltroNotaAvaliacao("todas");
+    router.replace(hrefAbaPerfil(proxima, { tipo: filtroTipo, nota: filtroNota }), {
+      scroll: false,
+    });
   }
 
   function irParaFiltroTipoAnotacao(proximo: FiltroTipoAnotacaoPessoa) {
     setFiltroTipoAnotacao(proximo);
+    setFiltroNotaAvaliacao("todas");
     setAba("anotacoes");
-    router.replace(hrefAbaPerfil("anotacoes", proximo), { scroll: false });
+    router.replace(hrefAbaPerfil("anotacoes", { tipo: proximo }), { scroll: false });
+  }
+
+  function irParaFiltroNotaAvaliacao(proximo: FiltroNotaAvaliacaoPessoa) {
+    setFiltroNotaAvaliacao(proximo);
+    setFiltroTipoAnotacao("todas");
+    setAba("avaliacoes");
+    router.replace(hrefAbaPerfil("avaliacoes", { nota: proximo }), { scroll: false });
   }
 
   if (!podeRh) {
@@ -2069,11 +2105,40 @@ function RhPerfilConteudo() {
                 )}
               </div>
             )}
-            {avaliacoesPessoa.length === 0 ? (
-              <Vazio mensagem="Nenhuma avaliação neste perfil." />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={`btn-secundario text-sm ${
+                  filtroNotaAvaliacao === "todas" ? "border-primaria bg-primaria-clara text-primaria" : ""
+                }`}
+                onClick={() => irParaFiltroNotaAvaliacao("todas")}
+              >
+                Todas ({avaliacoesPessoa.length})
+              </button>
+              {NOTAS_AVALIACAO_PESSOA.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className={`btn-secundario text-sm ${
+                    filtroNotaAvaliacao === n ? "border-primaria bg-primaria-clara text-primaria" : ""
+                  }`}
+                  onClick={() => irParaFiltroNotaAvaliacao(n)}
+                >
+                  Nota {n} ({contagemAvaliacoesPorNota[n]})
+                </button>
+              ))}
+            </div>
+            {avaliacoesFiltradas.length === 0 ? (
+              <Vazio
+                mensagem={
+                  avaliacoesPessoa.length === 0
+                    ? "Nenhuma avaliação neste perfil."
+                    : "Nenhuma avaliação com esta nota."
+                }
+              />
             ) : (
               <div className="space-y-2">
-                {avaliacoesPessoa.map((avaliacao) => (
+                {avaliacoesFiltradas.map((avaliacao) => (
                   <div
                     key={avaliacao.id}
                     className={`rounded-lg border px-3 py-2 ${

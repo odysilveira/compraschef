@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Download, FileUp, Save, Trash2, Users } from "lucide-react";
+import { ArrowLeft, Copy, Download, FileUp, Save, Trash2, Users } from "lucide-react";
 import { Badge, Campo, Card, TituloPagina, Vazio } from "@/components/ui";
 import { mutate, useDB } from "@/lib/data";
 import {
@@ -45,6 +45,12 @@ import {
   rotuloStatusPagamentoPessoa,
   rotuloTipoPagamentoPessoa,
 } from "@/lib/domain/pagamentos-pessoas";
+import {
+  chavePixDaPessoa,
+  linkWhatsAppReciboPagamento,
+  montarTextoConfirmacaoRecebimento,
+  montarTextoReciboPagamentoPessoa,
+} from "@/lib/domain/recibo-pagamento-pessoa";
 import { hrefConsumosRh, hrefEscalaRh, filtroConsumosRhDeStatus, filtroPagamentosRhDeStatus, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
   FUNCOES_OPERACIONAIS,
@@ -66,6 +72,7 @@ import type {
   DocumentoPessoa,
   FuncaoOperacional,
   ModuloAcesso,
+  PagamentoPessoa,
   Papel,
   PessoaRH,
   TipoPessoaRH,
@@ -302,6 +309,76 @@ function RhPerfilConteudo() {
     URL.revokeObjectURL(url);
     setMensagem("CSV baixado (checklist desta pessoa).");
     setErro(null);
+  }
+
+  async function copiarChavePixPerfil() {
+    const chave = chavePixDaPessoa(pessoa ?? undefined);
+    if (!chave) {
+      setErro("Esta pessoa não tem chave PIX cadastrada.");
+      setMensagem(null);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(chave);
+      setErro(null);
+      setMensagem(`PIX de ${pessoa?.nome ?? "pessoa"} copiado.`);
+    } catch {
+      setErro("Não foi possível copiar a chave PIX neste navegador.");
+    }
+  }
+
+  async function copiarReciboPerfil(
+    pagamento: PagamentoPessoa,
+    variante: "recibo" | "confirmacao"
+  ) {
+    if (!pessoa) return;
+    const texto =
+      variante === "confirmacao"
+        ? montarTextoConfirmacaoRecebimento({ pessoa, pagamento })
+        : montarTextoReciboPagamentoPessoa({
+            pessoa,
+            pagamento,
+            consumos: db.consumos_pessoas ?? [],
+          });
+    try {
+      await navigator.clipboard.writeText(texto);
+      setErro(null);
+      setMensagem(
+        variante === "confirmacao"
+          ? "Confirmação copiada — envie para responder no WhatsApp."
+          : "Recibo discriminado copiado — pode colar no WhatsApp ou arquivar."
+      );
+    } catch {
+      setErro("Não foi possível copiar neste navegador.");
+    }
+  }
+
+  function abrirWhatsAppReciboPerfil(
+    pagamento: PagamentoPessoa,
+    variante: "recibo" | "confirmacao"
+  ) {
+    if (!pessoa) return;
+    const texto =
+      variante === "confirmacao"
+        ? montarTextoConfirmacaoRecebimento({ pessoa, pagamento })
+        : montarTextoReciboPagamentoPessoa({
+            pessoa,
+            pagamento,
+            consumos: db.consumos_pessoas ?? [],
+          });
+    const url = linkWhatsAppReciboPagamento(pessoa.telefone, texto);
+    if (!url) {
+      setErro("Cadastre o telefone desta pessoa nos dados para abrir o WhatsApp.");
+      setMensagem(null);
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+    setErro(null);
+    setMensagem(
+      variante === "confirmacao"
+        ? "WhatsApp aberto com a confirmação."
+        : "WhatsApp aberto com o recibo."
+    );
   }
 
   function salvarDados(e: FormEvent) {
@@ -1149,27 +1226,77 @@ function RhPerfilConteudo() {
                   key={pagamento.id}
                   className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
                 >
-                  <div>
-                    <p className="font-semibold text-slate-900">
-                      {rotuloTipoPagamentoPessoa(pagamento.tipo)}
-                      {pagamento.descricao ? ` · ${pagamento.descricao}` : ""}
-                    </p>
-                    <p className="text-lg font-bold">{moeda(pagamento.pagamento_valor ?? pagamento.valor)}</p>
-                    <p className="text-xs text-slate-500">
-                      Venc. {dataBR(pagamento.vencimento)}
-                      {pagamento.competencia ? ` · ${pagamento.competencia}` : ""}
-                    </p>
-                    <Link
-                      href={hrefPagamentosRh({
-                        filtro: filtroPagamentosRhDeStatus(pagamento.status),
-                        pessoa: pessoa.id,
-                        competencia: pagamento.competencia || undefined,
-                        tipo: pagamento.tipo,
-                      })}
-                      className="mt-1 inline-block text-sm text-primaria-escura underline"
-                    >
-                      Ver na lista
-                    </Link>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        {rotuloTipoPagamentoPessoa(pagamento.tipo)}
+                        {pagamento.descricao ? ` · ${pagamento.descricao}` : ""}
+                      </p>
+                      <p className="text-lg font-bold">{moeda(pagamento.pagamento_valor ?? pagamento.valor)}</p>
+                      <p className="text-xs text-slate-500">
+                        Venc. {dataBR(pagamento.vencimento)}
+                        {pagamento.competencia ? ` · ${pagamento.competencia}` : ""}
+                      </p>
+                      <Link
+                        href={hrefPagamentosRh({
+                          filtro: filtroPagamentosRhDeStatus(pagamento.status),
+                          pessoa: pessoa.id,
+                          competencia: pagamento.competencia || undefined,
+                          tipo: pagamento.tipo,
+                        })}
+                        className="mt-1 inline-block text-sm text-primaria-escura underline"
+                      >
+                        Ver na lista
+                      </Link>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(pagamento.status === "previsto" || pagamento.status === "liberado") &&
+                        chavePixDaPessoa(pessoa) && (
+                          <button
+                            type="button"
+                            className="btn-secundario text-sm"
+                            onClick={() => void copiarChavePixPerfil()}
+                            title="Copia a chave PIX cadastrada no perfil"
+                          >
+                            <Copy size={14} /> Copiar PIX
+                          </button>
+                        )}
+                      {(pagamento.status === "aguardando_conciliacao" ||
+                        pagamento.status === "pago") && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn-secundario text-sm"
+                            onClick={() => void copiarReciboPerfil(pagamento, "recibo")}
+                          >
+                            <Copy size={14} /> Copiar recibo
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secundario text-sm"
+                            onClick={() => abrirWhatsAppReciboPerfil(pagamento, "recibo")}
+                            title="Abre o WhatsApp com o recibo"
+                          >
+                            WhatsApp recibo
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secundario text-sm"
+                            onClick={() => void copiarReciboPerfil(pagamento, "confirmacao")}
+                          >
+                            <Copy size={14} /> Confirmação
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secundario text-sm"
+                            onClick={() => abrirWhatsAppReciboPerfil(pagamento, "confirmacao")}
+                            title="Abre o WhatsApp com a confirmação"
+                          >
+                            WhatsApp confirmação
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <Badge
                     cor={

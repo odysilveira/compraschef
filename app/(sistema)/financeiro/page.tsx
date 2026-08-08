@@ -115,14 +115,13 @@ import {
   montarTextosWhatsAppRecibosPagamentoLote,
   linkWhatsAppReciboPagamento,
 } from "@/lib/domain/recibo-pagamento-pessoa";
-import { parseOfx } from "@/lib/domain/extrato-ofx";
-import {
-  aplicarMatchesExtrato,
-  sugerirMatchesExtrato,
-  type SugestaoMatchExtrato,
-} from "@/lib/domain/conciliar-extrato";
 import { SeletorContaOrigem } from "@/components/financeiro/SeletorContaOrigem";
+import AbaExtratoBancario from "@/components/financeiro/AbaExtratoBancario";
 import { contaPadraoOrigem } from "@/lib/domain/contas-pagamento";
+import {
+  importarExtratoCsv,
+  importarExtratoOfx,
+} from "@/lib/domain/extrato-persistido";
 import {
   CLASSE_CAIXA_CODIGO_SEM_ROLAGEM,
   CLASSE_GRID_CODIGO_PAGAMENTO,
@@ -566,8 +565,7 @@ function FinanceiroConteudo() {
   const [formDivergenciaBoleto, setFormDivergenciaBoleto] = useState<FormDivergenciaBoletoState>(novaDivergenciaBoletoInicial());
   const [erroDivergenciaBoleto, setErroDivergenciaBoleto] = useState<string | null>(null);
   const [modalExtratoOfxAberto, setModalExtratoOfxAberto] = useState(false);
-  const [sugestoesExtrato, setSugestoesExtrato] = useState<SugestaoMatchExtrato[]>([]);
-  const [selecionadosExtrato, setSelecionadosExtrato] = useState<Record<string, boolean>>({});
+  const [contaImportacaoExtratoId, setContaImportacaoExtratoId] = useState("");
   const [erroExtratoOfx, setErroExtratoOfx] = useState<string | null>(null);
   const [processandoExtratoOfx, setProcessandoExtratoOfx] = useState(false);
   const [processandoDivergenciaBoleto, setProcessandoDivergenciaBoleto] = useState(false);
@@ -777,89 +775,60 @@ function FinanceiroConteudo() {
 
   function abrirImportarExtratoOfx() {
     setModalExtratoOfxAberto(true);
-    setSugestoesExtrato([]);
-    setSelecionadosExtrato({});
+    const padrao =
+      (db.contas_bancarias ?? []).find((c) => c.ativa && c.padrao)?.id ??
+      (db.contas_bancarias ?? []).find((c) => c.ativa)?.id ??
+      "";
+    setContaImportacaoExtratoId(padrao);
     setErroExtratoOfx(null);
   }
 
   function fecharImportarExtratoOfx() {
     if (processandoExtratoOfx) return;
     setModalExtratoOfxAberto(false);
-    setSugestoesExtrato([]);
-    setSelecionadosExtrato({});
     setErroExtratoOfx(null);
   }
 
-  async function aoEscolherArquivoOfx(event: ChangeEvent<HTMLInputElement>) {
+  async function aoEscolherArquivoExtrato(event: ChangeEvent<HTMLInputElement>) {
     const arquivo = event.target.files?.[0];
     event.target.value = "";
     if (!arquivo) return;
     setErroExtratoOfx(null);
+    setProcessandoExtratoOfx(true);
     try {
       const texto = await arquivo.text();
-      const parseado = parseOfx(texto);
-      if (!parseado.ok) {
-        setErroExtratoOfx(parseado.erro);
-        setSugestoesExtrato([]);
-        return;
-      }
-      const sugestoes = sugerirMatchesExtrato(db, parseado.linhas);
-      setSugestoesExtrato(sugestoes);
-      const sel: Record<string, boolean> = {};
-      for (const s of sugestoes) {
-        if (s.alvo_id && (s.confianca === "exata" || s.confianca === "proxima")) {
-          sel[`${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.alvo}-${s.alvo_id}`] = s.confianca === "exata";
-        }
-      }
-      setSelecionadosExtrato(sel);
-      if (!sugestoes.some((s) => s.alvo_id)) {
-        setErroExtratoOfx("Extrato lido, mas nenhum débito casou com boleto ou pagamento RH aguardando conciliação.");
-      }
-    } catch {
-      setErroExtratoOfx("Não foi possível ler o arquivo.");
-    }
-  }
-
-  function confirmarExtratoOfx() {
-    if (processandoExtratoOfx) return;
-    const matches = sugestoesExtrato
-      .filter((s) => {
-        if (!s.alvo || !s.alvo_id) return false;
-        const chave = `${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.alvo}-${s.alvo_id}`;
-        return selecionadosExtrato[chave];
-      })
-      .map((s) => ({
-        alvo: s.alvo!,
-        alvo_id: s.alvo_id!,
-        dataLiquidacao: s.linha.data,
-        observacao: `OFX: ${s.linha.descricao}`.slice(0, 200),
-      }));
-    if (matches.length === 0) {
-      setErroExtratoOfx("Selecione ao menos um match para conciliar.");
-      return;
-    }
-    setProcessandoExtratoOfx(true);
-    setErroExtratoOfx(null);
-    try {
+      const nome = arquivo.name || "extrato";
+      const ehCsv = /\.csv$/i.test(nome) || arquivo.type.includes("csv");
       const proximo = structuredClone(db) as DB;
-      const resultado = aplicarMatchesExtrato(proximo, matches, {
-        responsavel: "usuário local",
-        idFactory: () => uid("bph"),
-      });
-      if (resultado.conciliados === 0) {
-        setErroExtratoOfx(resultado.erros.join(" ") || "Nenhum título foi conciliado.");
+      const resultado = ehCsv
+        ? importarExtratoCsv(proximo, texto, {
+            arquivo_nome: nome,
+            conta_bancaria_id: contaImportacaoExtratoId || undefined,
+            idFactory: () => uid("ext"),
+          })
+        : importarExtratoOfx(proximo, texto, {
+            arquivo_nome: nome,
+            conta_bancaria_id: contaImportacaoExtratoId || undefined,
+            idFactory: () => uid("ext"),
+          });
+      if (!resultado.sucesso) {
+        setErroExtratoOfx(resultado.erros.join(" ") || "Falha ao importar extrato.");
         return;
       }
       mutate((atual) => {
         Object.assign(atual, proximo);
       });
       setModalExtratoOfxAberto(false);
-      setSugestoesExtrato([]);
-      setSelecionadosExtrato({});
       setMensagemReceberBoleto(
-        `${resultado.conciliados} título(s) conciliado(s) pelo extrato OFX (boletos e/ou RH).` +
-          (resultado.erros.length ? ` Alguns falharam: ${resultado.erros[0]}` : "")
+        `Extrato importado: ${resultado.criadas} linha(s)` +
+          (resultado.ignoradas_duplicadas
+            ? ` (${resultado.ignoradas_duplicadas} duplicada(s) ignorada(s))`
+            : "") +
+          ". Revise os débitos abertos na aba Extrato."
       );
+      irParaFinanceiro({ aba: "extrato" });
+    } catch {
+      setErroExtratoOfx("Não foi possível ler o arquivo.");
     } finally {
       setProcessandoExtratoOfx(false);
     }
@@ -2629,6 +2598,13 @@ function FinanceiroConteudo() {
         >
           Notas fiscais
         </button>
+        <button
+          type="button"
+          className={`btn-secundario ${abaFinanceira === "extrato" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
+          onClick={() => irParaFinanceiro({ aba: "extrato" })}
+        >
+          Extrato
+        </button>
       </div>
 
       {abaFinanceira === "boletos" ? (
@@ -2672,7 +2648,7 @@ function FinanceiroConteudo() {
                   : ""}
               </button>
               <button type="button" className="btn-secundario" onClick={abrirImportarExtratoOfx}>
-                <Upload size={18} /> Importar extrato OFX
+                <Upload size={18} /> Importar extrato
               </button>
               <button type="button" className="btn-primario" onClick={() => abrirImportarBoleto()}>
                 <Upload size={18} /> Importar boleto
@@ -2959,6 +2935,14 @@ function FinanceiroConteudo() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="rotulo text-blue-700">Aguardando conciliação</p>
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-secundario text-sm"
+                    onClick={() => irParaFinanceiro({ aba: "extrato" })}
+                    title="Abrir extrato persistido para casar débitos"
+                  >
+                    <Upload size={14} /> Conciliar via extrato
+                  </button>
                   {boletosAguardandoConciliacao.length > 0 && (
                     <button
                       type="button"
@@ -3312,7 +3296,7 @@ function FinanceiroConteudo() {
             </>
           )}
         </section>
-      ) : (
+      ) : abaFinanceira === "notas" ? (
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -3500,7 +3484,12 @@ function FinanceiroConteudo() {
             </>
           )}
         </section>
-      )}
+      ) : abaFinanceira === "extrato" ? (
+        <AbaExtratoBancario
+          onMensagem={setMensagemReceberBoleto}
+          onAbrirImportar={abrirImportarExtratoOfx}
+        />
+      ) : null}
 
       {/* Confirmação "Liberar mesmo assim" */}
       <Modal
@@ -3532,76 +3521,49 @@ function FinanceiroConteudo() {
 
       <Modal
         aberto={modalExtratoOfxAberto}
-        titulo="Importar extrato OFX"
+        titulo="Importar extrato"
         onFechar={fecharImportarExtratoOfx}
         fecharAoClicarFundo={false}
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
-            Exporte o extrato em OFX no internet banking e envie aqui. O ComprasChef sugere casar débitos com boletos e
-            pagamentos de RH em <span className="font-semibold">aguardando conciliação</span> (valor, data e banco
-            informado).
+            Envie um arquivo <span className="font-semibold">OFX</span> ou <span className="font-semibold">CSV</span>{" "}
+            (data, valor, descrição). As linhas ficam salvas na aba Extrato para você revisar e conciliar com boletos e
+            pagamentos RH em aguardando conciliação.
           </p>
           <label className="block">
-            <span className="rotulo mb-1 block">Arquivo OFX</span>
+            <span className="rotulo mb-1 block">Conta do extrato (opcional)</span>
+            <select
+              className="input w-full"
+              value={contaImportacaoExtratoId}
+              disabled={processandoExtratoOfx}
+              onChange={(e) => setContaImportacaoExtratoId(e.target.value)}
+            >
+              <option value="">— sem vincular conta —</option>
+              {(db.contas_bancarias ?? [])
+                .filter((c) => c.ativa)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.banco}
+                    {c.apelido ? ` — ${c.apelido}` : ""}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="rotulo mb-1 block">Arquivo OFX ou CSV</span>
             <input
               type="file"
-              accept=".ofx,.OFX,application/x-ofx,application/ofx,text/xml"
+              accept=".ofx,.OFX,.csv,.CSV,application/x-ofx,application/ofx,text/xml,text/csv"
               className="input w-full py-2"
               disabled={processandoExtratoOfx}
-              onChange={(e) => void aoEscolherArquivoOfx(e)}
+              onChange={(e) => void aoEscolherArquivoExtrato(e)}
             />
           </label>
           {erroExtratoOfx && <p className="text-sm font-medium text-erro">{erroExtratoOfx}</p>}
-          {sugestoesExtrato.length > 0 && (
-            <div className="max-h-80 space-y-2 overflow-y-auto">
-              {sugestoesExtrato.map((s) => {
-                const chave = `${s.linha.fitid ?? s.linha.data}-${s.linha.valor}-${s.alvo ?? "x"}-${s.alvo_id ?? "x"}`;
-                return (
-                  <label
-                    key={chave}
-                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
-                      s.alvo_id ? "border-stone-200 bg-white" : "border-dashed border-stone-200 bg-stone-50"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      disabled={!s.alvo_id || processandoExtratoOfx}
-                      checked={Boolean(s.alvo_id && selecionadosExtrato[chave])}
-                      onChange={(e) =>
-                        setSelecionadosExtrato((atual) => ({ ...atual, [chave]: e.target.checked }))
-                      }
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-slate-900">
-                        {dataBR(s.linha.data)} · {moeda(Math.abs(s.linha.valor))} · {s.linha.descricao}
-                      </span>
-                      {s.alvo_id ? (
-                        <span className="block text-xs text-slate-600">
-                          → {s.rotulo_alvo} ({s.confianca === "exata" ? "match exato" : "match próximo"}
-                          {s.motivos.length ? ` · ${s.motivos.join(", ")}` : ""})
-                        </span>
-                      ) : (
-                        <span className="block text-xs text-slate-500">Sem correspondente</span>
-                      )}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          )}
           <div className="flex flex-wrap justify-end gap-2">
             <button type="button" className="btn-secundario" onClick={fecharImportarExtratoOfx} disabled={processandoExtratoOfx}>
               Cancelar
-            </button>
-            <button
-              type="button"
-              className="btn-primario"
-              disabled={processandoExtratoOfx || !sugestoesExtrato.some((s) => s.alvo_id)}
-              onClick={confirmarExtratoOfx}
-            >
-              {processandoExtratoOfx ? "Conciliando…" : "Conciliar selecionados"}
             </button>
           </div>
         </div>

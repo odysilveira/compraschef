@@ -689,6 +689,48 @@ export interface ContaBancariaRestaurante {
   atualizado_em: string;
 }
 
+/** Origem do arquivo de extrato bancário. */
+export type OrigemExtrato = "ofx" | "csv";
+
+/** Status da linha persistida do extrato. */
+export type StatusExtratoLinha = "aberta" | "conciliada" | "ignorada";
+
+/** Alvo de conciliação a partir de um débito do extrato. */
+export type AlvoExtratoLinha = "boleto" | "rh";
+
+/** Lote de importação de extrato (OFX/CSV). */
+export interface ExtratoImportacao {
+  id: string;
+  conta_bancaria_id?: string;
+  origem: OrigemExtrato;
+  arquivo_nome: string;
+  importado_em: string;
+  importado_por: string;
+  linhas_total: number;
+  debitos: number;
+}
+
+/** Movimentação persistida do extrato (não efêmera). */
+export interface ExtratoLinha {
+  id: string;
+  importacao_id: string;
+  conta_bancaria_id?: string;
+  /** YYYY-MM-DD */
+  data: string;
+  /** Valor com sinal: negativo = débito (saída). */
+  valor: number;
+  tipo: "debito" | "credito" | "outro";
+  descricao: string;
+  /** ID estável do OFX — usado para dedupe. */
+  fitid?: string;
+  status: StatusExtratoLinha;
+  alvo?: AlvoExtratoLinha;
+  alvo_id?: string;
+  conciliado_em?: string;
+  conciliado_por?: string;
+  observacao?: string;
+}
+
 /** Parâmetros de RH aplicados só após confirmar uma norma. */
 export type ParametroNormaRh = "antecedencia_minima_dias";
 
@@ -857,6 +899,10 @@ export interface DB {
   convocacoes: ConvocacaoIntermitente[];
   /** Contas de onde o restaurante paga (origem). */
   contas_bancarias: ContaBancariaRestaurante[];
+  /** Lotes de importação de extrato bancário. */
+  extrato_importacoes?: ExtratoImportacao[];
+  /** Linhas persistidas do extrato (débitos/créditos). */
+  extrato_linhas?: ExtratoLinha[];
   /** Parâmetros RH vigentes (normas + ponto). */
   config_rh?: ConfigRh;
   /** Fila de normas detectadas para revisão. */

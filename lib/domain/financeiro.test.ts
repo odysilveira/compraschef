@@ -344,6 +344,13 @@ describe("helpers de contas a pagar na tela", () => {
     expect(hrefFinanceiro({ aba: "boletos", fila: "suspeitos" })).toBe(
       "/financeiro?fila=suspeitos"
     );
+    expect(hrefFinanceiro({ aba: "extrato" })).toBe("/financeiro?aba=extrato");
+    expect(hrefFinanceiro({ aba: "extrato", extratoStatus: "abertas" })).toBe(
+      "/financeiro?aba=extrato"
+    );
+    expect(hrefFinanceiro({ aba: "extrato", extratoStatus: "todas" })).toBe(
+      "/financeiro?aba=extrato&status=todas"
+    );
     expect(hrefFinanceiro({ aba: "boletos", vencimento: "atrasadas" })).toBe(
       "/financeiro?vencimento=atrasadas"
     );
@@ -353,6 +360,7 @@ describe("helpers de contas a pagar na tela", () => {
     expect(hrefFinanceiro({ aba: "contas", fila: "aguardando" })).toBe("/financeiro?aba=contas");
 
     expect(parseAbaFinanceiro("contas")).toBe("contas");
+    expect(parseAbaFinanceiro("extrato")).toBe("extrato");
     expect(parseAbaFinanceiro("xyz")).toBe("boletos");
     expect(parseFilaAgendaFinanceiro("aguardando")).toBe("aguardando");
     expect(parseFilaAgendaFinanceiro("pagos")).toBe("pagos");

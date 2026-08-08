@@ -1062,6 +1062,55 @@ export const seedDB: DB = {
     },
   ],
 
+  // Demo da aba Extrato: 1 importação + débitos (match exato com bol-4, próximo, e sem alvo)
+  extrato_importacoes: [
+    {
+      id: "extimp-1",
+      conta_bancaria_id: "cbanc-itau",
+      origem: "ofx",
+      arquivo_nome: "extrato-demo.ofx",
+      importado_em: diasAtras(0),
+      importado_por: "Ody",
+      linhas_total: 3,
+      debitos: 3,
+    },
+  ],
+  extrato_linhas: [
+    {
+      id: "extl-1",
+      importacao_id: "extimp-1",
+      conta_bancaria_id: "cbanc-itau",
+      data: soData(diasAtras(1)),
+      valor: -150.0,
+      tipo: "debito",
+      descricao: "PIX BOLETO HORTIFRUTI ITAU",
+      fitid: "SEED-BOL4",
+      status: "aberta",
+    },
+    {
+      id: "extl-2",
+      importacao_id: "extimp-1",
+      conta_bancaria_id: "cbanc-itau",
+      data: soData(diasAtras(0)),
+      valor: -149.5,
+      tipo: "debito",
+      descricao: "TED FORNECEDOR PROXIMO",
+      fitid: "SEED-PROX",
+      status: "aberta",
+    },
+    {
+      id: "extl-3",
+      importacao_id: "extimp-1",
+      conta_bancaria_id: "cbanc-itau",
+      data: soData(diasAtras(0)),
+      valor: -88.0,
+      tipo: "debito",
+      descricao: "COMPRA CARTAO SEM TITULO",
+      fitid: "SEED-SEM",
+      status: "aberta",
+    },
+  ],
+
   recebimentos: [
     // Recebimento com divergência no tomate (Painel → Divergências)
     { id: "rec-1", pedido_id: "ped-2", nota_id: "nf-1", status: "divergente", recebido_por: "perfil-lider", recebido_em: diasAtras(5) },

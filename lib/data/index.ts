@@ -155,6 +155,16 @@ export function atualizarComNovidades(db: DB): boolean {
     mudou = true;
   }
 
+  if (!Array.isArray(db.extrato_importacoes)) {
+    db.extrato_importacoes = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.extrato_linhas)) {
+    db.extrato_linhas = [];
+    mudou = true;
+  }
+
   if (!Array.isArray(db.batidas_ponto)) {
     db.batidas_ponto = [];
     mudou = true;

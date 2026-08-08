@@ -3,7 +3,8 @@
 // Lista de Compras (requisitos 7–9): geração automática pelo estoque mínimo,
 // edição do rascunho e confirmação que dispara cotações por fornecedor.
 
-import { useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FilePlus2, Plus, Sparkles, Store, Trash2 } from "lucide-react";
 import { Badge, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
 import {
@@ -18,6 +19,13 @@ import {
   uid,
   useDB,
 } from "@/lib/data";
+import {
+  FILTROS_STATUS_LISTA_COMPRAS_UI,
+  filtrarListasComprasPorStatus,
+  hrefListaCompras,
+  parseFiltroStatusListaCompras,
+  type FiltroStatusListaCompras,
+} from "@/lib/domain/lista-compras-navegacao";
 import { usePapel } from "@/lib/roles";
 import { dataHoraBR, qtd } from "@/lib/format";
 import type { ListaItem, StatusLista } from "@/lib/types";
@@ -29,14 +37,46 @@ const STATUS_LISTA: Record<StatusLista, { rotulo: string; cor: "verde" | "laranj
   finalizada: { rotulo: "Finalizada", cor: "verde" },
 };
 
-export default function ListaComprasPage() {
+function ListaComprasConteudo() {
   const db = useDB();
   const { papel } = usePapel();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [aviso, setAviso] = useState<string | null>(null);
   const [escolhendoLista, setEscolhendoLista] = useState<string | null>(null);
   const [selecionados, setSelecionados] = useState<Record<string, boolean>>({});
+  const [filtroStatus, setFiltroStatus] = useState<FiltroStatusListaCompras>(() =>
+    parseFiltroStatusListaCompras(searchParams.get("status"))
+  );
 
-  const listas = [...db.listas_compras].sort((a, b) => b.criada_em.localeCompare(a.criada_em));
+  useEffect(() => {
+    setFiltroStatus(parseFiltroStatusListaCompras(searchParams.get("status")));
+  }, [searchParams]);
+
+  const listasTodas = useMemo(
+    () => [...db.listas_compras].sort((a, b) => b.criada_em.localeCompare(a.criada_em)),
+    [db.listas_compras]
+  );
+  const listas = useMemo(
+    () => filtrarListasComprasPorStatus(listasTodas, filtroStatus),
+    [listasTodas, filtroStatus]
+  );
+  const contagemPorStatus = useMemo(() => {
+    const base: Record<FiltroStatusListaCompras, number> = {
+      todos: listasTodas.length,
+      rascunho: 0,
+      confirmada: 0,
+      em_cotacao: 0,
+      finalizada: 0,
+    };
+    for (const l of listasTodas) base[l.status] += 1;
+    return base;
+  }, [listasTodas]);
+
+  function irParaFiltroStatus(proximo: FiltroStatusListaCompras) {
+    setFiltroStatus(proximo);
+    router.replace(hrefListaCompras({ status: proximo }), { scroll: false });
+  }
 
   function gerarListaAutomatica() {
     const abaixo = produtosAbaixoDoMinimo(db);
@@ -217,8 +257,41 @@ export default function ListaComprasPage() {
         </div>
       )}
 
-      {listas.length === 0 ? (
+      <div className="mb-4 flex flex-wrap gap-2">
+        {FILTROS_STATUS_LISTA_COMPRAS_UI.map((f) => {
+          const ativo = filtroStatus === f.id;
+          const n = contagemPorStatus[f.id];
+          return (
+            <button
+              key={f.id}
+              type="button"
+              className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+                ativo
+                  ? "bg-primaria text-white"
+                  : "bg-stone-100 text-slate-700 hover:bg-stone-200"
+              }`}
+              onClick={() => irParaFiltroStatus(f.id)}
+              title={`Filtrar listas: ${f.rotulo}`}
+            >
+              {f.rotulo}
+              <span className={`ml-1.5 tabular-nums ${ativo ? "text-white/80" : "text-slate-500"}`}>
+                {n}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {listasTodas.length === 0 ? (
         <Vazio mensagem="Nenhuma lista de compras ainda. Use o botão acima para gerar uma automaticamente." />
+      ) : listas.length === 0 ? (
+        <Vazio
+          mensagem={
+            filtroStatus === "rascunho"
+              ? "Nenhuma lista em rascunho no momento."
+              : `Nenhuma lista com status “${STATUS_LISTA[filtroStatus as StatusLista]?.rotulo ?? filtroStatus}”.`
+          }
+        />
       ) : (
         <div className="space-y-4">
           {listas.map((lista) => {
@@ -483,5 +556,20 @@ export default function ListaComprasPage() {
           })()}
       </Modal>
     </div>
+  );
+}
+
+export default function ListaComprasPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina titulo="Lista de Compras" subtitulo="Carregando…" />
+          <p className="text-sm text-slate-500">Carregando listas…</p>
+        </div>
+      }
+    >
+      <ListaComprasConteudo />
+    </Suspense>
   );
 }

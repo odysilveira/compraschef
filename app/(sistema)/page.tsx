@@ -10,6 +10,7 @@ import {
   CircleCheckBig,
   ClipboardCheck,
   Clock,
+  FileSpreadsheet,
   FileWarning,
   Megaphone,
   MessageSquare,
@@ -29,6 +30,7 @@ import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@
 import { boletoSuspeitoAtivo, hrefFinanceiro } from "@/lib/domain/financeiro";
 import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
 import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
+import { hrefListaCompras } from "@/lib/domain/lista-compras-navegacao";
 import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
 import { hrefRecebimento } from "@/lib/domain/recebimento-navegacao";
 import { listarPrestadoresNoLimiteSemana } from "@/lib/domain/prestador-eventual";
@@ -80,10 +82,12 @@ export default function PainelPage() {
   const { papel } = usePapel();
   const financeiro = podeVerValores(papel);
   const podeRh = usePodeAcessarModulo("rh");
+  const podeListaCompras = usePodeAcessarModulo("lista_compras");
   const resumoRh = podeRh ? resumirOperacionalRh(db) : null;
   const prestadoresNoLimite = podeRh ? listarPrestadoresNoLimiteSemana(db) : [];
 
   const abaixoMinimo = produtosAbaixoDoMinimo(db).length;
+  const listasRascunho = db.listas_compras.filter((l) => l.status === "rascunho").length;
   const cotacoesAguardando = db.cotacoes.filter((c) => c.status === "enviada").length;
   const pedidosAprovacao = db.pedidos.filter((p) => p.status === "aguardando_aprovacao").length;
   const boletosVencendo = db.boletos.filter((b) => {
@@ -120,6 +124,15 @@ export default function PainelPage() {
           icone={PackageX}
           cor="vermelho"
         />
+        {podeListaCompras && (
+          <CartaoAlerta
+            href={hrefListaCompras({ status: "rascunho" })}
+            titulo="Listas de compras em rascunho"
+            numero={listasRascunho}
+            icone={FileSpreadsheet}
+            cor="laranja"
+          />
+        )}
         {financeiro && (
           <CartaoAlerta
             href={hrefCotacoes({ status: "enviada" })}

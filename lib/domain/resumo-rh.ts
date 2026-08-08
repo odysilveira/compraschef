@@ -298,6 +298,17 @@ export function parseFiltroPendenciasPontoRh(
   return "abertas";
 }
 
+/**
+ * Destino do alerta de ponto (Painel / hub RH): proposta → a avisar → abertas.
+ */
+export function filtroPontoRhPrioritario(
+  resumo: Pick<ResumoOperacionalRh, "ponto_propostas" | "ponto_a_avisar" | "ponto_abertas">
+): Extract<FiltroPendenciasPontoRh, "proposta" | "aviso" | "abertas"> {
+  if (resumo.ponto_propostas > 0) return "proposta";
+  if (resumo.ponto_a_avisar > 0) return "aviso";
+  return "abertas";
+}
+
 export function parseFiltroEspelhoPontoRh(
   valor: string | null | undefined
 ): FiltroEspelhoPonto {

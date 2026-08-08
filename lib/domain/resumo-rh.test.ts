@@ -10,6 +10,7 @@ import {
   hrefPontoRh,
   destaqueSlotFiltroConvocacao,
   filtroDocsRhPrioritario,
+  filtroPontoRhPrioritario,
   filtroPagamentosRhDeStatus,
   filtroConsumosRhDeStatus,
   parseAbaPontoRh,
@@ -242,6 +243,15 @@ describe("resumo-rh", () => {
     );
     expect(hrefPontoRh({ pessoa: "pes-1" })).toBe("/rh/ponto?pessoa=pes-1");
     expect(hrefPontoRh({ filtro: "proposta" })).toBe("/rh/ponto?filtro=proposta");
+    expect(
+      filtroPontoRhPrioritario({ ponto_propostas: 1, ponto_a_avisar: 2, ponto_abertas: 3 })
+    ).toBe("proposta");
+    expect(
+      filtroPontoRhPrioritario({ ponto_propostas: 0, ponto_a_avisar: 2, ponto_abertas: 2 })
+    ).toBe("aviso");
+    expect(
+      filtroPontoRhPrioritario({ ponto_propostas: 0, ponto_a_avisar: 0, ponto_abertas: 1 })
+    ).toBe("abertas");
     expect(parseFiltroEspelhoPontoRh("atraso")).toBe("atraso");
     expect(parseFiltroEspelhoPontoRh("saldo_negativo")).toBe("saldo_negativo");
     expect(parseFiltroEspelhoPontoRh(null)).toBe("todos");

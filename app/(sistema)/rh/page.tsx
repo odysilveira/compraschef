@@ -32,7 +32,7 @@ import {
   listarAvaliacoesPessoa,
   resumirAvaliacoesPessoa,
 } from "@/lib/domain/avaliacoes-pessoa";
-import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, filtroDocsRhPrioritario, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, filtroDocsRhPrioritario, filtroPontoRhPrioritario, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -344,12 +344,7 @@ function RhPessoasConteudo() {
         <Link
           href={hrefPontoRh({
             aba: "pendencias",
-            filtro:
-              resumoOp.ponto_propostas > 0
-                ? "proposta"
-                : resumoOp.ponto_a_avisar > 0
-                  ? "aviso"
-                  : "abertas",
+            filtro: filtroPontoRhPrioritario(resumoOp),
           })}
           className="block"
         >

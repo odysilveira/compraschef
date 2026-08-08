@@ -14,11 +14,13 @@ import {
   Megaphone,
   MessageSquare,
   PackageX,
+  ScrollText,
   ShieldAlert,
   Timer,
   TriangleAlert,
   Truck,
   UserRound,
+  Utensils,
 } from "lucide-react";
 import { Badge, Card, Vazio } from "@/components/ui";
 import CartaoAlerta from "@/components/operacao/CartaoAlerta";
@@ -33,7 +35,9 @@ import {
   filtroConvocacaoEscalaRhPrioritario,
   filtroDocsRhPrioritario,
   filtroPontoRhPrioritario,
+  hrefConsumosRh,
   hrefEscalaRh,
+  hrefNormasRh,
   hrefPagamentosRh,
   hrefPessoasRh,
   hrefPontoRh,
@@ -210,6 +214,24 @@ export default function PainelPage() {
             titulo="Prestadores no limite (2×/semana)"
             numero={prestadoresNoLimite.length}
             icone={UserRound}
+            cor="laranja"
+          />
+        )}
+        {podeRh && resumoRh && (
+          <CartaoAlerta
+            href={hrefConsumosRh("pendentes")}
+            titulo="Consumos RH pendentes de desconto"
+            numero={resumoRh.consumos_pendentes}
+            icone={Utensils}
+            cor="laranja"
+          />
+        )}
+        {podeRh && resumoRh && (
+          <CartaoAlerta
+            href={hrefNormasRh("pendente")}
+            titulo="Normas RH aguardando confirmação"
+            numero={resumoRh.normas_pendentes}
+            icone={ScrollText}
             cor="laranja"
           />
         )}

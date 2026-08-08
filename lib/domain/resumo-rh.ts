@@ -380,6 +380,21 @@ export function parseFiltroConvocacaoEscalaRh(
   return "todas";
 }
 
+/**
+ * Destino do alerta de convocações (Painel / hub RH):
+ * sem resposta → rascunho a enviar → enviada.
+ */
+export function filtroConvocacaoEscalaRhPrioritario(
+  resumo: Pick<
+    ResumoOperacionalRh,
+    "convocacoes_sem_resposta" | "convocacoes_rascunho" | "convocacoes_enviadas"
+  >
+): Extract<FiltroConvocacaoEscalaRh, "sem_resposta" | "rascunho" | "enviada"> {
+  if (resumo.convocacoes_sem_resposta > 0) return "sem_resposta";
+  if (resumo.convocacoes_rascunho > 0) return "rascunho";
+  return "enviada";
+}
+
 export function hrefEscalaRh(opts?: {
   convocacao?: FiltroConvocacaoEscalaRh;
   clt?: "sem";

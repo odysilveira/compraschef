@@ -11,6 +11,7 @@ import {
   ClipboardCheck,
   Clock,
   FileWarning,
+  Megaphone,
   MessageSquare,
   PackageX,
   ShieldAlert,
@@ -27,8 +28,10 @@ import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
 import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
 import { hrefRecebimento } from "@/lib/domain/recebimento-navegacao";
 import {
+  filtroConvocacaoEscalaRhPrioritario,
   filtroDocsRhPrioritario,
   filtroPontoRhPrioritario,
+  hrefEscalaRh,
   hrefPagamentosRh,
   hrefPessoasRh,
   hrefPontoRh,
@@ -179,6 +182,17 @@ export default function PainelPage() {
             titulo="Pendências de ponto RH"
             numero={resumoRh.ponto_abertas}
             icone={Clock}
+            cor="laranja"
+          />
+        )}
+        {podeRh && resumoRh && (
+          <CartaoAlerta
+            href={hrefEscalaRh({
+              convocacao: filtroConvocacaoEscalaRhPrioritario(resumoRh),
+            })}
+            titulo="Convocações RH a acompanhar"
+            numero={resumoRh.convocacoes_enviadas + resumoRh.convocacoes_rascunho}
+            icone={Megaphone}
             cor="laranja"
           />
         )}

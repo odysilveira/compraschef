@@ -32,7 +32,7 @@ import {
   listarAvaliacoesPessoa,
   resumirAvaliacoesPessoa,
 } from "@/lib/domain/avaliacoes-pessoa";
-import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, filtroDocsRhPrioritario, filtroPontoRhPrioritario, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, filtroConvocacaoEscalaRhPrioritario, filtroDocsRhPrioritario, filtroPontoRhPrioritario, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -369,12 +369,7 @@ function RhPessoasConteudo() {
         </Link>
         <Link
           href={hrefEscalaRh({
-            convocacao:
-              resumoOp.convocacoes_sem_resposta > 0
-                ? "sem_resposta"
-                : resumoOp.convocacoes_rascunho > 0
-                  ? "rascunho"
-                  : "enviada",
+            convocacao: filtroConvocacaoEscalaRhPrioritario(resumoOp),
           })}
           className="block"
         >

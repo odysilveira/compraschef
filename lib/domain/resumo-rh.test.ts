@@ -11,6 +11,7 @@ import {
   destaqueSlotFiltroConvocacao,
   filtroDocsRhPrioritario,
   filtroPontoRhPrioritario,
+  filtroConvocacaoEscalaRhPrioritario,
   filtroPagamentosRhDeStatus,
   filtroConsumosRhDeStatus,
   parseAbaPontoRh,
@@ -283,6 +284,27 @@ describe("resumo-rh", () => {
     expect(parseFiltroConvocacaoEscalaRh("rascunho")).toBe("rascunho");
     expect(parseFiltroConvocacaoEscalaRh("sem_resposta")).toBe("sem_resposta");
     expect(parseFiltroConvocacaoEscalaRh(null)).toBe("todas");
+    expect(
+      filtroConvocacaoEscalaRhPrioritario({
+        convocacoes_sem_resposta: 1,
+        convocacoes_rascunho: 2,
+        convocacoes_enviadas: 3,
+      })
+    ).toBe("sem_resposta");
+    expect(
+      filtroConvocacaoEscalaRhPrioritario({
+        convocacoes_sem_resposta: 0,
+        convocacoes_rascunho: 2,
+        convocacoes_enviadas: 3,
+      })
+    ).toBe("rascunho");
+    expect(
+      filtroConvocacaoEscalaRhPrioritario({
+        convocacoes_sem_resposta: 0,
+        convocacoes_rascunho: 0,
+        convocacoes_enviadas: 1,
+      })
+    ).toBe("enviada");
     expect(hrefEscalaRh()).toBe("/rh/escala");
     expect(hrefEscalaRh({ convocacao: "enviada" })).toBe("/rh/escala?convocacao=enviada");
     expect(hrefEscalaRh({ convocacao: "rascunho" })).toBe("/rh/escala?convocacao=rascunho");

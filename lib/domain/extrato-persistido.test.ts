@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   aplicarMatchesLinhasPersistidas,
   contarDebitosExtratoAbertos,
+  contarTitulosAguardandoConciliacao,
   filtrarLinhasExtrato,
   ignorarLinhasExtrato,
   importarExtratoOfx,
+  listarImportacoesExtrato,
+  rotuloOrigemExtrato,
   sugerirMatchesLinhasPersistidas,
+  ultimaImportacaoExtrato,
 } from "./extrato-persistido";
 import type { Boleto, DB, PagamentoPessoa } from "../types";
 
@@ -153,5 +157,19 @@ describe("extrato persistido", () => {
     expect(r.ignoradas).toBe(1);
     expect(debito!.status).toBe("ignorada");
     expect(db.boletos[0]?.status).toBe("aguardando_conciliacao");
+  });
+
+  it("lista importações e conta títulos aguardando", () => {
+    const db = dbBase();
+    let n = 0;
+    importarExtratoOfx(db, OFX_MINIMO, {
+      arquivo_nome: "demo.ofx",
+      idFactory: () => `id-${++n}`,
+    });
+    expect(ultimaImportacaoExtrato(db)?.arquivo_nome).toBe("demo.ofx");
+    expect(listarImportacoesExtrato(db)).toHaveLength(1);
+    expect(contarTitulosAguardandoConciliacao(db)).toBe(2);
+    expect(rotuloOrigemExtrato("ofx")).toBe("OFX");
+    expect(rotuloOrigemExtrato("csv")).toBe("CSV");
   });
 });

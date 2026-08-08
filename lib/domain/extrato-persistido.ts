@@ -48,6 +48,35 @@ export function contarDebitosExtratoAbertos(db: Pick<DB, "extrato_linhas">): num
   ).length;
 }
 
+export function rotuloOrigemExtrato(origem: OrigemExtrato): string {
+  return origem === "csv" ? "CSV" : "OFX";
+}
+
+/** Importações mais recentes primeiro. */
+export function listarImportacoesExtrato(
+  db: Pick<DB, "extrato_importacoes">
+): ExtratoImportacao[] {
+  return [...(db.extrato_importacoes ?? [])].sort((a, b) =>
+    b.importado_em.localeCompare(a.importado_em)
+  );
+}
+
+export function ultimaImportacaoExtrato(
+  db: Pick<DB, "extrato_importacoes">
+): ExtratoImportacao | null {
+  return listarImportacoesExtrato(db)[0] ?? null;
+}
+
+/** Boletos + RH em aguardando conciliação (candidatos de match). */
+export function contarTitulosAguardandoConciliacao(
+  db: Pick<DB, "boletos" | "pagamentos_pessoas">
+): number {
+  const boletos = (db.boletos ?? []).filter((b) => b.status === "aguardando_conciliacao").length;
+  const rh = (db.pagamentos_pessoas ?? []).filter((p) => p.status === "aguardando_conciliacao")
+    .length;
+  return boletos + rh;
+}
+
 export function linhaPersistidaParaMatch(linha: ExtratoLinha): LinhaExtrato {
   return {
     data: linha.data,

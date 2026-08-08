@@ -9,15 +9,19 @@ import type { AlvoMatchExtrato } from "@/lib/domain/conciliar-extrato";
 import {
   aplicarMatchesLinhasPersistidas,
   contarDebitosExtratoAbertos,
+  contarTitulosAguardandoConciliacao,
   filtrarLinhasExtrato,
   ignorarLinhasExtrato,
+  listarImportacoesExtrato,
   parseFiltroStatusExtratoLinha,
+  rotuloOrigemExtrato,
   sugerirMatchesLinhasPersistidas,
   type FiltroStatusExtratoLinha,
 } from "@/lib/domain/extrato-persistido";
 import { hrefFinanceiro } from "@/lib/domain/financeiro";
-import { dataBR, moeda } from "@/lib/format";
+import { dataBR, dataHoraBR, moeda } from "@/lib/format";
 import type { DB, ExtratoLinha, StatusExtratoLinha } from "@/lib/types";
+import { rotuloContaBancaria } from "@/lib/domain/contas-pagamento";
 
 type Props = {
   onMensagem: (msg: string) => void;
@@ -93,6 +97,8 @@ export default function AbaExtratoBancario({ onMensagem, onAbrirImportar }: Prop
   const [processando, setProcessando] = useState(false);
 
   const linhas = db.extrato_linhas ?? [];
+  const titulosAguardando = useMemo(() => contarTitulosAguardandoConciliacao(db), [db]);
+  const importacoes = useMemo(() => listarImportacoesExtrato(db), [db]);
 
   const contagens = useMemo(
     () => ({
@@ -224,6 +230,19 @@ export default function AbaExtratoBancario({ onMensagem, onAbrirImportar }: Prop
     return linha.alvo === "boleto" ? rotuloBoleto(db, linha.alvo_id) : rotuloRh(db, linha.alvo_id);
   }
 
+  function rotuloContaImportacao(contaId: string | undefined): string | null {
+    if (!contaId) return null;
+    const conta = (db.contas_bancarias ?? []).find((c) => c.id === contaId);
+    return conta ? rotuloContaBancaria(conta) : null;
+  }
+
+  const mensagemVazioAbertas =
+    linhas.length === 0
+      ? "Nenhum extrato importado ainda. Use Importar OFX/CSV para começar a conciliação."
+      : contagens.abertas === 0
+        ? "Nenhum débito aberto — tudo conciliado ou ignorado neste extrato."
+        : "Nenhum débito aberto no extrato.";
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -237,6 +256,47 @@ export default function AbaExtratoBancario({ onMensagem, onAbrirImportar }: Prop
           <Upload size={16} /> Importar OFX/CSV
         </button>
       </div>
+
+      {importacoes.length > 0 && (
+        <Card className="space-y-2 py-3">
+          <p className="text-sm font-semibold text-slate-800">Importações recentes</p>
+          <ul className="space-y-1.5">
+            {importacoes.slice(0, 5).map((imp) => {
+              const contaRotulo = rotuloContaImportacao(imp.conta_bancaria_id);
+              return (
+                <li
+                  key={imp.id}
+                  className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm text-slate-600"
+                >
+                  <span>
+                    <span className="font-medium text-slate-800">{imp.arquivo_nome}</span>
+                    {" · "}
+                    {rotuloOrigemExtrato(imp.origem)}
+                    {" · "}
+                    {imp.debitos} débito{imp.debitos === 1 ? "" : "s"}
+                    {contaRotulo ? ` · ${contaRotulo}` : ""}
+                  </span>
+                  <span className="shrink-0 text-xs text-slate-500">
+                    {dataHoraBR(imp.importado_em)}
+                    {imp.importado_por ? ` · ${imp.importado_por}` : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {importacoes.length > 5 && (
+            <p className="text-xs text-slate-400">+ {importacoes.length - 5} importação(ões) anteriores</p>
+          )}
+        </Card>
+      )}
+
+      {filtro === "abertas" && contagens.abertas > 0 && titulosAguardando === 0 && (
+        <div className="rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          Há débitos abertos no extrato, mas nenhum boleto ou pagamento RH em{" "}
+          <span className="font-semibold">aguardando conciliação</span>. Informe o pagamento na agenda de
+          boletos (ou no RH) antes de casar com o extrato — ou ignore débitos que não forem do restaurante.
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {FILTROS.map((f) => {
@@ -262,7 +322,7 @@ export default function AbaExtratoBancario({ onMensagem, onAbrirImportar }: Prop
       {filtro === "abertas" ? (
         <>
           {sugestoes.length === 0 ? (
-            <Vazio mensagem="Nenhum débito aberto no extrato. Importe um OFX/CSV para conciliar." />
+            <Vazio mensagem={mensagemVazioAbertas} />
           ) : (
             <div className="space-y-2">
               {sugestoes.map((s) => {
@@ -290,12 +350,16 @@ export default function AbaExtratoBancario({ onMensagem, onAbrirImportar }: Prop
                         <select
                           className="input w-full py-1.5 text-sm"
                           value={escolha}
-                          disabled={processando}
+                          disabled={processando || alvosDisponiveis.length === 0}
                           onChange={(e) =>
                             setEscolhas((atual) => ({ ...atual, [id]: e.target.value }))
                           }
                         >
-                          <option value="">Selecione boleto ou pagamento RH…</option>
+                          <option value="">
+                            {alvosDisponiveis.length === 0
+                              ? "Nenhum título aguardando conciliação"
+                              : "Selecione boleto ou pagamento RH…"}
+                          </option>
                           {alvosDisponiveis.map((a) => (
                             <option key={a.valor} value={a.valor}>
                               {a.rotulo}
@@ -316,8 +380,13 @@ export default function AbaExtratoBancario({ onMensagem, onAbrirImportar }: Prop
               <button
                 type="button"
                 className="btn-primario"
-                disabled={processando || idsSelecionados().length === 0}
+                disabled={processando || idsSelecionados().length === 0 || titulosAguardando === 0}
                 onClick={conciliarSelecionados}
+                title={
+                  titulosAguardando === 0
+                    ? "Não há títulos em aguardando conciliação"
+                    : "Conciliar débitos selecionados"
+                }
               >
                 {processando ? "Processando…" : "Conciliar selecionados"}
               </button>
@@ -333,7 +402,13 @@ export default function AbaExtratoBancario({ onMensagem, onAbrirImportar }: Prop
           )}
         </>
       ) : linhasFiltradas.length === 0 ? (
-        <Vazio mensagem="Nenhuma linha neste filtro." />
+        <Vazio
+          mensagem={
+            filtro === "todas"
+              ? "Nenhuma linha de extrato ainda. Importe um OFX ou CSV."
+              : `Nenhuma linha ${filtro === "conciliadas" ? "conciliada" : "ignorada"} ainda.`
+          }
+        />
       ) : (
         <div className="space-y-2">
           {linhasFiltradas.map((linha) => {

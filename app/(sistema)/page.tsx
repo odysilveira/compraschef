@@ -9,6 +9,7 @@ import {
   CalendarClock,
   CircleCheckBig,
   ClipboardCheck,
+  FileWarning,
   MessageSquare,
   PackageX,
   ShieldAlert,
@@ -24,7 +25,12 @@ import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
 import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
 import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
 import { hrefRecebimento } from "@/lib/domain/recebimento-navegacao";
-import { hrefPagamentosRh, resumirOperacionalRh } from "@/lib/domain/resumo-rh";
+import {
+  filtroDocsRhPrioritario,
+  hrefPagamentosRh,
+  hrefPessoasRh,
+  resumirOperacionalRh,
+} from "@/lib/domain/resumo-rh";
 import { podeVerValores, usePapel, usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, diasAte, moeda } from "@/lib/format";
 import type { DB, Pedido, StatusPedido } from "@/lib/types";
@@ -150,6 +156,15 @@ export default function PainelPage() {
             numero={resumoRh.pagamentos_aguardando}
             icone={CircleCheckBig}
             cor="azul"
+          />
+        )}
+        {podeRh && resumoRh && (
+          <CartaoAlerta
+            href={hrefPessoasRh({ docs: filtroDocsRhPrioritario(resumoRh) })}
+            titulo="Documentos RH com alerta"
+            numero={resumoRh.docs_alerta}
+            icone={FileWarning}
+            cor="laranja"
           />
         )}
         <CartaoAlerta

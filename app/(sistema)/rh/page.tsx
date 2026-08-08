@@ -33,6 +33,11 @@ import {
   resumirAvaliacoesPessoa,
 } from "@/lib/domain/avaliacoes-pessoa";
 import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, filtroConvocacaoEscalaRhPrioritario, filtroDocsRhPrioritario, filtroPontoRhPrioritario, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
+import {
+  AVISO_REPASSE_INTEGRAL_PRESTADOR,
+  LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL,
+  precisaDadosPagamentoHoraPrestador,
+} from "@/lib/domain/prestador-eventual";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -86,7 +91,15 @@ function precisaDadosConvocacao(tipo: TipoPessoaRH): boolean {
 
 function BadgeTipo({ tipo }: { tipo: TipoPessoaRH }) {
   const cor =
-    tipo === "colaborador" ? "verde" : tipo === "intermitente" ? "azul" : tipo === "entregador" ? "laranja" : "cinza";
+    tipo === "colaborador"
+      ? "verde"
+      : tipo === "intermitente"
+        ? "azul"
+        : tipo === "entregador"
+          ? "laranja"
+          : tipo === "prestador_eventual"
+            ? "cinza"
+            : "cinza";
   return <Badge cor={cor}>{rotuloTipoPessoa(tipo)}</Badge>;
 }
 
@@ -710,6 +723,32 @@ function RhPessoasConteudo() {
                       value={form.chave_pix}
                       onChange={(e) => setForm({ ...form, chave_pix: e.target.value })}
                       placeholder="CPF, e-mail ou chave aleatória"
+                    />
+                  </Campo>
+                </>
+              )}
+              {precisaDadosPagamentoHoraPrestador(form.tipo) && (
+                <>
+                  <div className="sm:col-span-2 rounded-card border border-destaque bg-destaque-clara/40 px-3 py-2 text-sm text-destaque">
+                    {AVISO_REPASSE_INTEGRAL_PRESTADOR} Limite operacional:{" "}
+                    {LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL} serviços por semana (confirmação na escala em breve).
+                  </div>
+                  <Campo rotulo="Valor-hora *">
+                    <input
+                      className="campo"
+                      inputMode="decimal"
+                      required
+                      value={form.valor_hora}
+                      onChange={(e) => setForm({ ...form, valor_hora: e.target.value })}
+                      placeholder="25,00"
+                    />
+                  </Campo>
+                  <Campo rotulo="Chave PIX">
+                    <input
+                      className="campo"
+                      value={form.chave_pix}
+                      onChange={(e) => setForm({ ...form, chave_pix: e.target.value })}
+                      placeholder="CNPJ/MEI, e-mail ou chave aleatória"
                     />
                   </Campo>
                 </>

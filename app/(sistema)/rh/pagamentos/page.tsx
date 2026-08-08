@@ -36,6 +36,12 @@ import {
   validarAdiantamento,
 } from "@/lib/domain/consumos-pessoas";
 import {
+  AVISO_REPASSE_INTEGRAL_PRESTADOR,
+  calcularValorHoraRepasseIntegral,
+  pagamentoEhRepasseIntegral,
+  tipoPagamentoPadraoPrestadorEventual,
+} from "@/lib/domain/prestador-eventual";
+import {
   criarPagamentosDaFolha,
   parseRecibosFolhaTexto,
   vincularRecibosAPessoas,
@@ -252,6 +258,8 @@ function RhPagamentosConteudo() {
 
   const previewNovo = useMemo(() => {
     if (!formNovo?.pessoa_id) return null;
+    const pessoaPreview = db.pessoas.find((p) => p.id === formNovo.pessoa_id);
+    if (pagamentoEhRepasseIntegral(pessoaPreview)) return null;
     const bruto = Number(formNovo.valor.replace(",", "."));
     if (!Number.isFinite(bruto) || bruto <= 0) return null;
     if (formNovo.tipo === "salario") {
@@ -301,6 +309,13 @@ function RhPagamentosConteudo() {
     const horas = formNovo.horas ? Number(formNovo.horas.replace(",", ".")) : undefined;
     const valorHora = formNovo.valor_hora ? Number(formNovo.valor_hora.replace(",", ".")) : undefined;
     const competencia = formNovo.competencia || undefined;
+    const repasse = pagamentoEhRepasseIntegral(pessoa);
+    const calculado =
+      repasse && Number.isFinite(horas) && Number.isFinite(valorHora)
+        ? calcularValorHoraRepasseIntegral(valorHora as number, horas as number)
+        : null;
+    const valorFinal = calculado?.valor ?? Number(valorBruto.toFixed(2));
+    const valorBrutoFinal = calculado?.valor_bruto ?? Number(valorBruto.toFixed(2));
 
     mutate((banco) => {
       const id = uid("pagp");
@@ -311,33 +326,55 @@ function RhPagamentosConteudo() {
         descricao: formNovo.descricao.trim() || undefined,
         competencia,
         vencimento: formNovo.vencimento,
-        valor: Number(valorBruto.toFixed(2)),
-        valor_bruto: Number(valorBruto.toFixed(2)),
+        valor: valorFinal,
+        valor_bruto: valorBrutoFinal,
         horas: Number.isFinite(horas) ? horas : undefined,
         valor_hora: Number.isFinite(valorHora) ? valorHora : undefined,
         status: "previsto",
         criado_em: agora,
         atualizado_em: agora,
+        pagamento_observacao: repasse ? "Repasse integral — sem retenção no ComprasChef." : undefined,
       };
       banco.pagamentos_pessoas.push(pagamento);
 
-      if (formNovo.tipo === "salario" || pagamentoUsaConsumoDiario(formNovo.tipo)) {
+      if (
+        !repasse &&
+        (formNovo.tipo === "salario" || pagamentoUsaConsumoDiario(formNovo.tipo))
+      ) {
         aplicarDescontosNoPagamento(banco, id);
       }
     });
     setFormNovo(null);
     setErroNovo(null);
-    setMensagem("Pagamento lançado como previsto.");
+    setMensagem(
+      repasse
+        ? "Pagamento de prestador eventual lançado (repasse integral, sem descontos)."
+        : "Pagamento lançado como previsto."
+    );
   }
 
   function aoMudarPessoaOuTipo(pessoaId: string, tipo: TipoPagamentoPessoa) {
     if (!formNovo) return;
     const pessoa = db.pessoas.find((p) => p.id === pessoaId);
+    let tipoFinal = tipo;
     let valor = formNovo.valor;
     let valorHora = formNovo.valor_hora;
     let horas = formNovo.horas;
 
-    if (tipo === "adiantamento" && pessoa?.adiantamento_valor != null) {
+    if (pagamentoEhRepasseIntegral(pessoa)) {
+      if (tipo !== "freela_hora" && tipo !== "freela_servico" && tipo !== "outro") {
+        tipoFinal = tipoPagamentoPadraoPrestadorEventual();
+      }
+      if (pessoa?.valor_hora != null && !valorHora) {
+        valorHora = pessoa.valor_hora.toFixed(2);
+      }
+      const h = horas ? Number(horas.replace(",", ".")) : undefined;
+      const vh = valorHora ? Number(valorHora.replace(",", ".")) : undefined;
+      if (Number.isFinite(h) && Number.isFinite(vh)) {
+        const calc = calcularValorHoraRepasseIntegral(vh as number, h as number);
+        if (calc) valor = calc.valor.toFixed(2);
+      }
+    } else if (tipo === "adiantamento" && pessoa?.adiantamento_valor != null) {
       valor = pessoa.adiantamento_valor.toFixed(2);
     } else if (tipo === "salario" && pessoa?.salario != null) {
       valor = pessoa.salario.toFixed(2);
@@ -348,7 +385,7 @@ function RhPagamentosConteudo() {
     setFormNovo({
       ...formNovo,
       pessoa_id: pessoaId,
-      tipo,
+      tipo: tipoFinal,
       valor,
       valor_hora: valorHora,
       horas,
@@ -1217,6 +1254,11 @@ function RhPagamentosConteudo() {
                 ))}
               </select>
             </Campo>
+            {pagamentoEhRepasseIntegral(db.pessoas.find((p) => p.id === formNovo.pessoa_id)) && (
+              <p className="rounded-card border border-destaque bg-destaque-clara/40 px-3 py-2 text-sm text-destaque">
+                {AVISO_REPASSE_INTEGRAL_PRESTADOR}
+              </p>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <Campo rotulo="Tipo *">
                 <select

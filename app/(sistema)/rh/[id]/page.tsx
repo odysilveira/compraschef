@@ -88,6 +88,11 @@ import {
 import { filaAgendaFinanceiroDeStatusPagamento, hrefFinanceiro } from "@/lib/domain/financeiro";
 import { hrefConsumosRh, hrefEscalaRh, filtroConsumosRhDeStatus, filtroPagamentosRhDeStatus, hrefPagamentosRh, hrefPontoRh } from "@/lib/domain/resumo-rh";
 import {
+  AVISO_REPASSE_INTEGRAL_PRESTADOR,
+  LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL,
+  ehPrestadorEventual,
+} from "@/lib/domain/prestador-eventual";
+import {
   FUNCOES_OPERACIONAIS,
   MODULOS_ACESSO,
   TIPOS_PESSOA_RH,
@@ -880,6 +885,15 @@ function RhPerfilConteudo() {
           </div>
         }
       />
+      {ehPrestadorEventual(pessoa) && (
+        <Card className="mb-4 border border-destaque bg-destaque-clara/30 py-3 text-sm text-destaque">
+          <p>{AVISO_REPASSE_INTEGRAL_PRESTADOR}</p>
+          <p className="mt-1 text-xs">
+            Limite operacional: {LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL} serviços por semana (confirmação na
+            escala no próximo passo).
+          </p>
+        </Card>
+      )}
       {alertaDocs?.tem_alerta && (
         <p className="mb-4 text-sm text-amber-800">
           {alertaDocs.rotulo}.{" "}
@@ -1059,7 +1073,7 @@ function RhPerfilConteudo() {
                   </p>
                 )}
               </Campo>
-              <Campo rotulo="Valor-hora (intermitente/entregador)">
+              <Campo rotulo="Valor-hora (intermitente / entregador / prestador eventual)">
                 <input
                   type="number"
                   step="0.01"

@@ -42,6 +42,7 @@ describe("rh helpers", () => {
 
   it("rotulos de tipo e funcao", () => {
     expect(rotuloTipoPessoa("intermitente")).toBe("Intermitente");
+    expect(rotuloTipoPessoa("prestador_eventual")).toBe("Prestador eventual");
     expect(rotuloFuncao({ funcao: "custom", funcao_custom: "Sommelier" })).toBe("Sommelier");
   });
 

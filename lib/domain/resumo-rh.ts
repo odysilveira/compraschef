@@ -195,6 +195,17 @@ export function parseFiltroDocsRh(valor: string | null | undefined): FiltroDocsR
   return "todos";
 }
 
+/**
+ * Destino do alerta de docs (Painel / hub RH): vencido > a vencer > alerta genérico.
+ */
+export function filtroDocsRhPrioritario(
+  resumo: Pick<ResumoOperacionalRh, "docs_vencido" | "docs_a_vencer" | "docs_alerta">
+): Exclude<FiltroDocsRh, "todos"> {
+  if (resumo.docs_vencido > 0) return "vencido";
+  if (resumo.docs_a_vencer > 0) return "a_vencer";
+  return "alerta";
+}
+
 export function hrefPessoasRh(opts?: { docs?: FiltroDocsRh }): string {
   if (opts?.docs === "alerta") return "/rh?docs=alerta";
   if (opts?.docs === "vencido") return "/rh?docs=vencido";

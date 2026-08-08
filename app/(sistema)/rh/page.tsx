@@ -32,7 +32,7 @@ import {
   listarAvaliacoesPessoa,
   resumirAvaliacoesPessoa,
 } from "@/lib/domain/avaliacoes-pessoa";
-import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
+import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPessoasRh, hrefPontoRh, filtroDocsRhPrioritario, parseFiltroDocsRh, pessoaCorrespondeFiltroDocsRh, resumirOperacionalRh, type FiltroDocsRh } from "@/lib/domain/resumo-rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -314,13 +314,7 @@ function RhPessoasConteudo() {
           type="button"
           className="text-left"
           onClick={() => {
-            irParaFiltroDocs(
-              resumoOp.docs_vencido > 0
-                ? "vencido"
-                : resumoOp.docs_a_vencer > 0
-                  ? "a_vencer"
-                  : "alerta"
-            );
+            irParaFiltroDocs(filtroDocsRhPrioritario(resumoOp));
             setBusca("");
           }}
         >

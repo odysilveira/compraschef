@@ -9,6 +9,7 @@ import {
   hrefPessoasRh,
   hrefPontoRh,
   destaqueSlotFiltroConvocacao,
+  filtroDocsRhPrioritario,
   filtroPagamentosRhDeStatus,
   filtroConsumosRhDeStatus,
   parseAbaPontoRh,
@@ -176,6 +177,15 @@ describe("resumo-rh", () => {
     expect(parseFiltroDocsRh("vencido")).toBe("vencido");
     expect(parseFiltroDocsRh("a_vencer")).toBe("a_vencer");
     expect(parseFiltroDocsRh(null)).toBe("todos");
+    expect(filtroDocsRhPrioritario({ docs_vencido: 1, docs_a_vencer: 2, docs_alerta: 3 })).toBe(
+      "vencido"
+    );
+    expect(filtroDocsRhPrioritario({ docs_vencido: 0, docs_a_vencer: 2, docs_alerta: 2 })).toBe(
+      "a_vencer"
+    );
+    expect(filtroDocsRhPrioritario({ docs_vencido: 0, docs_a_vencer: 0, docs_alerta: 1 })).toBe(
+      "alerta"
+    );
     expect(hrefPessoasRh({ docs: "alerta" })).toBe("/rh?docs=alerta");
     expect(hrefPessoasRh({ docs: "vencido" })).toBe("/rh?docs=vencido");
     expect(hrefPessoasRh({ docs: "a_vencer" })).toBe("/rh?docs=a_vencer");

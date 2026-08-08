@@ -9,6 +9,7 @@ import {
   CalendarClock,
   CircleCheckBig,
   ClipboardCheck,
+  Clock,
   FileWarning,
   MessageSquare,
   PackageX,
@@ -27,8 +28,10 @@ import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
 import { hrefRecebimento } from "@/lib/domain/recebimento-navegacao";
 import {
   filtroDocsRhPrioritario,
+  filtroPontoRhPrioritario,
   hrefPagamentosRh,
   hrefPessoasRh,
+  hrefPontoRh,
   resumirOperacionalRh,
 } from "@/lib/domain/resumo-rh";
 import { podeVerValores, usePapel, usePodeAcessarModulo } from "@/lib/roles";
@@ -164,6 +167,18 @@ export default function PainelPage() {
             titulo="Documentos RH com alerta"
             numero={resumoRh.docs_alerta}
             icone={FileWarning}
+            cor="laranja"
+          />
+        )}
+        {podeRh && resumoRh && (
+          <CartaoAlerta
+            href={hrefPontoRh({
+              aba: "pendencias",
+              filtro: filtroPontoRhPrioritario(resumoRh),
+            })}
+            titulo="Pendências de ponto RH"
+            numero={resumoRh.ponto_abertas}
+            icone={Clock}
             cor="laranja"
           />
         )}

@@ -36,8 +36,10 @@ import { hrefConsumosRh, hrefEscalaRh, hrefNormasRh, hrefPagamentosRh, hrefPesso
 import {
   AVISO_REPASSE_INTEGRAL_PRESTADOR,
   LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL,
+  listarPrestadoresNoLimiteSemana,
   precisaDadosPagamentoHoraPrestador,
 } from "@/lib/domain/prestador-eventual";
+import { dataBR } from "@/lib/format";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import type { FuncaoOperacional, Papel, PessoaRH, TipoPessoaRH } from "@/lib/types";
 
@@ -132,6 +134,7 @@ function RhPessoasConteudo() {
   }, [db.pessoas]);
 
   const resumoOp = useMemo(() => resumirOperacionalRh(db), [db]);
+  const prestadoresNoLimite = useMemo(() => listarPrestadoresNoLimiteSemana(db), [db]);
 
   const lista = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -426,6 +429,28 @@ function RhPessoasConteudo() {
                 : "Todos com plantão na janela"
             }
             cor={resumoOp.clt_sem_plantao > 0 ? "amarelo" : "verde"}
+          />
+        </Link>
+        <Link
+          href={hrefEscalaRh({
+            pessoa:
+              prestadoresNoLimite.length === 1
+                ? prestadoresNoLimite[0]!.pessoa_id
+                : undefined,
+          })}
+          className="block"
+        >
+          <StatCard
+            rotulo="Prestadores no limite"
+            valor={String(prestadoresNoLimite.length)}
+            subtexto={
+              prestadoresNoLimite.length === 0
+                ? `Nenhum no teto de ${LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL}×/semana`
+                : prestadoresNoLimite.length === 1
+                  ? `${prestadoresNoLimite[0]!.nome}: ${prestadoresNoLimite[0]!.count}/${prestadoresNoLimite[0]!.limite} · ${dataBR(prestadoresNoLimite[0]!.inicio)}–${dataBR(prestadoresNoLimite[0]!.fim)}`
+                  : `${prestadoresNoLimite.length} no teto ${LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL}× · Abrir escala`
+            }
+            cor={prestadoresNoLimite.length > 0 ? "laranja" : "verde"}
           />
         </Link>
         <Link href={hrefPagamentosRh("aguardando")} className="block">

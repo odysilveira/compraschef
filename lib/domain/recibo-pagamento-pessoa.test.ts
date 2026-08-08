@@ -103,8 +103,9 @@ describe("recibo-pagamento-pessoa", () => {
     expect(texto).toContain("repasse integral");
     expect(texto).toContain("Líquido = bruto");
     expect(texto).toContain("prestação eventual de serviço");
+    expect(texto).toContain("fora da folha CLT");
     expect(texto).not.toContain("13º");
-    expect(texto).not.toContain("contrato de trabalho intermitente");
+    expect(texto).not.toContain("integra o registro do contrato de trabalho intermitente");
     expect(texto).not.toContain("Trabalhador(a)");
   });
 

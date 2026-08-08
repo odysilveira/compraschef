@@ -132,7 +132,7 @@ export function montarTextoReciboPagamentoPessoa(input: {
     );
     linhas.push("");
     linhas.push(
-      "Esta mensagem registra pagamento de prestação eventual de serviço (não integra contrato de trabalho intermitente)."
+      "Esta mensagem registra pagamento de prestação eventual de serviço (fora da folha CLT)."
     );
   } else {
     linhas.push(

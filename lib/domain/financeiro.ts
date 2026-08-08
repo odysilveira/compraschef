@@ -232,8 +232,18 @@ export function exportarContasPagarCsv(
 
 export type AbaFinanceiro = "boletos" | "contas" | "notas";
 
-/** Seção da agenda de boletos (deep link a partir do RH). */
-export type FilaAgendaFinanceiro = "aguardando" | "pagos" | "liberados";
+/** Seção da agenda de boletos (deep link a partir do RH / Painel). */
+export type FilaAgendaFinanceiro = "aguardando" | "pagos" | "liberados" | "suspeitos";
+
+/** Prefixo de observação quando o dono confirma golpe (mesmo critério da agenda). */
+export const MARCA_GOLPE_BOLETO = "GOLPE CONFIRMADO";
+
+export function boletoSuspeitoAtivo(boleto: {
+  status: string;
+  observacao?: string;
+}): boolean {
+  return boleto.status === "suspeito" && !boleto.observacao?.startsWith(MARCA_GOLPE_BOLETO);
+}
 
 const STATUS_CONTA_PAGAR: StatusContaPagar[] = [
   "aguardando_boleto",
@@ -255,7 +265,14 @@ export function parseAbaFinanceiro(valor: string | null | undefined): AbaFinance
 export function parseFilaAgendaFinanceiro(
   valor: string | null | undefined
 ): FilaAgendaFinanceiro | undefined {
-  if (valor === "aguardando" || valor === "pagos" || valor === "liberados") return valor;
+  if (
+    valor === "aguardando" ||
+    valor === "pagos" ||
+    valor === "liberados" ||
+    valor === "suspeitos"
+  ) {
+    return valor;
+  }
   return undefined;
 }
 

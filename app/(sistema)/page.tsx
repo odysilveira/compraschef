@@ -11,6 +11,7 @@ import {
   ClipboardCheck,
   MessageSquare,
   PackageX,
+  ShieldAlert,
   Timer,
   TriangleAlert,
   Truck,
@@ -18,7 +19,7 @@ import {
 import { Badge, Card, Vazio } from "@/components/ui";
 import CartaoAlerta from "@/components/operacao/CartaoAlerta";
 import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@/lib/data";
-import { hrefFinanceiro } from "@/lib/domain/financeiro";
+import { boletoSuspeitoAtivo, hrefFinanceiro } from "@/lib/domain/financeiro";
 import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
 import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
 import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
@@ -70,6 +71,7 @@ export default function PainelPage() {
     const dias = diasAte(b.vencimento);
     return dias !== undefined && dias > 0 && dias <= 7;
   }).length;
+  const boletosSuspeitos = db.boletos.filter(boletoSuspeitoAtivo).length;
   const divergencias = db.recebimentos.filter((r) => r.status === "divergente" || r.status === "parcial").length;
   const caixasValidade = caixasVencendo(db, 3).length;
 
@@ -121,6 +123,15 @@ export default function PainelPage() {
             numero={boletosVencendo}
             icone={CalendarClock}
             cor="laranja"
+          />
+        )}
+        {financeiro && (
+          <CartaoAlerta
+            href={hrefFinanceiro({ aba: "boletos", fila: "suspeitos" })}
+            titulo="Boletos suspeitos (possível golpe)"
+            numero={boletosSuspeitos}
+            icone={ShieldAlert}
+            cor="vermelho"
           />
         )}
         {podeRh && resumoRh && (

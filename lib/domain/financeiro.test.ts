@@ -3,6 +3,7 @@ import type { DB, StatusContaPagar } from "../types";
 import { seedDB } from "../data/seed";
 import { calcularValorFinal, criarContaManual, alterarStatusConta, informarPagamento, atualizarComNovidades } from "../data/index";
 import {
+  boletoSuspeitoAtivo,
   contaEstaAtrasada,
   contaVenceHoje,
   contaVenceNosProximos7Dias,
@@ -10,6 +11,7 @@ import {
   filtrarContasPagar,
   filaAgendaFinanceiroDeStatusPagamento,
   hrefFinanceiro,
+  MARCA_GOLPE_BOLETO,
   ordenarContasPagar,
   parseAbaFinanceiro,
   parseFilaAgendaFinanceiro,
@@ -339,6 +341,9 @@ describe("helpers de contas a pagar na tela", () => {
     expect(hrefFinanceiro({ aba: "boletos", fila: "liberados" })).toBe(
       "/financeiro?fila=liberados"
     );
+    expect(hrefFinanceiro({ aba: "boletos", fila: "suspeitos" })).toBe(
+      "/financeiro?fila=suspeitos"
+    );
     expect(hrefFinanceiro({ aba: "boletos", vencimento: "atrasadas" })).toBe(
       "/financeiro?vencimento=atrasadas"
     );
@@ -352,7 +357,13 @@ describe("helpers de contas a pagar na tela", () => {
     expect(parseFilaAgendaFinanceiro("aguardando")).toBe("aguardando");
     expect(parseFilaAgendaFinanceiro("pagos")).toBe("pagos");
     expect(parseFilaAgendaFinanceiro("liberados")).toBe("liberados");
+    expect(parseFilaAgendaFinanceiro("suspeitos")).toBe("suspeitos");
     expect(parseFilaAgendaFinanceiro("x")).toBeUndefined();
+    expect(boletoSuspeitoAtivo({ status: "suspeito" })).toBe(true);
+    expect(
+      boletoSuspeitoAtivo({ status: "suspeito", observacao: `${MARCA_GOLPE_BOLETO} — x` })
+    ).toBe(false);
+    expect(boletoSuspeitoAtivo({ status: "liberado" })).toBe(false);
     expect(filaAgendaFinanceiroDeStatusPagamento("liberado")).toBe("liberados");
     expect(filaAgendaFinanceiroDeStatusPagamento("aguardando_conciliacao")).toBe("aguardando");
     expect(filaAgendaFinanceiroDeStatusPagamento("pago")).toBe("pagos");

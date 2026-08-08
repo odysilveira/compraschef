@@ -34,10 +34,12 @@ import { calcularValorFinal, criarContaManual, mutate, nomeFornecedor, uid, useD
 import { identificarFormatoBoleto, normalizarLinhaBoleto } from "@/lib/domain/boletos";
 import { calcularHashSHA256, receberBoletoContaPagar, validarArquivoDocumentoBoleto } from "@/lib/domain/documentos-boleto";
 import {
+  boletoSuspeitoAtivo,
   filtrarContasPagar,
   resumirContasPagar,
   exportarContasPagarCsv,
   hrefFinanceiro,
+  MARCA_GOLPE_BOLETO,
   parseAbaFinanceiro,
   parseFilaAgendaFinanceiro,
   parseFiltroCompletudeNota,
@@ -141,7 +143,7 @@ import type {
   StatusContaPagar,
 } from "@/lib/types";
 
-const MARCA_GOLPE = "GOLPE CONFIRMADO";
+const MARCA_GOLPE = MARCA_GOLPE_BOLETO;
 
 type FormContaState = {
   fornecedor_id: string;
@@ -447,7 +449,7 @@ function notaDoBoleto(db: DB, boleto: Boleto) {
 }
 
 function golpeConfirmado(b: Boleto): boolean {
-  return b.status === "suspeito" && Boolean(b.observacao?.startsWith(MARCA_GOLPE));
+  return b.status === "suspeito" && !boletoSuspeitoAtivo(b);
 }
 
 function BadgeStatus({ boleto }: { boleto: Boleto }) {
@@ -1426,7 +1428,7 @@ function FinanceiroConteudo() {
     });
   }
 
-  const suspeitos = db.boletos.filter((b) => b.status === "suspeito" && !golpeConfirmado(b));
+  const suspeitos = db.boletos.filter(boletoSuspeitoAtivo);
   const contas = Array.isArray(db.contas_pagar) ? db.contas_pagar : [];
   const fornecedoresPorId = useMemo(
     () => Object.fromEntries(db.fornecedores.map((fornecedor) => [fornecedor.id, fornecedor.nome])),
@@ -1584,6 +1586,7 @@ function FinanceiroConteudo() {
     if (fila === "aguardando") id = "financeiro-fila-aguardando";
     else if (fila === "pagos") id = "financeiro-fila-pagos";
     else if (fila === "liberados") id = "financeiro-fila-liberados";
+    else if (fila === "suspeitos") id = "financeiro-fila-suspeitos";
     else if (vencimento === "atrasadas") id = "financeiro-agenda-atrasadas";
     else if (vencimento === "hoje") id = "financeiro-agenda-hoje";
     else if (vencimento === "proximos_7_dias") id = "financeiro-agenda-proximos-7";
@@ -2684,6 +2687,7 @@ function FinanceiroConteudo() {
           )}
 
           {/* Alerta de boleto suspeito */}
+          <div id="financeiro-fila-suspeitos" className="scroll-mt-4 space-y-3">
           {suspeitos.map((b) => (
             <div key={b.id} className="rounded-card border-2 border-erro bg-erro-clara p-4">
               <div className="flex items-start gap-3">
@@ -2705,6 +2709,7 @@ function FinanceiroConteudo() {
               </div>
             </div>
           ))}
+          </div>
 
           {/* Totais da semana */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -2759,12 +2764,21 @@ function FinanceiroConteudo() {
               </p>
               <p className="text-xl font-bold text-primaria-escura">{moeda(totais.pago)}</p>
             </button>
-            <Card className="py-3">
+            <button
+              type="button"
+              className={`rounded-card border bg-white px-4 py-3 text-left space-y-1 transition ${
+                parseFilaAgendaFinanceiro(searchParams.get("fila")) === "suspeitos"
+                  ? "border-erro ring-1 ring-erro"
+                  : "border-slate-200 hover:border-erro"
+              }`}
+              onClick={() => irParaFinanceiro({ aba: "boletos", fila: "suspeitos" })}
+              title="Ir para os alertas de boletos suspeitos"
+            >
               <p className="rotulo flex items-center gap-1">
                 <TriangleAlert size={13} /> Suspeitos
               </p>
               <p className="text-xl font-bold text-erro">{moeda(totais.suspeito)}</p>
-            </Card>
+            </button>
           </div>
 
           <div id="financeiro-fila-liberados" className="scroll-mt-4 space-y-2">

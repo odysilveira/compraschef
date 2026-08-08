@@ -18,6 +18,7 @@ import {
   Timer,
   TriangleAlert,
   Truck,
+  UserRound,
 } from "lucide-react";
 import { Badge, Card, Vazio } from "@/components/ui";
 import CartaoAlerta from "@/components/operacao/CartaoAlerta";
@@ -27,6 +28,7 @@ import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
 import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
 import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
 import { hrefRecebimento } from "@/lib/domain/recebimento-navegacao";
+import { listarPrestadoresNoLimiteSemana } from "@/lib/domain/prestador-eventual";
 import {
   filtroConvocacaoEscalaRhPrioritario,
   filtroDocsRhPrioritario,
@@ -74,6 +76,7 @@ export default function PainelPage() {
   const financeiro = podeVerValores(papel);
   const podeRh = usePodeAcessarModulo("rh");
   const resumoRh = podeRh ? resumirOperacionalRh(db) : null;
+  const prestadoresNoLimite = podeRh ? listarPrestadoresNoLimiteSemana(db) : [];
 
   const abaixoMinimo = produtosAbaixoDoMinimo(db).length;
   const cotacoesAguardando = db.cotacoes.filter((c) => c.status === "enviada").length;
@@ -193,6 +196,20 @@ export default function PainelPage() {
             titulo="Convocações RH a acompanhar"
             numero={resumoRh.convocacoes_enviadas + resumoRh.convocacoes_rascunho}
             icone={Megaphone}
+            cor="laranja"
+          />
+        )}
+        {podeRh && (
+          <CartaoAlerta
+            href={hrefEscalaRh({
+              pessoa:
+                prestadoresNoLimite.length === 1
+                  ? prestadoresNoLimite[0]!.pessoa_id
+                  : undefined,
+            })}
+            titulo="Prestadores no limite (2×/semana)"
+            numero={prestadoresNoLimite.length}
+            icone={UserRound}
             cor="laranja"
           />
         )}

@@ -1,4 +1,4 @@
-import type { EscalaSlot, PessoaRH, TipoPagamentoPessoa, TipoPessoaRH } from "../types";
+import type { DB, EscalaSlot, PessoaRH, TipoPagamentoPessoa, TipoPessoaRH } from "../types";
 import { formatDataLocal, parseDataLocal } from "./escala";
 
 /** Máximo de serviços na escala por semana (regra operacional; override com confirmação). */
@@ -124,4 +124,39 @@ export function anexarObservacaoOverride(
   if (!atual?.trim()) return override;
   if (atual.includes(MARCA_LIMITE_SEMANA_OVERRIDE)) return atual;
   return `${override} · ${atual.trim()}`;
+}
+
+export interface PrestadorNoLimiteSemana {
+  pessoa_id: string;
+  nome: string;
+  count: number;
+  limite: number;
+  inicio: string;
+  fim: string;
+}
+
+/**
+ * Prestadores eventuais ativos que já atingiram o limite na semana de `hoje`
+ * (próximo serviço exigiria confirmação de risco).
+ */
+export function listarPrestadoresNoLimiteSemana(
+  db: Pick<DB, "pessoas" | "escala_slots">,
+  hoje: string = new Date().toISOString().slice(0, 10)
+): PrestadorNoLimiteSemana[] {
+  const slots = db.escala_slots ?? [];
+  const saida: PrestadorNoLimiteSemana[] = [];
+  for (const pessoa of db.pessoas ?? []) {
+    if (!pessoa.ativo || !ehPrestadorEventual(pessoa)) continue;
+    const av = avaliarLimiteSemanaPrestador(pessoa, slots, pessoa.id, hoje);
+    if (!av.excede) continue;
+    saida.push({
+      pessoa_id: pessoa.id,
+      nome: pessoa.nome,
+      count: av.count,
+      limite: av.limite,
+      inicio: av.inicio,
+      fim: av.fim,
+    });
+  }
+  return saida.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }

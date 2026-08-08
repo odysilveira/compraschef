@@ -595,6 +595,31 @@ export const seedDB: DB = {
       criado_em: diasAtras(1),
       atualizado_em: diasAtras(1),
     },
+    // Prestador eventual no limite da semana corrente (demo do Painel / modal 2×)
+    {
+      id: "esc-prest-1",
+      pessoa_id: "pes-prest-1",
+      data: soData(diasAtras(1)),
+      hora_inicio: "18:00",
+      hora_fim: "22:00",
+      intervalo_min: 0,
+      funcao: "Salão",
+      local: "Vera Bela Restaurante",
+      criado_em: diasAtras(2),
+      atualizado_em: diasAtras(1),
+    },
+    {
+      id: "esc-prest-2",
+      pessoa_id: "pes-prest-1",
+      data: soData(diasAtras(0)),
+      hora_inicio: "18:00",
+      hora_fim: "22:00",
+      intervalo_min: 0,
+      funcao: "Salão",
+      local: "Vera Bela Restaurante",
+      criado_em: diasAtras(1),
+      atualizado_em: diasAtras(0),
+    },
   ],
 
   convocacoes: [

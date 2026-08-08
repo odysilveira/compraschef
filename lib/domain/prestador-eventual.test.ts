@@ -9,6 +9,7 @@ import {
   contarSlotsPessoaNaSemana,
   ehPrestadorEventual,
   limitesSemanaIso,
+  listarPrestadoresNoLimiteSemana,
   pagamentoEhRepasseIntegral,
   precisaDadosPagamentoHoraPrestador,
   textoOverrideLimiteSemana,
@@ -84,5 +85,29 @@ describe("prestador eventual", () => {
     expect(texto).toContain("3>2");
     expect(anexarObservacaoOverride("nota", texto)).toContain("nota");
     expect(anexarObservacaoOverride(texto, "outro")).toBe(texto);
+
+    const lista = listarPrestadoresNoLimiteSemana(
+      {
+        pessoas: [
+          {
+            id: "pes-1",
+            nome: "Diego",
+            tipo: "prestador_eventual",
+            ativo: true,
+          },
+          {
+            id: "pes-2",
+            nome: "Outro",
+            tipo: "intermitente",
+            ativo: true,
+          },
+        ],
+        escala_slots: slots,
+      } as never,
+      "2026-08-05"
+    );
+    expect(lista).toHaveLength(1);
+    expect(lista[0]?.pessoa_id).toBe("pes-1");
+    expect(lista[0]?.count).toBe(2);
   });
 });

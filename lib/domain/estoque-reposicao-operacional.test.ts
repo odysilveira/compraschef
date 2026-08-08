@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { atualizarComNovidades } from "../data";
 import type { DB } from "../types";
 import {
@@ -16,6 +16,15 @@ import {
   produtoOperacionalEfetivo,
 } from "./estoque-boxes";
 import { registrarAberturaBoxOperacional, registrarFechamentoBoxOperacional } from "./operacao-boxes";
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T12:00:00.000Z"));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function bancoBase(): DB {
   return {

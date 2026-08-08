@@ -17,7 +17,7 @@ import {
   ReceiptText,
   TriangleAlert,
 } from "lucide-react";
-import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
+import { Badge, Campo, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import ReceberPorNota from "@/components/operacao/ReceberPorNota";
@@ -144,12 +144,19 @@ function RecebimentoConteudo() {
   const [filtroHistorico, setFiltroHistorico] = useState<FiltroRecebimento>(() =>
     parseFiltroRecebimento(searchParams.get("status"))
   );
+  const [recebimentoSelecionado, setRecebimentoSelecionado] = useState<string | null>(() =>
+    searchParams.get("recebimento")
+  );
   const timerDestaque = useRef<ReturnType<typeof setTimeout> | null>(null);
   const salvandoCorrecaoNfeRef = useRef(false);
 
   useEffect(() => {
     setFiltroHistorico(parseFiltroRecebimento(searchParams.get("status")));
-  }, [searchParams]);
+    const recUrl = searchParams.get("recebimento");
+    if (recUrl && (db.recebimentos ?? []).some((r) => r.id === recUrl)) {
+      setRecebimentoSelecionado(recUrl);
+    }
+  }, [searchParams, db.recebimentos]);
 
   const pedidosParaReceber = db.pedidos.filter((p) => p.status === "enviado" || p.status === "confirmado");
   const historicoRecebimentos = useMemo(
@@ -161,10 +168,31 @@ function RecebimentoConteudo() {
     () => filtrarRecebimentosPorStatus(historicoRecebimentos, filtroHistorico),
     [historicoRecebimentos, filtroHistorico]
   );
+  const recebimentoDetalhe = (db.recebimentos ?? []).find((r) => r.id === recebimentoSelecionado);
+  const itensRecebimentoDetalhe = recebimentoDetalhe
+    ? (db.recebimento_itens ?? []).filter((i) => i.recebimento_id === recebimentoDetalhe.id)
+    : [];
+  const pedidoRecebimentoDetalhe = recebimentoDetalhe
+    ? db.pedidos.find((p) => p.id === recebimentoDetalhe.pedido_id)
+    : undefined;
+  const notaRecebimentoDetalhe = recebimentoDetalhe?.nota_id
+    ? db.notas_fiscais.find((n) => n.id === recebimentoDetalhe.nota_id)
+    : undefined;
 
   function irParaFiltroHistorico(proximo: FiltroRecebimento) {
     setFiltroHistorico(proximo);
+    setRecebimentoSelecionado(null);
     router.replace(hrefRecebimento({ status: proximo }), { scroll: false });
+  }
+
+  function abrirRecebimentoHistorico(id: string) {
+    setRecebimentoSelecionado(id);
+    router.replace(hrefRecebimento({ status: filtroHistorico, recebimento: id }), { scroll: false });
+  }
+
+  function fecharRecebimentoHistorico() {
+    setRecebimentoSelecionado(null);
+    router.replace(hrefRecebimento({ status: filtroHistorico }), { scroll: false });
   }
   // DANFEs baixadas da Receita (via certificado) aguardando conferência
   const notasImportadas = db.notas_fiscais.filter(
@@ -745,9 +773,11 @@ function RecebimentoConteudo() {
                     {historicoFiltrado.map((rec) => {
                       const pedidoRec = db.pedidos.find((p) => p.id === rec.pedido_id);
                       return (
-                        <Card
+                        <button
                           key={rec.id}
-                          className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                          type="button"
+                          className="card flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-shadow hover:shadow-md"
+                          onClick={() => abrirRecebimentoHistorico(rec.id)}
                         >
                           <div>
                             <p className="font-semibold">
@@ -763,7 +793,7 @@ function RecebimentoConteudo() {
                           <Badge cor={corBadgeStatusRecebimento(rec.status)}>
                             {rotuloStatusRecebimento(rec.status)}
                           </Badge>
-                        </Card>
+                        </button>
                       );
                     })}
                   </div>
@@ -772,6 +802,58 @@ function RecebimentoConteudo() {
             )}
           </section>
         </div>
+
+        {recebimentoDetalhe && (
+          <Modal
+            aberto
+            titulo={`Recebimento — ${
+              pedidoRecebimentoDetalhe
+                ? nomeFornecedor(db, pedidoRecebimentoDetalhe.fornecedor_id)
+                : "Pedido removido"
+            }`}
+            onFechar={fecharRecebimentoHistorico}
+          >
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Badge cor={corBadgeStatusRecebimento(recebimentoDetalhe.status)}>
+                {rotuloStatusRecebimento(recebimentoDetalhe.status)}
+              </Badge>
+              <p className="text-xs text-slate-500">
+                {dataHoraBR(recebimentoDetalhe.recebido_em)}
+                {recebimentoDetalhe.recebido_por
+                  ? ` · ${nomePerfil(db, recebimentoDetalhe.recebido_por)}`
+                  : ""}
+              </p>
+            </div>
+            {notaRecebimentoDetalhe && (
+              <p className="mb-3 text-sm text-slate-600">
+                NF-e {notaRecebimentoDetalhe.numero || "—"}
+                {notaRecebimentoDetalhe.valor_total != null
+                  ? ` · ${moeda(notaRecebimentoDetalhe.valor_total)}`
+                  : ""}
+              </p>
+            )}
+            {itensRecebimentoDetalhe.length === 0 ? (
+              <Vazio mensagem="Nenhum item registrado neste recebimento." />
+            ) : (
+              <Tabela cabecalho={["Produto", "Esperado", "Recebido", "Validade", "Obs."]}>
+                {itensRecebimentoDetalhe.map((item) => {
+                  const sigla = siglaUnidadeUso(db, item.produto_id);
+                  return (
+                    <tr key={item.id} className={item.divergencia ? "bg-destaque-clara/40" : undefined}>
+                      <td className="px-3 py-2">{nomeProduto(db, item.produto_id)}</td>
+                      <td className="px-3 py-2">{qtd(item.qtd_esperada, sigla)}</td>
+                      <td className="px-3 py-2 font-semibold">{qtd(item.qtd_recebida, sigla)}</td>
+                      <td className="px-3 py-2">{item.validade ? dataBR(item.validade) : "—"}</td>
+                      <td className="px-3 py-2 text-sm text-slate-600">
+                        {item.divergencia || "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </Tabela>
+            )}
+          </Modal>
+        )}
 
         <Modal aberto={Boolean(notaCorrecao)} titulo="Completar ou corrigir dados da NF-e" onFechar={fecharCorrecaoNfe}>
           {notaCorrecao && (

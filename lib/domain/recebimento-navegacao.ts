@@ -14,14 +14,21 @@ export function parseFiltroRecebimento(valor: string | null | undefined): Filtro
 }
 
 /**
- * Deep link de Recebimento (`?status=`).
- * Default omitido: todos → `/recebimento`.
+ * Deep link de Recebimento (`?status=` + opcional `recebimento=`).
+ * Defaults omitidos: todos e sem id → `/recebimento`.
  * `problema` = divergente | parcial (mesmo critério do Painel).
  */
-export function hrefRecebimento(opts?: { status?: FiltroRecebimento }): string {
+export function hrefRecebimento(opts?: {
+  status?: FiltroRecebimento;
+  recebimento?: string;
+}): string {
+  const params = new URLSearchParams();
   const status = opts?.status ?? "todos";
-  if (status === "todos") return "/recebimento";
-  return `/recebimento?status=${status}`;
+  if (status !== "todos") params.set("status", status);
+  const recebimentoId = (opts?.recebimento ?? "").trim();
+  if (recebimentoId) params.set("recebimento", recebimentoId);
+  const q = params.toString();
+  return q ? `/recebimento?${q}` : "/recebimento";
 }
 
 export function filtrarRecebimentosPorStatus<T extends { status: StatusRecebimento }>(

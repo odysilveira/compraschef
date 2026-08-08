@@ -12,6 +12,7 @@ import {
   Clock,
   FileSpreadsheet,
   FileWarning,
+  Landmark,
   Megaphone,
   MessageSquare,
   PackageX,
@@ -28,6 +29,7 @@ import { Badge, Card, Vazio } from "@/components/ui";
 import CartaoAlerta from "@/components/operacao/CartaoAlerta";
 import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@/lib/data";
 import { boletoSuspeitoAtivo, hrefFinanceiro } from "@/lib/domain/financeiro";
+import { contarDebitosExtratoAbertos } from "@/lib/domain/extrato-persistido";
 import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
 import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
 import { hrefListaCompras } from "@/lib/domain/lista-compras-navegacao";
@@ -96,6 +98,10 @@ export default function PainelPage() {
     return dias !== undefined && dias > 0 && dias <= 7;
   }).length;
   const boletosSuspeitos = db.boletos.filter(boletoSuspeitoAtivo).length;
+  const titulosAguardandoConciliacao =
+    db.boletos.filter((b) => b.status === "aguardando_conciliacao").length +
+    (db.pagamentos_pessoas ?? []).filter((p) => p.status === "aguardando_conciliacao").length;
+  const debitosExtratoAbertos = financeiro ? contarDebitosExtratoAbertos(db) : 0;
   const divergencias = db.recebimentos.filter((r) => r.status === "divergente" || r.status === "parcial").length;
   const caixasValidade = caixasVencendo(db, 3).length;
 
@@ -165,6 +171,24 @@ export default function PainelPage() {
             numero={boletosSuspeitos}
             icone={ShieldAlert}
             cor="vermelho"
+          />
+        )}
+        {financeiro && (
+          <CartaoAlerta
+            href={hrefFinanceiro({ aba: "boletos", fila: "aguardando" })}
+            titulo="Títulos aguardando conciliação"
+            numero={titulosAguardandoConciliacao}
+            icone={CircleCheckBig}
+            cor="azul"
+          />
+        )}
+        {financeiro && (
+          <CartaoAlerta
+            href={hrefFinanceiro({ aba: "extrato", extratoStatus: "abertas" })}
+            titulo="Débitos de extrato sem match"
+            numero={debitosExtratoAbertos}
+            icone={Landmark}
+            cor="laranja"
           />
         )}
         {podeRh && resumoRh && (

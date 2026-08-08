@@ -230,7 +230,7 @@ export function exportarContasPagarCsv(
   return `\uFEFF${[cabecalho.join(";"), ...linhas].join("\r\n")}`;
 }
 
-export type AbaFinanceiro = "boletos" | "contas" | "notas";
+export type AbaFinanceiro = "boletos" | "contas" | "notas" | "extrato";
 
 /** Seção da agenda de boletos (deep link a partir do RH / Painel). */
 export type FilaAgendaFinanceiro = "aguardando" | "pagos" | "liberados" | "suspeitos";
@@ -258,7 +258,9 @@ const STATUS_CONTA_PAGAR: StatusContaPagar[] = [
 ];
 
 export function parseAbaFinanceiro(valor: string | null | undefined): AbaFinanceiro {
-  if (valor === "contas" || valor === "notas" || valor === "boletos") return valor;
+  if (valor === "contas" || valor === "notas" || valor === "boletos" || valor === "extrato") {
+    return valor;
+  }
   return "boletos";
 }
 
@@ -304,8 +306,9 @@ export function parseFiltroStatusConta(
 }
 
 /**
- * Deep link do Financeiro (`?aba=` + filtros Contas/Notas + `fila` da agenda).
+ * Deep link do Financeiro (`?aba=` + filtros Contas/Notas + `fila` da agenda + Extrato).
  * Defaults omitidos da query (aba boletos, vencimento todas, status todos, completude todas).
+ * Extrato: `?aba=extrato` e opcional `status=abertas|conciliadas|ignoradas|todas` (default abertas omitido).
  */
 export function hrefFinanceiro(opts?: {
   aba?: AbaFinanceiro;
@@ -313,6 +316,8 @@ export function hrefFinanceiro(opts?: {
   status?: StatusContaPagar | "todos";
   fila?: FilaAgendaFinanceiro;
   completude?: FiltroCompletudeNota;
+  /** Filtro da aba Extrato (`status=` na query). */
+  extratoStatus?: "abertas" | "conciliadas" | "ignoradas" | "todas";
 }): string {
   const params = new URLSearchParams();
   const aba = opts?.aba ?? "boletos";
@@ -336,6 +341,11 @@ export function hrefFinanceiro(opts?: {
   if (aba === "notas") {
     if (opts?.completude && opts.completude !== "todas") {
       params.set("completude", opts.completude);
+    }
+  }
+  if (aba === "extrato") {
+    if (opts?.extratoStatus && opts.extratoStatus !== "abertas") {
+      params.set("status", opts.extratoStatus);
     }
   }
   const q = params.toString();

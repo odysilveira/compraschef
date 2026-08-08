@@ -81,8 +81,12 @@ import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
 import type { ConvocacaoIntermitente, EscalaSlot, PagamentoPessoa, PessoaRH, StatusConvocacao } from "@/lib/types";
 import {
+  LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL,
+  MARCA_LIMITE_SEMANA_OVERRIDE,
   anexarObservacaoOverride,
   avaliarLimiteSemanaPrestador,
+  ehPrestadorEventual,
+  listarPrestadoresNoLimiteSemana,
   textoOverrideLimiteSemana,
 } from "@/lib/domain/prestador-eventual";
 
@@ -170,6 +174,7 @@ function BancoPessoas({
   vazio,
   destaquePessoaId,
   onFiltrarPessoa,
+  marcadoresLimite,
 }: {
   titulo: string;
   pessoas: PessoaRH[];
@@ -188,6 +193,8 @@ function BancoPessoas({
   destaquePessoaId?: string;
   /** Alterna filtro `?pessoa=` no calendário. */
   onFiltrarPessoa?: (pessoaId: string) => void;
+  /** Prestadores eventuais no teto da semana corrente (`count`/`limite`). */
+  marcadoresLimite?: Map<string, { count: number; limite: number }>;
 }) {
   const ehClt = setor === "clt";
   const destaqueRef = useRef<HTMLLIElement | null>(null);
@@ -231,6 +238,7 @@ function BancoPessoas({
           const temAvisoDocs = gate.ok && gate.avisos.length > 0;
           const rotuloSetor =
             setorPessoa !== "clt" ? rotuloSetorConvocacao(setorPessoa as SetorConvocacaoEscala) : "";
+          const limiteInfo = marcadoresLimite?.get(p.id);
           return (
             <li
               key={`${setorPessoa}-${p.id}`}
@@ -254,7 +262,9 @@ function BancoPessoas({
                         : "border-amber-200 bg-amber-50/80"
                 }`}
                 title={
-                  ehClt
+                  limiteInfo
+                    ? `${p.nome}: ${limiteInfo.count}/${limiteInfo.limite} serviços nesta semana (teto operacional)`
+                    : ehClt
                     ? `Arraste ${p.nome} para um dia (CLT · sem convocação)`
                     : gate.ok
                       ? temAvisoDocs
@@ -273,6 +283,14 @@ function BancoPessoas({
               >
                 <GripVertical size={14} className="shrink-0 text-slate-400" />
                 <span className="min-w-0 flex-1 truncate font-medium">{p.nome.split(/\s+/)[0]}</span>
+                {limiteInfo && (
+                  <span
+                    className="shrink-0 rounded bg-amber-100 px-1 text-[10px] font-bold text-amber-900"
+                    aria-label={`Limite semanal ${limiteInfo.count} de ${limiteInfo.limite}`}
+                  >
+                    {limiteInfo.count}/{limiteInfo.limite}×
+                  </span>
+                )}
                 {ehClt && <span className="shrink-0 text-[10px] font-semibold text-sky-800">CLT</span>}
                 {!ehClt && setorPessoa !== "motoboy" && (
                   <span className="shrink-0 text-[10px] font-semibold uppercase text-stone-600">
@@ -447,6 +465,13 @@ function RhEscalaConteudo() {
     () => pessoasAtivas.filter((p) => p.tipo === "prestador_eventual"),
     [pessoasAtivas]
   );
+  const marcadoresLimitePrestador = useMemo(() => {
+    const map = new Map<string, { count: number; limite: number }>();
+    for (const p of listarPrestadoresNoLimiteSemana(db, hoje)) {
+      map.set(p.pessoa_id, { count: p.count, limite: p.limite });
+    }
+    return map;
+  }, [db, hoje]);
   const entregadores = useMemo(
     () => pessoasAtivas.filter((p) => p.tipo === "entregador"),
     [pessoasAtivas]
@@ -1160,6 +1185,17 @@ function RhEscalaConteudo() {
     ? filaAgendaFinanceiroDeStatusPagamento(detalhePagamento.status)
     : undefined;
   const detalhePessoa = detalheSlot ? db.pessoas.find((p) => p.id === detalheSlot.pessoa_id) : undefined;
+  const detalheLimite = detalheSlot
+    ? avaliarLimiteSemanaPrestador(
+        detalhePessoa,
+        db.escala_slots ?? [],
+        detalheSlot.pessoa_id,
+        detalheSlot.data
+      )
+    : null;
+  const detalheOverrideLimite = Boolean(
+    detalheSlot?.observacao?.includes(MARCA_LIMITE_SEMANA_OVERRIDE)
+  );
   const linkWaDetalhe =
     detalheConv && detalhePessoa
       ? linkWhatsAppConvocacao(detalhePessoa.telefone, detalheConv.texto_mensagem)
@@ -1701,6 +1737,7 @@ function RhEscalaConteudo() {
               }
               destaquePessoaId={filtroPessoa || undefined}
               onFiltrarPessoa={alternarFiltroPessoa}
+              marcadoresLimite={marcadoresLimitePrestador}
             />
             <BancoPessoas
               titulo="Motoboys / entregadores"
@@ -1874,6 +1911,18 @@ function RhEscalaConteudo() {
                                     const pessoaSlot = db.pessoas.find((p) => p.id === slot.pessoa_id);
                                     const ehClt = pessoaSlot?.tipo === "colaborador";
                                     const setor = setorDoPlantao(slot, pessoaSlot);
+                                    const avLimite = ehPrestadorEventual(pessoaSlot)
+                                      ? avaliarLimiteSemanaPrestador(
+                                          pessoaSlot,
+                                          db.escala_slots ?? [],
+                                          slot.pessoa_id,
+                                          slot.data
+                                        )
+                                      : null;
+                                    const noLimiteSemana = Boolean(avLimite?.aplica && avLimite.excede);
+                                    const comOverrideLimite = Boolean(
+                                      slot.observacao?.includes(MARCA_LIMITE_SEMANA_OVERRIDE)
+                                    );
                                     const destaque = destaqueSlotFiltroConvocacao(
                                       filtroConvocacao,
                                       conv?.status,
@@ -1900,9 +1949,11 @@ function RhEscalaConteudo() {
                                                   : "bg-amber-200 text-amber-950 ring-1 ring-amber-500 hover:bg-amber-300/90"
                                             : destaque === "atenuado"
                                               ? "bg-stone-100/70 text-slate-400 opacity-45 hover:opacity-70"
-                                              : ehClt
-                                                ? "bg-sky-100 text-sky-950 hover:bg-sky-200/80"
-                                                : "bg-stone-100 text-slate-800 hover:bg-primaria/15"
+                                              : noLimiteSemana
+                                                ? "bg-amber-50 text-amber-950 ring-1 ring-amber-300/80 hover:bg-amber-100/90"
+                                                : ehClt
+                                                  ? "bg-sky-100 text-sky-950 hover:bg-sky-200/80"
+                                                  : "bg-stone-100 text-slate-800 hover:bg-primaria/15"
                                         } ${arrasto?.tipo === "slot" && arrasto.id === slot.id ? "opacity-50" : ""}`}
                                         title={`${nomePessoa(slot.pessoa_id)} · ${
                                           ehClt
@@ -1912,7 +1963,11 @@ function RhEscalaConteudo() {
                                               : slot.funcao ?? "—"
                                         } · ${slot.hora_inicio}–${slot.hora_fim}${
                                           conv ? ` · ${rotuloStatusConvocacao(conv.status)}` : ""
-                                        } — arraste para outro dia`}
+                                        }${
+                                          noLimiteSemana && avLimite
+                                            ? ` · limite ${avLimite.count}/${avLimite.limite} na semana`
+                                            : ""
+                                        }${comOverrideLimite ? " · risco de limite confirmado" : ""} — arraste para outro dia`}
                                         onDragStart={(e) => {
                                           arrastouRef.current = false;
                                           setArrasto({ tipo: "slot", id: slot.id });
@@ -1946,6 +2001,12 @@ function RhEscalaConteudo() {
                                           <span className={`font-normal ${ehClt ? "text-sky-800" : "text-slate-500"}`}>
                                             {" "}
                                             · {abrevSetorConvocacao(setor)}
+                                          </span>
+                                        )}
+                                        {noLimiteSemana && avLimite && (
+                                          <span className="font-semibold text-amber-800">
+                                            {" "}
+                                            · {avLimite.count}/{avLimite.limite}×
                                           </span>
                                         )}
                                       </button>
@@ -2300,7 +2361,20 @@ function RhEscalaConteudo() {
               <p className="text-sm text-slate-500">
                 {detalheSlot.funcao ?? "—"} · {detalheSlot.local ?? LOCAL_PADRAO_ESCALA}
               </p>
-              <Link href={hrefPerfilRh(detalheSlot.pessoa_id, { aba: "escala" })} className="text-sm text-primaria-escura underline">
+              {detalheLimite?.aplica && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Badge cor={detalheLimite.excede ? "laranja" : "cinza"}>
+                    {detalheLimite.count}/{detalheLimite.limite}× na semana
+                  </Badge>
+                  {detalheOverrideLimite && <Badge cor="laranja">Limite confirmado</Badge>}
+                  {detalheLimite.excede && !detalheOverrideLimite && (
+                    <span className="text-xs text-amber-800">
+                      Teto operacional de {LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL}×/semana atingido.
+                    </span>
+                  )}
+                </div>
+              )}
+              <Link href={hrefPerfilRh(detalheSlot.pessoa_id, { aba: "escala" })} className="mt-1 inline-block text-sm text-primaria-escura underline">
                 Ver perfil
               </Link>
             </div>

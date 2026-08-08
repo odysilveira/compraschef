@@ -20,6 +20,7 @@ import {
   TriangleAlert,
   Truck,
   UserRound,
+  Users,
   Utensils,
 } from "lucide-react";
 import { Badge, Card, Vazio } from "@/components/ui";
@@ -200,6 +201,15 @@ export default function PainelPage() {
             titulo="Convocações RH a acompanhar"
             numero={resumoRh.convocacoes_enviadas + resumoRh.convocacoes_rascunho}
             icone={Megaphone}
+            cor="laranja"
+          />
+        )}
+        {podeRh && resumoRh && (
+          <CartaoAlerta
+            href={resumoRh.clt_sem_plantao > 0 ? hrefEscalaRh({ clt: "sem" }) : hrefEscalaRh()}
+            titulo="CLT sem plantão na escala"
+            numero={resumoRh.clt_sem_plantao}
+            icone={Users}
             cor="laranja"
           />
         )}

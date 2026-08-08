@@ -22,6 +22,7 @@ import { hrefFinanceiro } from "@/lib/domain/financeiro";
 import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
 import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
 import { hrefPedidos } from "@/lib/domain/pedidos-navegacao";
+import { hrefRecebimento } from "@/lib/domain/recebimento-navegacao";
 import { hrefPagamentosRh, resumirOperacionalRh } from "@/lib/domain/resumo-rh";
 import { podeVerValores, usePapel, usePodeAcessarModulo } from "@/lib/roles";
 import { dataBR, diasAte, moeda } from "@/lib/format";
@@ -141,7 +142,7 @@ export default function PainelPage() {
           />
         )}
         <CartaoAlerta
-          href="/recebimento"
+          href={hrefRecebimento({ status: "problema" })}
           titulo="Divergências de recebimento"
           numero={divergencias}
           icone={TriangleAlert}

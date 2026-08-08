@@ -2,6 +2,7 @@ import { dataBR, moeda } from "../format";
 import type { ConsumoPessoa, PagamentoPessoa, PessoaRH } from "../types";
 import { RAZAO_SOCIAL_PADRAO, formatDataBrLonga } from "./escala";
 import { rotuloTipoPagamentoPessoa } from "./pagamentos-pessoas";
+import { AVISO_REPASSE_INTEGRAL_PRESTADOR, ehPrestadorEventual } from "./prestador-eventual";
 import { rotuloFuncao, rotuloTipoPessoa, somenteDigitosTelefone } from "./rh";
 
 function fmtHoras(valor: number): string {
@@ -38,15 +39,21 @@ export function montarTextoReciboPagamentoPessoa(input: {
   const bruto = pagamento.valor_bruto ?? pagamento.valor;
   const horas = pagamento.horas;
   const valorHora = pagamento.valor_hora ?? pessoa.valor_hora;
+  const ePrestador = ehPrestadorEventual(pessoa);
   const eIntermitente =
-    pagamento.tipo === "intermitente_periodo" ||
-    pagamento.tipo === "freela_hora" ||
-    pessoa.tipo === "intermitente" ||
-    pessoa.tipo === "entregador";
+    !ePrestador &&
+    (pagamento.tipo === "intermitente_periodo" ||
+      pagamento.tipo === "freela_hora" ||
+      pessoa.tipo === "intermitente" ||
+      pessoa.tipo === "entregador");
 
   const linhas: string[] = [];
 
-  if (eIntermitente && horas != null && horas > 0) {
+  if (ePrestador && horas != null && horas > 0) {
+    linhas.push(
+      `${primeiroNome(pessoa.nome)}, serviço eventual de ${dataPeriodo(pagamento)}: ${fmtHoras(horas)} h.`
+    );
+  } else if (eIntermitente && horas != null && horas > 0) {
     linhas.push(
       `${primeiroNome(pessoa.nome)}, período de ${dataPeriodo(pagamento)} encerrado: ${fmtHoras(horas)} h líquidas/pagas.`
     );
@@ -58,7 +65,11 @@ export function montarTextoReciboPagamentoPessoa(input: {
   linhas.push("");
   linhas.push("RECIBO DISCRIMINADO");
   linhas.push(`Empresa: ${razao}`);
-  linhas.push(`Trabalhador(a): ${pessoa.nome}`);
+  linhas.push(
+    ePrestador
+      ? `Prestador(a): ${pessoa.nome}`
+      : `Trabalhador(a): ${pessoa.nome}`
+  );
   linhas.push(`Tipo: ${rotuloTipoPessoa(pessoa.tipo)}${pessoa.funcao ? ` · ${rotuloFuncao(pessoa)}` : ""}`);
   if (pessoa.cpf) linhas.push(`CPF: ${pessoa.cpf}`);
   linhas.push(`Natureza: ${rotuloTipoPagamentoPessoa(pagamento.tipo)}`);
@@ -68,7 +79,7 @@ export function montarTextoReciboPagamentoPessoa(input: {
 
   if (horas != null && horas > 0 && valorHora != null && valorHora > 0) {
     const horasX = Number((horas * valorHora).toFixed(2));
-    linhas.push(`• Horas pagas: ${fmtHoras(horas)} h × ${moeda(valorHora)} = ${moeda(horasX)}`);
+    linhas.push(`• Horas: ${fmtHoras(horas)} h × ${moeda(valorHora)} = ${moeda(horasX)}`);
     if (eIntermitente) {
       linhas.push(
         "• Verbas proporcionais (13º, férias + 1/3 e DSR): incluídas no valor bruto quando aplicável ao período"
@@ -76,11 +87,15 @@ export function montarTextoReciboPagamentoPessoa(input: {
     }
   }
 
+  if (ePrestador) {
+    linhas.push(`• ${AVISO_REPASSE_INTEGRAL_PRESTADOR}`);
+  }
+
   linhas.push(`• Valor bruto: ${moeda(bruto)}`);
-  if (pagamento.desconto_adiantamento && pagamento.desconto_adiantamento > 0) {
+  if (!ePrestador && pagamento.desconto_adiantamento && pagamento.desconto_adiantamento > 0) {
     linhas.push(`• (−) Adiantamento: ${moeda(pagamento.desconto_adiantamento)}`);
   }
-  if (pagamento.desconto_consumo && pagamento.desconto_consumo > 0) {
+  if (!ePrestador && pagamento.desconto_consumo && pagamento.desconto_consumo > 0) {
     linhas.push(`• (−) Consumo no restaurante: ${moeda(pagamento.desconto_consumo)}`);
     const consumos = (input.consumos ?? []).filter((c) => (pagamento.consumo_ids ?? []).includes(c.id));
     for (const c of consumos) {
@@ -88,6 +103,9 @@ export function montarTextoReciboPagamentoPessoa(input: {
     }
   }
   linhas.push(`• Líquido: ${moeda(liquido)}`);
+  if (ePrestador) {
+    linhas.push("• Líquido = bruto (repasse integral, sem retenção neste módulo).");
+  }
   linhas.push("");
 
   if (pagamento.pagamento_data) {
@@ -108,14 +126,24 @@ export function montarTextoReciboPagamentoPessoa(input: {
   }
 
   linhas.push("");
-  linhas.push(
-    "Segue o recibo discriminado — por favor, confirme o recebimento e assine a via física na próxima vez que estiver aqui."
-  );
-  linhas.push("");
-  if (eIntermitente) {
-    linhas.push("Esta mensagem integra o registro do contrato de trabalho intermitente.");
+  if (ePrestador) {
+    linhas.push(
+      "Segue o recibo do serviço eventual — confirme o recebimento. Este texto não caracteriza vínculo empregatício."
+    );
+    linhas.push("");
+    linhas.push(
+      "Esta mensagem registra pagamento de prestação eventual de serviço (fora da folha CLT)."
+    );
   } else {
-    linhas.push("Este recibo integra o registro do pagamento junto à empresa.");
+    linhas.push(
+      "Segue o recibo discriminado — por favor, confirme o recebimento e assine a via física na próxima vez que estiver aqui."
+    );
+    linhas.push("");
+    if (eIntermitente) {
+      linhas.push("Esta mensagem integra o registro do contrato de trabalho intermitente.");
+    } else {
+      linhas.push("Este recibo integra o registro do pagamento junto à empresa.");
+    }
   }
 
   return linhas.join("\n");

@@ -890,7 +890,7 @@ function RhPerfilConteudo() {
           <p>{AVISO_REPASSE_INTEGRAL_PRESTADOR}</p>
           <p className="mt-1 text-xs">
             Limite operacional: {LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL} serviços por semana (confirmação na
-            escala no próximo passo).
+            escala ao lançar além do teto).
           </p>
         </Card>
       )}

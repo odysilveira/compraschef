@@ -756,7 +756,7 @@ function RhPessoasConteudo() {
                 <>
                   <div className="sm:col-span-2 rounded-card border border-destaque bg-destaque-clara/40 px-3 py-2 text-sm text-destaque">
                     {AVISO_REPASSE_INTEGRAL_PRESTADOR} Limite operacional:{" "}
-                    {LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL} serviços por semana (confirmação na escala em breve).
+                    {LIMITE_SERVICOS_SEMANA_PRESTADOR_EVENTUAL} serviços por semana (confirmação na escala).
                   </div>
                   <Campo rotulo="Valor-hora *">
                     <input

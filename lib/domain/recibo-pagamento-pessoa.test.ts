@@ -73,6 +73,39 @@ describe("recibo-pagamento-pessoa", () => {
     expect(texto).toContain("carlos.extra@pix");
     expect(texto).toContain("aguardando conciliação");
     expect(texto).toContain("contrato de trabalho intermitente");
+    expect(texto).toContain("13º");
+  });
+
+  it("monta recibo de prestador eventual com repasse integral (sem verbas CLT)", () => {
+    const texto = montarTextoReciboPagamentoPessoa({
+      pessoa: pessoa({
+        id: "pes-prest-1",
+        nome: "Diego Eventual",
+        tipo: "prestador_eventual",
+        chave_pix: "diego.eventual@pix",
+        valor_hora: 25,
+      }),
+      pagamento: pagamento({
+        pessoa_id: "pes-prest-1",
+        tipo: "freela_hora",
+        descricao: "Serviço eventual — 4 h",
+        valor: 100,
+        valor_bruto: 100,
+        horas: 4,
+        valor_hora: 25,
+        pagamento_valor: 100,
+        status: "previsto",
+        pagamento_data: undefined,
+      }),
+    });
+    expect(texto).toContain("serviço eventual");
+    expect(texto).toContain("Prestador(a): Diego Eventual");
+    expect(texto).toContain("repasse integral");
+    expect(texto).toContain("Líquido = bruto");
+    expect(texto).toContain("prestação eventual de serviço");
+    expect(texto).not.toContain("13º");
+    expect(texto).not.toContain("contrato de trabalho intermitente");
+    expect(texto).not.toContain("Trabalhador(a)");
   });
 
   it("lista consumos quando houver desconto", () => {

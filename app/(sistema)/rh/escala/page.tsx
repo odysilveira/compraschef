@@ -80,6 +80,11 @@ import { hrefPerfilRh, rotuloFuncao, rotuloTipoPessoa } from "@/lib/domain/rh";
 import { usePodeAcessarModulo } from "@/lib/roles";
 import { moeda } from "@/lib/format";
 import type { ConvocacaoIntermitente, EscalaSlot, PagamentoPessoa, PessoaRH, StatusConvocacao } from "@/lib/types";
+import {
+  anexarObservacaoOverride,
+  avaliarLimiteSemanaPrestador,
+  textoOverrideLimiteSemana,
+} from "@/lib/domain/prestador-eventual";
 
 function setorArrastoIntermitente(pessoa: PessoaRH): Exclude<SetorConvocacaoEscala, "motoboy"> {
   const setor = setorOperacionalDaPessoa(pessoa);
@@ -316,6 +321,16 @@ function RhEscalaConteudo() {
   const podeRh = usePodeAcessarModulo("rh");
   const [form, setForm] = useState<FormPlantao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [pendenteLimite, setPendenteLimite] = useState<{
+    nome: string;
+    data: string;
+    count: number;
+    limite: number;
+    inicio: string;
+    fim: string;
+    executar: () => void;
+  } | null>(null);
+  const [confirmouRiscoLimite, setConfirmouRiscoLimite] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [mensagemHrefPagamentos, setMensagemHrefPagamentos] = useState<string | null>(null);
@@ -428,6 +443,10 @@ function RhEscalaConteudo() {
     () => pessoasAtivas.filter((p) => p.tipo === "intermitente"),
     [pessoasAtivas]
   );
+  const prestadoresEventuais = useMemo(
+    () => pessoasAtivas.filter((p) => p.tipo === "prestador_eventual"),
+    [pessoasAtivas]
+  );
   const entregadores = useMemo(
     () => pessoasAtivas.filter((p) => p.tipo === "entregador"),
     [pessoasAtivas]
@@ -528,36 +547,85 @@ function RhEscalaConteudo() {
     });
   }
 
+  function fecharPendenteLimite() {
+    setPendenteLimite(null);
+    setConfirmouRiscoLimite(false);
+  }
+
+  /** Se exceder 2×/semana do prestador eventual, abre modal; senão executa na hora. */
+  function comChecagemLimitePrestador(
+    pessoa: PessoaRH,
+    data: string,
+    executar: (observacaoOverride?: string) => void,
+    opts?: { excluirSlotId?: string }
+  ) {
+    const av = avaliarLimiteSemanaPrestador(
+      pessoa,
+      db.escala_slots ?? [],
+      pessoa.id,
+      data,
+      opts
+    );
+    if (!av.aplica || !av.excede) {
+      executar();
+      return;
+    }
+    setConfirmouRiscoLimite(false);
+    setPendenteLimite({
+      nome: pessoa.nome,
+      data,
+      count: av.count,
+      limite: av.limite,
+      inicio: av.inicio,
+      fim: av.fim,
+      executar: () => executar(textoOverrideLimiteSemana(av)),
+    });
+  }
+
   function salvarPlantao(e: FormEvent) {
     e.preventDefault();
     if (!form) return;
-    const proximo = structuredClone(db);
-    const resultado = criarSlot(
-      proximo,
-      {
-        pessoa_id: form.pessoa_id,
-        data: form.data,
-        hora_inicio: form.hora_inicio,
-        hora_fim: form.hora_fim,
-        intervalo_min: Number(form.intervalo_min) || 0,
-        funcao: form.funcao,
-        local: form.local,
-      },
-      { id: uid("esc"), convocacaoId: uid("conv") }
-    );
-    if (!resultado.sucesso) {
-      setErro(resultado.erros.join(" "));
+    const pessoa = db.pessoas.find((p) => p.id === form.pessoa_id);
+    if (!pessoa) {
+      setErro("Pessoa não encontrada.");
       return;
     }
-    mutate((atual) => Object.assign(atual, proximo));
-    setForm(null);
-    setMensagem(
-      resultado.convocacao
-        ? "Plantão criado com convocação em rascunho. Copie o WhatsApp e registre o aceite."
-        : "Plantão lançado na escala."
-    );
-    if (resultado.avisos.length) setAviso(resultado.avisos.join(" "));
-    if (resultado.slot) setDetalheSlotId(resultado.slot.id);
+
+    const lancar = (observacaoOverride?: string) => {
+      const proximo = structuredClone(db);
+      const resultado = criarSlot(
+        proximo,
+        {
+          pessoa_id: form.pessoa_id,
+          data: form.data,
+          hora_inicio: form.hora_inicio,
+          hora_fim: form.hora_fim,
+          intervalo_min: Number(form.intervalo_min) || 0,
+          funcao: form.funcao,
+          local: form.local,
+          observacao: observacaoOverride,
+        },
+        { id: uid("esc"), convocacaoId: uid("conv") }
+      );
+      if (!resultado.sucesso) {
+        setErro(resultado.erros.join(" "));
+        return;
+      }
+      mutate((atual) => Object.assign(atual, proximo));
+      setForm(null);
+      fecharPendenteLimite();
+      setMensagem(
+        resultado.convocacao
+          ? "Plantão criado com convocação em rascunho. Copie o WhatsApp e registre o aceite."
+          : observacaoOverride
+            ? "Plantão lançado com confirmação do limite semanal (risco assumido)."
+            : "Plantão lançado na escala."
+      );
+      if (resultado.avisos.length) setAviso(resultado.avisos.join(" "));
+      if (resultado.slot) setDetalheSlotId(resultado.slot.id);
+    };
+
+    comChecagemLimitePrestador(pessoa, form.data, lancar);
   }
 
   async function copiarTexto(texto: string, convocacaoId: string) {
@@ -914,18 +982,38 @@ function RhEscalaConteudo() {
   }
 
   function soltarPlantaoNoDia(slotId: string, novaData: string) {
-    const proximo = structuredClone(db);
-    const r = moverSlotParaData(proximo, slotId, novaData);
+    const slot = (db.escala_slots ?? []).find((s) => s.id === slotId);
+    const pessoa = slot ? db.pessoas.find((p) => p.id === slot.pessoa_id) : undefined;
     setArrasto(null);
     setDiaDestinoHover(null);
-    if (!r.sucesso) {
-      setErro(r.erros.join(" "));
+
+    const mover = (observacaoOverride?: string) => {
+      const proximo = structuredClone(db);
+      const r = moverSlotParaData(proximo, slotId, novaData);
+      if (!r.sucesso) {
+        setErro(r.erros.join(" "));
+        return;
+      }
+      if (observacaoOverride && r.slot) {
+        r.slot.observacao = anexarObservacaoOverride(r.slot.observacao, observacaoOverride);
+        r.slot.atualizado_em = new Date().toISOString();
+      }
+      mutate((atual) => Object.assign(atual, proximo));
+      fecharPendenteLimite();
+      setErro(null);
+      setMensagem(
+        observacaoOverride
+          ? `Plantão movido para ${formatDataBrLonga(novaData)} (limite semanal confirmado).`
+          : `Plantão movido para ${formatDataBrLonga(novaData)}.`
+      );
+      if (r.avisos.length) setAviso(r.avisos.join(" "));
+    };
+
+    if (pessoa) {
+      comChecagemLimitePrestador(pessoa, novaData, mover, { excluirSlotId: slotId });
       return;
     }
-    mutate((atual) => Object.assign(atual, proximo));
-    setErro(null);
-    setMensagem(`Plantão movido para ${formatDataBrLonga(novaData)}.`);
-    if (r.avisos.length) setAviso(r.avisos.join(" "));
+    mover();
   }
 
   function soltarPessoaNoDia(pessoaId: string, data: string, setor: SetorArrastoEscala) {
@@ -998,40 +1086,51 @@ function RhEscalaConteudo() {
       setErro("Colaborador CLT: use a lista CLT ou Gerar padrão 12x36.");
       return;
     }
-    const gate = validarPreRequisitosConvocacao(pessoa);
-    if (!gate.ok) {
-      setErro(gate.erros.join(" "));
-      setAviso("Marque contrato e eSocial no perfil antes de convocar.");
-      return;
+    if (pessoaPrecisaConvocacao(pessoa.tipo)) {
+      const gate = validarPreRequisitosConvocacao(pessoa);
+      if (!gate.ok) {
+        setErro(gate.erros.join(" "));
+        setAviso("Marque contrato e eSocial no perfil antes de convocar.");
+        return;
+      }
     }
-    const proximo = structuredClone(db);
-    const resultado = criarSlot(
-      proximo,
-      {
-        pessoa_id: pessoaId,
-        data,
-        hora_inicio: "18:00",
-        hora_fim: "23:30",
-        intervalo_min: 30,
-        funcao: rotuloSetorConvocacao(setor),
-        local: LOCAL_PADRAO_ESCALA,
-      },
-      { id: uid("esc"), convocacaoId: uid("conv") }
-    );
-    if (!resultado.sucesso) {
-      setErro(resultado.erros.join(" "));
-      return;
-    }
-    mutate((atual) => Object.assign(atual, proximo));
-    setErro(null);
-    const nomeCurto = pessoa.nome.split(/\s+/)[0];
-    setMensagem(
-      resultado.convocacao
-        ? `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)} (convocação em rascunho).`
-        : `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)}.`
-    );
-    if (resultado.avisos.length) setAviso(resultado.avisos.join(" "));
-    if (resultado.slot) setDetalheSlotId(resultado.slot.id);
+
+    const lancar = (observacaoOverride?: string) => {
+      const proximo = structuredClone(db);
+      const resultado = criarSlot(
+        proximo,
+        {
+          pessoa_id: pessoaId,
+          data,
+          hora_inicio: "18:00",
+          hora_fim: "23:30",
+          intervalo_min: 30,
+          funcao: rotuloSetorConvocacao(setor),
+          local: LOCAL_PADRAO_ESCALA,
+          observacao: observacaoOverride,
+        },
+        { id: uid("esc"), convocacaoId: uid("conv") }
+      );
+      if (!resultado.sucesso) {
+        setErro(resultado.erros.join(" "));
+        return;
+      }
+      mutate((atual) => Object.assign(atual, proximo));
+      fecharPendenteLimite();
+      setErro(null);
+      const nomeCurto = pessoa.nome.split(/\s+/)[0];
+      setMensagem(
+        observacaoOverride
+          ? `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)} (limite semanal confirmado).`
+          : resultado.convocacao
+            ? `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)} (convocação em rascunho).`
+            : `${nomeCurto} em ${rotuloSetorConvocacao(setor)} · ${formatDataBrLonga(data)}.`
+      );
+      if (resultado.avisos.length) setAviso(resultado.avisos.join(" "));
+      if (resultado.slot) setDetalheSlotId(resultado.slot.id);
+    };
+
+    comChecagemLimitePrestador(pessoa, data, lancar);
   }
 
   function aoSoltarNoDia(dia: string, dataTransfer: DataTransfer) {
@@ -1538,7 +1637,8 @@ function RhEscalaConteudo() {
               <p className="text-sm font-bold text-slate-900">Quem entra na escala</p>
               <p className="text-xs text-slate-600">
                 CLT: solte num dia e o sistema preenche o 12x36. Intermitentes: arraste para o dia — gera
-                convocação em rascunho (WhatsApp). Motoboys entram na lista abaixo.
+                convocação em rascunho (WhatsApp). Prestadores eventuais: máx. 2×/semana (com confirmação).
+                Motoboys entram na lista abaixo.
               </p>
             </div>
             <BancoPessoas
@@ -1580,6 +1680,29 @@ function RhEscalaConteudo() {
               onFiltrarPessoa={alternarFiltroPessoa}
             />
             <BancoPessoas
+              titulo="Prestadores eventuais"
+              pessoas={prestadoresEventuais}
+              setor="salao"
+              resolverSetor={setorArrastoIntermitente}
+              arrasto={arrasto}
+              onDragStart={(pessoaId, setor) => setArrasto({ tipo: "pessoa", id: pessoaId, setor })}
+              onDragEnd={() => {
+                setArrasto(null);
+                setDiaDestinoHover(null);
+              }}
+              vazio={
+                <>
+                  Nenhum prestador eventual — cadastre em{" "}
+                  <Link href="/rh" className="underline">
+                    Pessoas
+                  </Link>
+                  .
+                </>
+              }
+              destaquePessoaId={filtroPessoa || undefined}
+              onFiltrarPessoa={alternarFiltroPessoa}
+            />
+            <BancoPessoas
               titulo="Motoboys / entregadores"
               pessoas={entregadores}
               setor="motoboy"
@@ -1592,7 +1715,10 @@ function RhEscalaConteudo() {
               destaquePessoaId={filtroPessoa || undefined}
               onFiltrarPessoa={alternarFiltroPessoa}
             />
-            {colaboradores.length === 0 && intermitentes.length === 0 && entregadores.length === 0 && (
+            {colaboradores.length === 0 &&
+              intermitentes.length === 0 &&
+              prestadoresEventuais.length === 0 &&
+              entregadores.length === 0 && (
               <p className="text-xs text-slate-500">
                 Cadastre pessoas em{" "}
                 <Link href="/rh" className="underline">
@@ -1854,6 +1980,53 @@ function RhEscalaConteudo() {
           </p>
         </div>
       </div>
+
+      <Modal
+        aberto={pendenteLimite !== null}
+        titulo="Limite semanal do prestador eventual"
+        onFechar={fecharPendenteLimite}
+        fecharAoClicarFundo={false}
+      >
+        {pendenteLimite && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-700">
+              <span className="font-semibold">{pendenteLimite.nome}</span> já tem{" "}
+              <span className="font-semibold">{pendenteLimite.count}</span> serviço(s) nesta semana (
+              {formatDataBrLonga(pendenteLimite.inicio)} a {formatDataBrLonga(pendenteLimite.fim)}). O limite
+              operacional é {pendenteLimite.limite}× por semana.
+            </p>
+            <p className="rounded-card border border-destaque bg-destaque-clara/40 px-3 py-2 text-sm text-destaque">
+              Incluir de novo aumenta o risco de caracterização de vínculo. Use só se não houver outra pessoa
+              disponível.
+            </p>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={confirmouRiscoLimite}
+                onChange={(e) => setConfirmouRiscoLimite(e.target.checked)}
+              />
+              <span>Entendo o risco e quero incluir mesmo assim.</span>
+            </label>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" className="btn-secundario" onClick={fecharPendenteLimite}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primario"
+                disabled={!confirmouRiscoLimite}
+                onClick={() => {
+                  if (!confirmouRiscoLimite) return;
+                  pendenteLimite.executar();
+                }}
+              >
+                Incluir mesmo assim
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal aberto={form !== null} titulo="Novo plantão" onFechar={() => setForm(null)} fecharAoClicarFundo={false}>
         {form && (

@@ -17,12 +17,14 @@ const ESTILOS: Record<Cor, { fundo: string; texto: string; icone: string }> = {
 interface Props {
   href: string;
   titulo: string;
+  /** Linha auxiliar sob o título (ex.: último extrato). */
+  subtitulo?: string;
   numero: number;
   icone: LucideIcon;
   cor: Cor;
 }
 
-export default function CartaoAlerta({ href, titulo, numero, icone: Icone, cor }: Props) {
+export default function CartaoAlerta({ href, titulo, subtitulo, numero, icone: Icone, cor }: Props) {
   const zerado = numero === 0;
   const estilo = ESTILOS[cor];
   return (
@@ -44,6 +46,9 @@ export default function CartaoAlerta({ href, titulo, numero, icone: Icone, cor }
           {numero}
         </span>
         <span className="mt-1 block text-sm font-medium text-slate-600">{titulo}</span>
+        {subtitulo && (
+          <span className="mt-0.5 block text-xs text-slate-500">{subtitulo}</span>
+        )}
       </span>
     </Link>
   );

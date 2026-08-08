@@ -29,7 +29,7 @@ import { Badge, Card, Vazio } from "@/components/ui";
 import CartaoAlerta from "@/components/operacao/CartaoAlerta";
 import { caixasVencendo, nomeFornecedor, produtosAbaixoDoMinimo, useDB } from "@/lib/data";
 import { boletoSuspeitoAtivo, hrefFinanceiro } from "@/lib/domain/financeiro";
-import { contarDebitosExtratoAbertos } from "@/lib/domain/extrato-persistido";
+import { contarDebitosExtratoAbertos, rotuloOrigemExtrato, ultimaImportacaoExtrato } from "@/lib/domain/extrato-persistido";
 import { hrefEstoque } from "@/lib/domain/estoque-navegacao";
 import { hrefCotacoes } from "@/lib/domain/cotacoes-navegacao";
 import { hrefListaCompras } from "@/lib/domain/lista-compras-navegacao";
@@ -49,7 +49,7 @@ import {
   resumirOperacionalRh,
 } from "@/lib/domain/resumo-rh";
 import { podeVerValores, usePapel, usePodeAcessarModulo } from "@/lib/roles";
-import { dataBR, diasAte, moeda } from "@/lib/format";
+import { dataBR, dataHoraBR, diasAte, moeda } from "@/lib/format";
 import type { DB, Pedido, StatusPedido } from "@/lib/types";
 
 const ROTULO_STATUS_PEDIDO: Record<StatusPedido, string> = {
@@ -102,6 +102,10 @@ export default function PainelPage() {
     db.boletos.filter((b) => b.status === "aguardando_conciliacao").length +
     (db.pagamentos_pessoas ?? []).filter((p) => p.status === "aguardando_conciliacao").length;
   const debitosExtratoAbertos = financeiro ? contarDebitosExtratoAbertos(db) : 0;
+  const ultimoExtrato = financeiro ? ultimaImportacaoExtrato(db) : null;
+  const subtituloExtrato = ultimoExtrato
+    ? `Último: ${rotuloOrigemExtrato(ultimoExtrato.origem)} · ${dataHoraBR(ultimoExtrato.importado_em)}`
+    : "Nenhum extrato importado ainda";
   const divergencias = db.recebimentos.filter((r) => r.status === "divergente" || r.status === "parcial").length;
   const caixasValidade = caixasVencendo(db, 3).length;
 
@@ -186,6 +190,7 @@ export default function PainelPage() {
           <CartaoAlerta
             href={hrefFinanceiro({ aba: "extrato", extratoStatus: "abertas" })}
             titulo="Débitos de extrato sem match"
+            subtitulo={subtituloExtrato}
             numero={debitosExtratoAbertos}
             icone={Landmark}
             cor="laranja"

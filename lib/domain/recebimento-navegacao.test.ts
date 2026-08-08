@@ -13,6 +13,10 @@ describe("navegação recebimento", () => {
     expect(hrefRecebimento()).toBe("/recebimento");
     expect(hrefRecebimento({ status: "todos" })).toBe("/recebimento");
     expect(hrefRecebimento({ status: "problema" })).toBe("/recebimento?status=problema");
+    expect(hrefRecebimento({ status: "ok", recebimento: "rec-2" })).toBe(
+      "/recebimento?status=ok&recebimento=rec-2"
+    );
+    expect(hrefRecebimento({ recebimento: "rec-1" })).toBe("/recebimento?recebimento=rec-1");
   });
 
   it("filtra problema = divergente|parcial", () => {

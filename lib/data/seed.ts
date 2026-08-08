@@ -912,6 +912,8 @@ export const seedDB: DB = {
     { id: "ped-2", fornecedor_id: "forn-hortifruti", status: "entregue", valor_total: 318.4, criado_em: diasAtras(6) },
     // Pedido confirmado, entrega prevista hoje
     { id: "ped-3", fornecedor_id: "forn-frigorifico", status: "confirmado", valor_total: 1240.0, criado_em: diasAtras(3) },
+    // Pedido antigo entregue sem divergência (histórico Ok)
+    { id: "ped-4", fornecedor_id: "forn-laticinios", status: "entregue", valor_total: 190.0, criado_em: diasAtras(12) },
   ],
 
   pedido_itens: [
@@ -921,6 +923,7 @@ export const seedDB: DB = {
     { id: "pi-4", pedido_id: "ped-2", produto_id: "prod-cebola", quantidade: 12, preco_unitario: 4.5 },
     { id: "pi-5", pedido_id: "ped-2", produto_id: "prod-alface", quantidade: 27, preco_unitario: 2.8 },
     { id: "pi-6", pedido_id: "ped-3", produto_id: "prod-file", quantidade: 20, preco_unitario: 62.0 },
+    { id: "pi-7", pedido_id: "ped-4", produto_id: "prod-mucarela", quantidade: 5, preco_unitario: 38.0 },
   ],
 
   notas_fiscais: [
@@ -989,14 +992,17 @@ export const seedDB: DB = {
   ],
 
   recebimentos: [
-    // Recebimento OK do pedido hortifrúti — com uma divergência parcial no tomate
+    // Recebimento com divergência no tomate (Painel → Divergências)
     { id: "rec-1", pedido_id: "ped-2", nota_id: "nf-1", status: "divergente", recebido_por: "perfil-lider", recebido_em: diasAtras(5) },
+    // Recebimento Ok — chip “Ok” do histórico
+    { id: "rec-2", pedido_id: "ped-4", status: "ok", recebido_por: "perfil-lider", recebido_em: diasAtras(11) },
   ],
 
   recebimento_itens: [
     { id: "ri-1", recebimento_id: "rec-1", produto_id: "prod-tomate", qtd_esperada: 24, qtd_recebida: 20, validade: soData(diasAFrente(4)), divergencia: "Faltaram 4 kg — 1 caixa veio com fundo amassado, devolvida" },
     { id: "ri-2", recebimento_id: "rec-1", produto_id: "prod-cebola", qtd_esperada: 12, qtd_recebida: 12, validade: soData(diasAFrente(15)) },
     { id: "ri-3", recebimento_id: "rec-1", produto_id: "prod-alface", qtd_esperada: 27, qtd_recebida: 27, validade: soData(diasAFrente(3)) },
+    { id: "ri-4", recebimento_id: "rec-2", produto_id: "prod-mucarela", qtd_esperada: 5, qtd_recebida: 5, validade: soData(diasAFrente(25)) },
   ],
 
   movimentos_estoque: [

@@ -6,8 +6,8 @@ export const TIPOS_PAGAMENTO_PESSOA: Array<{ id: TipoPagamentoPessoa; rotulo: st
   { id: "adiantamento", rotulo: "Adiantamento" },
   { id: "vale", rotulo: "Vale" },
   { id: "intermitente_periodo", rotulo: "Intermitente (período)" },
-  { id: "freela_hora", rotulo: "Por hora" },
-  { id: "freela_servico", rotulo: "Por serviço" },
+  { id: "freela_hora", rotulo: "Por hora (repasse integral)" },
+  { id: "freela_servico", rotulo: "Por serviço (repasse integral)" },
   { id: "outro", rotulo: "Outro" },
 ];
 

@@ -453,15 +453,29 @@ export interface HistoricoCorrecaoFornecedorNfe {
   justificativa?: string;
 }
 
+/** NF-e mercadoria (55) vs NFS-e serviço municipal. */
+export type TipoNotaFiscal = "nfe" | "nfse";
+
+export type MeioPagamentoNota = "boleto" | "pix";
+
 export interface NotaFiscal {
   id: string;
   fornecedor_id: string;
   pedido_id?: string;
   numero: string;
+  /** NF-e: chave 44 dígitos. NFS-e: chave municipal (ex. NFS…). */
   chave_acesso: string;
+  /** Distinto quando tipo=nfse (espelha chave_acesso ou chave própria). */
+  chave_nfse?: string;
+  tipo?: TipoNotaFiscal;
   cnpj_emitente?: string;
   razao_social_emitente?: string;
   xml_url?: string;
+  /** Nome do PDF importado (NFS-e costuma vir só em PDF). */
+  arquivo_pdf_nome?: string;
+  descricao_servico?: string;
+  municipio_emissao?: string;
+  meio_pagamento_esperado?: MeioPagamentoNota;
   valor_total: number;
   emitida_em: string;
   importada_em: string;
@@ -487,6 +501,8 @@ export interface Boleto {
   cnpj_beneficiario?: string;
   linha_digitavel?: string;
   status: StatusBoleto;
+  /** Título de NFS-e pode ser boleto bancário ou PIX. */
+  meio_pagamento_esperado?: MeioPagamentoNota;
   documento_boleto_id?: string;
   status_conferencia?: "aguardando_documento" | "conferido" | "em_analise";
   conferido_em?: string;
@@ -537,7 +553,7 @@ export type StatusContaPagar =
   | "conciliado"
   | "cancelado";
 
-export type OrigemContaPagar = "nfe" | "manual" | "recorrente";
+export type OrigemContaPagar = "nfe" | "nfse" | "manual" | "recorrente";
 
 export interface ContaPagar {
   id: string;

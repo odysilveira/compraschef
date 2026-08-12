@@ -432,6 +432,30 @@ export function atualizarComNovidades(db: DB): boolean {
       mudou = true;
     }
   }
+
+  // Cadastro ADG (boleto real R$ 613,34) — injeta em DBs já persistidos sem sobrescrever.
+  for (const semente of seedDB.fornecedores) {
+    if (semente.id !== "forn-adg-cakes") continue;
+    if (!db.fornecedores.some((f) => f.id === semente.id || f.cnpj.replace(/\D/g, "") === "37681455000120")) {
+      db.fornecedores.push(structuredClone(semente));
+      mudou = true;
+    }
+  }
+  for (const semente of seedDB.notas_fiscais) {
+    if (semente.id !== "nf-adg-613") continue;
+    if (!db.notas_fiscais.some((n) => n.id === semente.id)) {
+      db.notas_fiscais.push(structuredClone(semente));
+      mudou = true;
+    }
+  }
+  for (const semente of seedDB.boletos) {
+    if (semente.id !== "bol-adg-613") continue;
+    if (!db.boletos.some((b) => b.id === semente.id)) {
+      db.boletos.push(structuredClone(semente));
+      mudou = true;
+    }
+  }
+
   return mudou;
 }
 

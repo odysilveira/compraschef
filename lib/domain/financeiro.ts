@@ -174,6 +174,8 @@ function rotuloOrigemContaPagar(origem: ContaPagar["origem"]): string {
   switch (origem) {
     case "nfe":
       return "NF-e";
+    case "nfse":
+      return "NFS-e";
     case "manual":
       return "Manual";
     case "recorrente":

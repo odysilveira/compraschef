@@ -142,6 +142,43 @@ function extrairNumeroParcelaRotulado(texto: string): string | undefined {
   return encontrados.length === 1 ? encontrados[0] : undefined;
 }
 
+function codigoBarrasBancario44(codigoOuLinha: string): string | undefined {
+  const validacao = validarBoleto(codigoOuLinha);
+  if (!validacao.valido) return undefined;
+
+  const normalizado = normalizarLinhaBoleto(codigoOuLinha);
+  if (validacao.formato === "codigo_barras_bancario_44") return normalizado;
+  if (validacao.formato === "linha_digitavel_bancaria_47") {
+    return validacao.codigoCanonico ?? converterLinha47ParaCodigo44(normalizado);
+  }
+  return undefined;
+}
+
+/**
+ * Converte o fator de vencimento do boleto bancário (posições 6–9 do código de 44)
+ * para data ISO. A partir de 22/02/2025 a Febraban usa base 1000 = 2025-02-22.
+ */
+export function dataDoFatorVencimentoBoleto(fator: number): string | undefined {
+  if (!Number.isInteger(fator) || fator <= 0) return undefined;
+
+  const base =
+    fator >= 1000
+      ? { iso: "2025-02-22", deslocamento: fator - 1000 }
+      : { iso: "1997-10-07", deslocamento: fator };
+
+  const data = new Date(`${base.iso}T12:00:00.000Z`);
+  data.setUTCDate(data.getUTCDate() + base.deslocamento);
+  return data.toISOString().slice(0, 10);
+}
+
+export function extrairVencimentoDoCodigoBoleto(codigoOuLinha: string): string | undefined {
+  const codigo44 = codigoBarrasBancario44(codigoOuLinha);
+  if (!codigo44) return undefined;
+  const fator = Number(codigo44.slice(5, 9));
+  if (!Number.isFinite(fator)) return undefined;
+  return dataDoFatorVencimentoBoleto(fator);
+}
+
 export function extrairValorDoCodigoBoleto(codigoOuLinha: string): number | undefined {
   const validacao = validarBoleto(codigoOuLinha);
   if (!validacao.valido) return undefined;
@@ -182,6 +219,13 @@ export function extrairDadosEstruturadosDoBoleto(codigoOuLinha: string, textoExt
   }
 
   const datas = extrairDatasRotuladas(textoExtraido);
+  const vencimentoDoCodigo = extrairVencimentoDoCodigoBoleto(codigoOuLinha);
+  const vencimento_extraido =
+    datas.length === 1 ? datas[0] : vencimentoDoCodigo;
+  const datas_encontradas = deduplicar([
+    ...datas,
+    ...(vencimentoDoCodigo ? [vencimentoDoCodigo] : []),
+  ]);
   const valoresRotulados = extrairValoresRotulados(textoExtraido);
   const beneficiarios = extrairCnpjsRotulados(
     textoExtraido,
@@ -196,8 +240,8 @@ export function extrairDadosEstruturadosDoBoleto(codigoOuLinha: string, textoExt
   return {
     codigo_canonico: validacao.codigoCanonico,
     valor_codificado: extrairValorDoCodigoBoleto(codigoOuLinha),
-    vencimento_extraido: datas.length === 1 ? datas[0] : undefined,
-    datas_encontradas: datas,
+    vencimento_extraido,
+    datas_encontradas,
     cnpj_beneficiario: cnpjBeneficiario,
     cnpj_pagador: cnpjPagador,
     cnpjs_encontrados: todosCnpjs,

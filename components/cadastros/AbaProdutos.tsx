@@ -147,10 +147,10 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
     setForm(null);
   }
 
-  function vincularFornecedor(fornecedorIdInformado?: string) {
-    const fornecedorId = (fornecedorIdInformado ?? fornecedorParaVincular).trim();
-    if (!form?.id || !fornecedorId) return;
+  function vincularFornecedor() {
+    if (!form?.id || !fornecedorParaVincular) return;
     const produtoId = form.id;
+    const fornecedorId = fornecedorParaVincular;
     mutate((banco) => {
       const jaExiste = banco.fornecedor_produtos.some(
         (fp) => fp.produto_id === produtoId && fp.fornecedor_id === fornecedorId
@@ -170,10 +170,11 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
   }
 
   const vinculos = form?.id ? db.fornecedor_produtos.filter((fp) => fp.produto_id === form.id) : [];
+  const idsJaVinculados = new Set(vinculos.map((fp) => fp.fornecedor_id));
   const fornecedoresDisponiveis = form?.id
-    ? db.fornecedores.filter(
-        (f) => f.ativo && !vinculos.some((fp) => fp.fornecedor_id === f.id)
-      )
+    ? db.fornecedores
+        .filter((f) => f.ativo !== false && !idsJaVinculados.has(f.id))
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
     : [];
 
   return (
@@ -569,44 +570,36 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                   </ul>
                 )}
                 {fornecedoresDisponiveis.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-slate-500">Toque em um fornecedor para vincular, ou escolha na lista:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {fornecedoresDisponiveis.slice(0, 8).map((f) => (
-                        <button
-                          key={f.id}
-                          type="button"
-                          className="btn-secundario"
-                          onClick={() => vincularFornecedor(f.id)}
-                        >
-                          <Link2 size={14} /> {f.nome}
-                        </button>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="campo flex-1"
+                      value={fornecedorParaVincular}
+                      onChange={(e) => setFornecedorParaVincular(e.target.value)}
+                    >
+                      <option value="">Escolher fornecedor…</option>
+                      {fornecedoresDisponiveis.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.nome}
+                          {f.cnpj ? ` · ${f.cnpj}` : ""}
+                        </option>
                       ))}
-                    </div>
-                    {fornecedoresDisponiveis.length > 8 && (
-                      <div className="flex items-center gap-2">
-                        <select
-                          className="campo flex-1"
-                          value={fornecedorParaVincular}
-                          onChange={(e) => {
-                            const id = e.target.value;
-                            setFornecedorParaVincular(id);
-                            if (id) vincularFornecedor(id);
-                          }}
-                        >
-                          <option value="">Mais fornecedores…</option>
-                          {fornecedoresDisponiveis.slice(8).map((f) => (
-                            <option key={f.id} value={f.id}>
-                              {f.nome}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      disabled={!fornecedorParaVincular}
+                      onClick={vincularFornecedor}
+                    >
+                      <Link2 size={16} /> Vincular
+                    </button>
                   </div>
                 )}
-                {fornecedoresDisponiveis.length === 0 && vinculos.length > 0 && (
-                  <p className="text-xs text-slate-500">Todos os fornecedores ativos já estão vinculados.</p>
+                {fornecedoresDisponiveis.length === 0 && (
+                  <p className="text-xs text-slate-500">
+                    {vinculos.length > 0
+                      ? "Todos os fornecedores ativos já estão vinculados. Cadastre um novo em Cadastros → Fornecedores."
+                      : "Nenhum fornecedor cadastrado ainda. Cadastre em Cadastros → Fornecedores."}
+                  </p>
                 )}
               </div>
             ) : (

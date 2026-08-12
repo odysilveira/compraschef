@@ -433,10 +433,15 @@ export function atualizarComNovidades(db: DB): boolean {
     }
   }
 
-  // Cadastro ADG (boleto real R$ 613,34) — injeta em DBs já persistidos sem sobrescrever.
+  // Fornecedores novos do seed (ex.: ADG) — injeta em DBs já persistidos sem sobrescrever.
   for (const semente of seedDB.fornecedores) {
-    if (semente.id !== "forn-adg-cakes") continue;
-    if (!db.fornecedores.some((f) => f.id === semente.id || f.cnpj.replace(/\D/g, "") === "37681455000120")) {
+    const cnpjSemente = (semente.cnpj ?? "").replace(/\D/g, "");
+    const jaTem = db.fornecedores.some((f) => {
+      if (f.id === semente.id) return true;
+      const cnpj = (f.cnpj ?? "").replace(/\D/g, "");
+      return cnpjSemente.length === 14 && cnpj === cnpjSemente;
+    });
+    if (!jaTem) {
       db.fornecedores.push(structuredClone(semente));
       mudou = true;
     }

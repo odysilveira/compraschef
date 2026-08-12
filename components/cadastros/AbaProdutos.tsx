@@ -2,7 +2,7 @@
 
 // Aba Produtos — requisitos 2 e 3 (vínculo fornecedor × produto).
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link2, Plus, X } from "lucide-react";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
@@ -37,11 +37,20 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
   const [codigoBarrasForm, setCodigoBarrasForm] = useState<ProdutoCodigoBarras[]>([]);
   const [novoCodigoBarras, setNovoCodigoBarras] = useState("");
   const [fornecedorParaVincular, setFornecedorParaVincular] = useState("");
+  const produtoAbertoPorUrl = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!produtoParaAbrirId) return;
+    if (!produtoParaAbrirId) {
+      produtoAbertoPorUrl.current = undefined;
+      return;
+    }
+    // Evita reabrir (e zerar o select de vínculo) a cada atualização do DB.
+    if (produtoAbertoPorUrl.current === produtoParaAbrirId) return;
     const produto = db.produtos.find((p) => p.id === produtoParaAbrirId);
-    if (produto) abrir(produto);
+    if (produto) {
+      produtoAbertoPorUrl.current = produtoParaAbrirId;
+      abrir(produto);
+    }
   }, [produtoParaAbrirId, db.produtos]);
 
   const categorias = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
@@ -138,10 +147,10 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
     setForm(null);
   }
 
-  function vincularFornecedor() {
-    if (!form?.id || !fornecedorParaVincular) return;
+  function vincularFornecedor(fornecedorIdInformado?: string) {
+    const fornecedorId = (fornecedorIdInformado ?? fornecedorParaVincular).trim();
+    if (!form?.id || !fornecedorId) return;
     const produtoId = form.id;
-    const fornecedorId = fornecedorParaVincular;
     mutate((banco) => {
       const jaExiste = banco.fornecedor_produtos.some(
         (fp) => fp.produto_id === produtoId && fp.fornecedor_id === fornecedorId
@@ -560,28 +569,44 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                   </ul>
                 )}
                 {fornecedoresDisponiveis.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <select
-                      className="campo flex-1"
-                      value={fornecedorParaVincular}
-                      onChange={(e) => setFornecedorParaVincular(e.target.value)}
-                    >
-                      <option value="">Escolher fornecedor…</option>
-                      {fornecedoresDisponiveis.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.nome}
-                        </option>
+                  <div className="space-y-2">
+                    <p className="text-xs text-slate-500">Toque em um fornecedor para vincular, ou escolha na lista:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {fornecedoresDisponiveis.slice(0, 8).map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() => vincularFornecedor(f.id)}
+                        >
+                          <Link2 size={14} /> {f.nome}
+                        </button>
                       ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn-secundario"
-                      disabled={!fornecedorParaVincular}
-                      onClick={vincularFornecedor}
-                    >
-                      <Link2 size={16} /> Vincular
-                    </button>
+                    </div>
+                    {fornecedoresDisponiveis.length > 8 && (
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="campo flex-1"
+                          value={fornecedorParaVincular}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            setFornecedorParaVincular(id);
+                            if (id) vincularFornecedor(id);
+                          }}
+                        >
+                          <option value="">Mais fornecedores…</option>
+                          {fornecedoresDisponiveis.slice(8).map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.nome}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
+                )}
+                {fornecedoresDisponiveis.length === 0 && vinculos.length > 0 && (
+                  <p className="text-xs text-slate-500">Todos os fornecedores ativos já estão vinculados.</p>
                 )}
               </div>
             ) : (

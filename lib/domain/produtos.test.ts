@@ -2,18 +2,23 @@ import { describe, expect, it } from "vitest";
 import type { DB } from "../types";
 import {
   associarCategoriasProdutos,
+  chaveUnidadeDaNota,
   codigoDeBarrasValido,
   converterParaUnidadeUso,
+  garantirUnidadeDaNota,
   identificarProduto,
   precoPorUnidadeUso,
   registrarVinculoDaNota,
+  unidadePorSigla,
 } from "./produtos";
 
 const db = {
   unidades: [
-    { id: "kg", nome: "quilograma", sigla: "kg" },
-    { id: "cx", nome: "caixa", sigla: "cx" },
-    { id: "fd", nome: "fardo", sigla: "fd" },
+    { id: "kg", nome: "quilograma", sigla: "kg", codigo_externo: "KG" },
+    { id: "cx", nome: "caixa", sigla: "cx", codigo_externo: "CX" },
+    { id: "fd", nome: "fardo", sigla: "fd", codigo_externo: "FD" },
+    { id: "un", nome: "unidade", sigla: "un", codigo_externo: "UN" },
+    { id: "l", nome: "litro", sigla: "L", codigo_externo: "L" },
   ],
   produtos: [
     {
@@ -38,9 +43,38 @@ const db = {
       codigo_barras_fornecedor: "789CAIXA",
       unidade_compra_id: "cx",
       fator_conversao: 6,
+      atualizado_em: "2026-01-01",
     },
   ],
+  categorias_produtos: [],
 } as unknown as DB;
+
+describe("unidade da NF-e (uCom)", () => {
+  it("normaliza aliases comuns do XML", () => {
+    expect(chaveUnidadeDaNota("UND")).toBe("UN");
+    expect(chaveUnidadeDaNota("und")).toBe("UN");
+    expect(chaveUnidadeDaNota("CXA")).toBe("CX");
+    expect(chaveUnidadeDaNota("LT")).toBe("L");
+    expect(chaveUnidadeDaNota("PCT")).toBe("PCT");
+  });
+
+  it("resolve unidade cadastrada por alias ou codigo_externo", () => {
+    expect(unidadePorSigla(db, "UND")?.id).toBe("un");
+    expect(unidadePorSigla(db, "CX")?.id).toBe("cx");
+    expect(unidadePorSigla(db, "KG")?.id).toBe("kg");
+    expect(unidadePorSigla(db, "lt")?.id).toBe("l");
+  });
+
+  it("cria unidade nova quando o uCom não existe no cadastro", () => {
+    const banco = structuredClone(db) as DB;
+    const criada = garantirUnidadeDaNota(banco, "PCT");
+    expect(criada.sigla).toBe("pct");
+    expect(criada.codigo_externo).toBe("PCT");
+    expect(banco.unidades.some((u) => u.id === criada.id)).toBe(true);
+    // segunda chamada reutiliza
+    expect(garantirUnidadeDaNota(banco, "pcte").id).toBe(criada.id);
+  });
+});
 
 describe("conversão para unidade de uso", () => {
   it("mantém quantidade quando a origem já é a unidade de uso", () => {

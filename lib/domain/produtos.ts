@@ -14,10 +14,102 @@ export function normalizarTexto(valor?: string): string {
     .replace(/\s+/g, " ");
 }
 
+/**
+ * Aliases comuns de uCom da NF-e → chave canônica (sigla/código).
+ * Ex.: UND/PC → UN, CXA → CX, LT → L.
+ */
+const ALIASES_UNIDADE_NFE: Record<string, string> = {
+  UN: "UN",
+  UND: "UN",
+  UNID: "UN",
+  UNIDADE: "UN",
+  PC: "UN",
+  PÇ: "UN",
+  PECA: "UN",
+  CX: "CX",
+  CXA: "CX",
+  CAIXA: "CX",
+  FD: "FD",
+  FAR: "FD",
+  FARDO: "FD",
+  KG: "KG",
+  KGS: "KG",
+  KILO: "KG",
+  QUILO: "KG",
+  G: "G",
+  GR: "G",
+  GRAM: "G",
+  GRAMA: "G",
+  L: "L",
+  LT: "L",
+  LIT: "L",
+  LITRO: "L",
+  ML: "ML",
+  SC: "SC",
+  SAC: "SC",
+  SACO: "SC",
+  PCT: "PCT",
+  PCTE: "PCT",
+  PCTO: "PCT",
+  PAC: "PCT",
+  PACOTE: "PCT",
+  DZ: "DZ",
+  DUZIA: "DZ",
+  BD: "BD",
+  BDJ: "BD",
+  BANDEJA: "BD",
+  CJ: "CJ",
+  CONJ: "CJ",
+  CONJUNTO: "CJ",
+};
+
+/** Normaliza uCom da NF-e para chave comparável (ex.: "und" → "UN"). */
+export function chaveUnidadeDaNota(uCom?: string): string {
+  const bruto = normalizarIdentificador(uCom)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]/g, "");
+  if (!bruto) return "";
+  return ALIASES_UNIDADE_NFE[bruto] ?? bruto;
+}
+
+function unidadeCasaComChave(unidade: Unidade, chave: string): boolean {
+  if (!chave) return false;
+  const sigla = chaveUnidadeDaNota(unidade.sigla);
+  const codigo = chaveUnidadeDaNota(unidade.codigo_externo);
+  return sigla === chave || codigo === chave;
+}
+
+/** Localiza unidade cadastrada a partir da sigla/uCom da NF-e (com aliases). */
 export function unidadePorSigla(db: DB, sigla?: string): Unidade | undefined {
-  const procurada = normalizarIdentificador(sigla);
-  if (!procurada) return undefined;
-  return db.unidades.find((u) => normalizarIdentificador(u.sigla) === procurada);
+  const chave = chaveUnidadeDaNota(sigla);
+  if (!chave) return undefined;
+  return db.unidades.find((u) => unidadeCasaComChave(u, chave));
+}
+
+/**
+ * Garante unidade para o uCom da NF-e: reutiliza cadastro ou cria a partir do XML.
+ * Assim o cadastro de produto já abre com a unidade de compra correta.
+ */
+export function garantirUnidadeDaNota(db: DB, uCom?: string): Unidade {
+  const existente = unidadePorSigla(db, uCom);
+  if (existente) return existente;
+
+  const chave = chaveUnidadeDaNota(uCom) || "UN";
+  const sigla = chave.toLowerCase();
+  let id = `un-${sigla}`;
+  if (db.unidades.some((u) => u.id === id)) {
+    id = `un-${sigla}-${db.unidades.length + 1}`;
+  }
+
+  const nova: Unidade = {
+    id,
+    codigo_externo: chave,
+    nome: sigla,
+    sigla,
+  };
+  db.unidades.push(nova);
+  return nova;
 }
 
 function slugCategoria(valor?: string): string {

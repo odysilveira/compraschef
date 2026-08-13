@@ -16,10 +16,10 @@ import { enviarEstoqueTotal } from "@/lib/integracao";
 import {
   converterParaUnidadeUso,
   codigoDeBarrasValido,
+  garantirUnidadeDaNota,
   identificarProduto,
   precoPorUnidadeUso,
   registrarVinculoDaNota,
-  unidadePorSigla,
 } from "@/lib/domain/produtos";
 import {
   localizarNotaFiscalPorChave,
@@ -325,7 +325,7 @@ export default function ReceberPorNota({
       for (const item of nota.itens) {
         const produtoId = decisoes[item.indice]?.produtoId;
         if (!produtoId) continue;
-        const unidadeOrigem = unidadePorSigla(d, item.uCom);
+        const unidadeOrigem = garantirUnidadeDaNota(d, item.uCom);
         const produto = d.produtos.find((p) => p.id === produtoId);
         registrarVinculoDaNota(d, {
           idNovo: uid("fp"),
@@ -333,9 +333,9 @@ export default function ReceberPorNota({
           produtoId,
           codigoFornecedor: item.cProd,
           ean: item.cEAN,
-          unidadeCompraId: unidadeOrigem?.id,
+          unidadeCompraId: unidadeOrigem.id,
           fatorConversao:
-            produto && produto.unidade_compra_id === unidadeOrigem?.id ? produto.fator_conversao : undefined,
+            produto && produto.unidade_compra_id === unidadeOrigem.id ? produto.fator_conversao : undefined,
           ultimoPreco: item.vUnCom,
           atualizadoEm: agora,
         });
@@ -345,8 +345,11 @@ export default function ReceberPorNota({
   }
 
   function abrirCadastroProduto(item: ItemNota) {
-    const unidadeXml = unidadePorSigla(db, item.uCom);
-    const unidadePadrao = unidadeXml?.id ?? db.unidades[0]?.id ?? "";
+    let unidadeCompraId = "";
+    mutate((d) => {
+      // uCom da NF-e → unidade de compra (cria no cadastro se ainda não existir)
+      unidadeCompraId = garantirUnidadeDaNota(d, item.uCom).id;
+    });
     const categorias = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
     const categoriaPadrao = categorias.find((c) => c.codigo === "sem-categoria")?.id;
     setProdutoForm({
@@ -356,8 +359,9 @@ export default function ReceberPorNota({
       categoriaId: categoriaPadrao,
       categoria: "",
       codigoBarras: codigoDeBarrasValido(item.cEAN) ?? "",
-      unidadeCompraId: unidadePadrao,
-      unidadeUsoId: unidadePadrao,
+      unidadeCompraId,
+      // Uso começa igual à compra; o operador ajusta fator se a cozinha usar outra unidade
+      unidadeUsoId: unidadeCompraId,
       fatorConversao: 1,
       estoqueMinimo: 0,
       validadePadraoDias: 30,
@@ -618,7 +622,7 @@ export default function ReceberPorNota({
         const recusado = dec.decisao === "recusado";
         const quantidade = recusado ? 0 : dec.quantidade;
         if (!dec.produtoId) continue; // item sem produto vinculado e não recusado: ignorado
-        const unidadeOrigem = unidadePorSigla(d, item.uCom);
+        const unidadeOrigem = garantirUnidadeDaNota(d, item.uCom);
         if (fornecedor) {
           const produto = d.produtos.find((p) => p.id === dec.produtoId);
           registrarVinculoDaNota(d, {
@@ -627,15 +631,15 @@ export default function ReceberPorNota({
             produtoId: dec.produtoId,
             codigoFornecedor: item.cProd,
             ean: item.cEAN,
-            unidadeCompraId: unidadeOrigem?.id,
+            unidadeCompraId: unidadeOrigem.id,
             fatorConversao:
-              produto && produto.unidade_compra_id === unidadeOrigem?.id ? produto.fator_conversao : undefined,
+              produto && produto.unidade_compra_id === unidadeOrigem.id ? produto.fator_conversao : undefined,
             ultimoPreco: item.vUnCom,
             atualizadoEm: agora,
           });
         }
         const esperadaConvertida = converterParaUnidadeUso(d, dec.produtoId, item.qCom, {
-          unidadeOrigemId: unidadeOrigem?.id,
+          unidadeOrigemId: unidadeOrigem.id,
           fornecedorId: fornecedor?.id,
         });
         const recebidaConvertida = converterParaUnidadeUso(d, dec.produtoId, quantidade, {

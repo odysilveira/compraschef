@@ -1,0 +1,84 @@
+import { validarChaveAcessoNfe } from "./boleto-nfe-confronto";
+
+export interface NotaIdentificadaDanfe {
+  chave: string;
+  numero: string;
+  cnpj: string;
+}
+
+/** Converte confusões comuns de OCR em dígitos e descarta o resto. */
+export function digitosComCorrecaoOcr(texto: string): string {
+  let out = "";
+  for (const ch of texto) {
+    if (/\d/.test(ch)) {
+      out += ch;
+      continue;
+    }
+    // Confusões frequentes em impressão/OCR de DANFE
+    if ("OoDdQq".includes(ch)) out += "0";
+    else if ("IiLl|!".includes(ch)) out += "1";
+    else if ("Zz".includes(ch)) out += "2";
+    else if ("Aa".includes(ch)) out += "4";
+    else if ("Ss".includes(ch)) out += "5";
+    else if ("Gg".includes(ch)) out += "6";
+    else if ("Tt".includes(ch)) out += "7";
+    else if ("Bb".includes(ch)) out += "8";
+  }
+  return out;
+}
+
+function montarNotaDaChave(chave: string): NotaIdentificadaDanfe {
+  return {
+    chave,
+    cnpj: chave.slice(6, 20),
+    numero: String(Number(chave.slice(25, 34)) || 0),
+  };
+}
+
+/** Coleta candidatos de 44 dígitos (janela deslizante) a partir de um fluxo só de dígitos. */
+export function candidatosChave44(digitos: string): string[] {
+  const limpo = digitos.replace(/\D/g, "");
+  if (limpo.length < 44) return [];
+  const vistos = new Set<string>();
+  const lista: string[] = [];
+  for (let i = 0; i <= limpo.length - 44; i += 1) {
+    const chave = limpo.slice(i, i + 44);
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    lista.push(chave);
+  }
+  return lista;
+}
+
+/**
+ * Identifica NF-e/DANFE pela chave de acesso em texto de QR, PDF ou OCR.
+ * Prefere chaves com dígito verificador válido.
+ */
+export function identificarNotaPorTexto(codigoOuTexto: string): NotaIdentificadaDanfe | null {
+  const bruto = codigoOuTexto ?? "";
+  if (!bruto.trim()) return null;
+
+  const fluxos = [
+    bruto.replace(/\D/g, ""),
+    digitosComCorrecaoOcr(bruto),
+  ];
+
+  const candidatos: string[] = [];
+  for (const fluxo of fluxos) {
+    for (const chave of candidatosChave44(fluxo)) {
+      candidatos.push(chave);
+    }
+  }
+
+  for (const chave of candidatos) {
+    if (validarChaveAcessoNfe(chave)) {
+      return montarNotaDaChave(chave);
+    }
+  }
+
+  // Fallback legado: primeiro bloco de 44 dígitos sem validar DV (QR às vezes chega “quase”)
+  const match = bruto.match(/\d{44}/);
+  if (match) return montarNotaDaChave(match[0]);
+
+  return null;
+}

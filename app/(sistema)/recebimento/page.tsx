@@ -633,7 +633,7 @@ function RecebimentoConteudo() {
             <span>
               <span className="block text-lg font-bold">Receber sem XML</span>
               <span className="block text-sm text-slate-600">
-                Leia o QR da nota impressa ou preencha os itens à mão (hortifrúti, feira).
+                QR, PDF da DANFE ou foto com OCR — ou preencha à mão (hortifrúti, feira).
               </span>
             </span>
           </button>

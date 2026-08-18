@@ -2,21 +2,25 @@
 
 // Recebimento AVULSO — para entregas sem o arquivo XML:
 // - Sem nota nenhuma (hortifrúti, feira, compra direta): preenche os itens na hora.
-// - Com a nota impressa (DANFE): lê o QR/código de barras → o sistema extrai a
-//   chave de acesso, identifica o fornecedor (CNPJ) e o nº da nota; os itens são
-//   preenchidos à mão (o download automático dos itens virá com o certificado A1).
+// - Com a nota impressa (DANFE): QR, PDF ou foto+OCR → chave / fornecedor / nº;
+//   os itens são preenchidos à mão (itens automáticos vêm com XML ou certificado A1).
 
-import { useState } from "react";
-import { ArrowLeft, CircleCheck, PackagePlus, Plus, ReceiptText, Trash2 } from "lucide-react";
-import { Badge, Campo, Card } from "@/components/ui";
+import { useRef, useState } from "react";
+import { ArrowLeft, Camera, CircleCheck, FileUp, PackagePlus, Plus, ReceiptText, Trash2 } from "lucide-react";
+import { Campo, Card } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import CampoMoeda from "@/components/operacao/CampoMoeda";
 import { estoqueAtual, mutate, nomeFornecedor, nomeProduto, siglaUnidadeUso, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
 import { criarLote } from "@/lib/domain/estoque";
+import {
+  identificarDanfeDeArquivo,
+  type OrigemIdentificacaoDanfe,
+} from "@/lib/domain/danfe-captura-browser";
+import { identificarNotaPorTexto, type NotaIdentificadaDanfe } from "@/lib/domain/danfe-identificacao";
 import { moeda, qtd } from "@/lib/format";
-import type { DB, StatusRecebimento } from "@/lib/types";
+import type { StatusRecebimento } from "@/lib/types";
 import type { ResultadoNota } from "@/components/operacao/ReceberPorNota";
 
 interface ItemAvulso {
@@ -25,12 +29,6 @@ interface ItemAvulso {
   quantidade: number;
   validade: string;
   preco?: number; // opcional — só dono/gerente informa
-}
-
-interface NotaIdentificada {
-  chave: string;
-  numero: string;
-  cnpj: string;
 }
 
 function hojeMais(dias: number): string {
@@ -43,16 +41,19 @@ function somenteDigitos(s: string): string {
   return s.replace(/\D/g, "");
 }
 
-/** Extrai a chave de acesso (44 dígitos) do QR/código da nota e decodifica CNPJ + número. */
-function lerChaveDeAcesso(codigo: string): NotaIdentificada | null {
-  const achado = codigo.match(/\d{44}/);
-  if (!achado) return null;
-  const chave = achado[0];
-  return {
-    chave,
-    cnpj: chave.slice(6, 20),
-    numero: String(Number(chave.slice(25, 34)) || 0),
-  };
+function rotuloOrigem(origem?: OrigemIdentificacaoDanfe): string {
+  switch (origem) {
+    case "pdf_texto":
+      return "pelo PDF";
+    case "pdf_ocr":
+      return "pelo PDF (OCR)";
+    case "foto_ocr":
+      return "pela foto (OCR)";
+    case "qr":
+      return "pelo QR";
+    default:
+      return "";
+  }
 }
 
 export default function ReceberAvulso({
@@ -62,16 +63,28 @@ export default function ReceberAvulso({
   onVoltar,
   aoFinalizar,
 }: {
-  db: DB;
+  db: import("@/lib/types").DB;
   usuarioId: string;
   verValores: boolean;
   onVoltar: () => void;
   aoFinalizar: (resultado: ResultadoNota) => void;
 }) {
   const [fornecedorId, setFornecedorId] = useState("");
-  const [notaIdentificada, setNotaIdentificada] = useState<NotaIdentificada | null>(null);
+  const [notaIdentificada, setNotaIdentificada] = useState<NotaIdentificadaDanfe | null>(null);
+  const [origemNota, setOrigemNota] = useState<OrigemIdentificacaoDanfe | undefined>(undefined);
   const [itens, setItens] = useState<ItemAvulso[]>([]);
   const [avisoScanner, setAvisoScanner] = useState<string | null>(null);
+  const [lendoArquivo, setLendoArquivo] = useState(false);
+  const inputPdfRef = useRef<HTMLInputElement>(null);
+  const inputFotoRef = useRef<HTMLInputElement>(null);
+
+  function aplicarNota(nota: NotaIdentificadaDanfe, origem: OrigemIdentificacaoDanfe) {
+    setNotaIdentificada(nota);
+    setOrigemNota(origem);
+    setAvisoScanner(null);
+    const forn = db.fornecedores.find((f) => somenteDigitos(f.cnpj) === nota.cnpj);
+    if (forn) setFornecedorId(forn.id);
+  }
 
   function adicionarProduto(produtoId: string) {
     if (!produtoId) return;
@@ -91,14 +104,12 @@ export default function ReceberAvulso({
     setItens((atual) => atual.map((i) => (i.id === id ? { ...i, ...mudanca } : i)));
   }
 
-  /** O leitor serve para dois códigos: a chave da nota (44 dígitos) ou o código de barras de um produto. */
+  /** QR/código: chave da nota (44 dígitos) ou EAN de produto. */
   function aoLerCodigo(codigo: string) {
     setAvisoScanner(null);
-    const nota = lerChaveDeAcesso(codigo);
+    const nota = identificarNotaPorTexto(codigo);
     if (nota) {
-      setNotaIdentificada(nota);
-      const forn = db.fornecedores.find((f) => somenteDigitos(f.cnpj) === nota.cnpj);
-      if (forn) setFornecedorId(forn.id);
+      aplicarNota(nota, "qr");
       return;
     }
     const limpo = codigo.trim();
@@ -108,6 +119,26 @@ export default function ReceberAvulso({
       return;
     }
     setAvisoScanner(`Código "${limpo}" não é uma chave de nota nem um produto cadastrado.`);
+  }
+
+  async function aoEscolherArquivo(arquivo: File | null) {
+    if (!arquivo) return;
+    setLendoArquivo(true);
+    setAvisoScanner(null);
+    try {
+      const resultado = await identificarDanfeDeArquivo(arquivo);
+      if (resultado.nota && resultado.origem) {
+        aplicarNota(resultado.nota, resultado.origem);
+      } else {
+        setAvisoScanner(resultado.detalhe ?? "Não consegui identificar a DANFE neste arquivo.");
+      }
+    } catch (erro) {
+      setAvisoScanner(erro instanceof Error ? erro.message : "Falha ao processar o arquivo.");
+    } finally {
+      setLendoArquivo(false);
+      if (inputPdfRef.current) inputPdfRef.current.value = "";
+      if (inputFotoRef.current) inputFotoRef.current.value = "";
+    }
   }
 
   function finalizar() {
@@ -220,18 +251,52 @@ export default function ReceberAvulso({
           <PackagePlus size={22} className="text-primaria" /> Receber sem o arquivo da nota
         </p>
         <p className="text-sm text-slate-600">
-          Se tiver a nota impressa, leia o <strong>QR code</strong> dela para identificar fornecedor e número.
-          Também dá para bipar o <strong>código de barras dos produtos</strong> para adicioná-los rapidinho — ou
-          escolher tudo à mão. Entrega sem nota (hortifrúti, feira)? É só preencher os itens.
+          Identifique a DANFE pelo <strong>QR</strong>, pelo <strong>PDF</strong> ou por uma{" "}
+          <strong>foto com OCR</strong> (luz do escritório). Também dá para bipar o{" "}
+          <strong>código de barras dos produtos</strong>. Os itens ainda são à mão — a lista automática vem do
+          XML/certificado.
         </p>
         <CodeScanner rotulo="Ler QR da nota ou código do produto" onLeitura={aoLerCodigo} />
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-secundario"
+            disabled={lendoArquivo}
+            onClick={() => inputPdfRef.current?.click()}
+          >
+            <FileUp size={16} /> {lendoArquivo ? "Lendo…" : "PDF da DANFE"}
+          </button>
+          <button
+            type="button"
+            className="btn-secundario"
+            disabled={lendoArquivo}
+            onClick={() => inputFotoRef.current?.click()}
+          >
+            <Camera size={16} /> {lendoArquivo ? "Lendo…" : "Foto / OCR"}
+          </button>
+          <input
+            ref={inputPdfRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => void aoEscolherArquivo(e.target.files?.[0] ?? null)}
+          />
+          <input
+            ref={inputFotoRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => void aoEscolherArquivo(e.target.files?.[0] ?? null)}
+          />
+        </div>
         {avisoScanner && (
           <p className="rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">{avisoScanner}</p>
         )}
         {notaIdentificada && (
           <p className="rounded-card bg-sucesso-clara px-3 py-2 text-sm text-primaria-escura">
             <ReceiptText size={14} className="mr-1 inline" />
-            Nota nº {notaIdentificada.numero} identificada pelo QR
+            Nota nº {notaIdentificada.numero} identificada {rotuloOrigem(origemNota)}
             {fornecedorId
               ? ` — ${nomeFornecedor(db, fornecedorId)}`
               : ` (CNPJ ${notaIdentificada.cnpj} não está nos seus fornecedores)`}

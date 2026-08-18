@@ -2,7 +2,7 @@
 
 // Cadastros — requisitos 1 a 6: fornecedores, produtos, unidades, locais e caixas.
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { TituloPagina } from "@/components/ui";
 import { AbaCategorias } from "@/components/cadastros/AbaCategorias";
@@ -23,7 +23,7 @@ const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "caixas", rotulo: "Caixas" },
 ];
 
-export default function CadastrosPage() {
+function CadastrosConteudo() {
   const searchParams = useSearchParams();
   const abaParam = searchParams.get("aba");
   const produtoParaAbrirId = searchParams.get("produtoId") ?? undefined;
@@ -65,5 +65,23 @@ export default function CadastrosPage() {
       {aba === "locais" && <AbaLocais />}
       {aba === "caixas" && <AbaCaixas />}
     </div>
+  );
+}
+
+export default function CadastrosPage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <TituloPagina
+            titulo="Cadastros"
+            subtitulo="Fornecedores, produtos, unidades, locais e caixas — a base de tudo"
+          />
+          <p className="text-sm text-slate-500">Carregando…</p>
+        </div>
+      }
+    >
+      <CadastrosConteudo />
+    </Suspense>
   );
 }

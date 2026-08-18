@@ -36,6 +36,7 @@ import {
   type DiagnosticoIdentificacaoBoleto,
   type ResultadoIdentificacaoArquivoBoleto,
 } from "@/lib/domain/identificacao-boleto-browser";
+import { configurarWorkerPdfjs } from "@/lib/domain/pdfjs-worker";
 import type { BoletoValidoIdentificado } from "@/lib/domain/identificacao-boleto";
 import {
   confrontarBoletoComNfe,
@@ -994,7 +995,7 @@ export default function FinanceiroPage() {
 
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => null);
     if (!pdfjs?.GlobalWorkerOptions) return "";
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+    configurarWorkerPdfjs(pdfjs);
 
     const buffer = await arquivo.arrayBuffer();
     const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer.slice(0)) });

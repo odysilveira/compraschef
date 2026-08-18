@@ -4,6 +4,7 @@ import {
   type ResultadoIdentificacaoTextoBoleto,
   type BoletoValidoIdentificado,
 } from "./identificacao-boleto";
+import { configurarWorkerPdfjs } from "./pdfjs-worker";
 
 interface BarcodeDetectorResultLike {
   rawValue?: string;
@@ -108,8 +109,7 @@ function configurarWorkerPdfLocal(pdfjs: { GlobalWorkerOptions?: { workerSrc?: s
   if (!pdfjs.GlobalWorkerOptions) {
     throw new Error("GlobalWorkerOptions indisponível");
   }
-  const workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-  pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+  configurarWorkerPdfjs(pdfjs);
 }
 
 function obterBarcodeDetectorGlobal(): BarcodeDetectorConstructorLike | undefined {

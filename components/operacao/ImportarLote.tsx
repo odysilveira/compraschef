@@ -1,21 +1,29 @@
 "use client";
 
 // Importar lote — caixa de entrada dos Downloads do e-mail:
-// multi-seleção → classifica (XML / boleto / NFS-e / DANFE / revisar) → triagem →
-// abre o fluxo certo. Nada é gravado só por classificar.
+// multi-seleção → classifica → fila “A conciliar” (sessão) → abre o fluxo.
+// A fila sobrevive ao cadastro de fornecedor/produto; nada grava só por classificar.
 
 import { useMemo, useRef, useState } from "react";
 import { ArrowLeft, FileStack, FolderOpen, Link2, Loader2, Trash2 } from "lucide-react";
 import { Badge, Card } from "@/components/ui";
-import {
-  classificarArquivosRecebimentoBrowser,
-  type ItemLoteClassificado,
-} from "@/lib/domain/classificar-arquivo-recebimento-browser";
+import { classificarArquivosRecebimentoBrowser } from "@/lib/domain/classificar-arquivo-recebimento-browser";
 import {
   contarPorTipo,
   rotuloTipoArquivoRecebimento,
   type TipoArquivoRecebimento,
 } from "@/lib/domain/classificar-arquivo-recebimento";
+import { filtrarItensAbertos, rotuloStatusFilaLote } from "@/lib/domain/lote-recebimento-fila";
+import {
+  acrescentarClassificados,
+  alterarTipoItemFila,
+  descartarItemFila,
+  definirFilaDeClassificados,
+  limparFilaLote,
+  marcarItemEmAndamento,
+  obterArquivoFila,
+  useFilaLoteRecebimento,
+} from "@/lib/domain/lote-recebimento-store";
 
 const TIPOS: TipoArquivoRecebimento[] = [
   "xml_nfe",
@@ -43,6 +51,7 @@ function corTipo(tipo: TipoArquivoRecebimento): "verde" | "azul" | "laranja" | "
 }
 
 export interface AcaoLoteArquivo {
+  id: string;
   tipo: TipoArquivoRecebimento;
   arquivo: File;
 }
@@ -55,16 +64,18 @@ interface Props {
 
 export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [itens, setItens] = useState<ItemLoteClassificado[]>([]);
+  const fila = useFilaLoteRecebimento();
+  const abertos = useMemo(() => filtrarItensAbertos(fila), [fila]);
   const [lendo, setLendo] = useState(false);
   const [progresso, setProgresso] = useState<{ feito: number; total: number; nome: string } | null>(
     null
   );
   const [erro, setErro] = useState<string | null>(null);
+  const [substituir, setSubstituir] = useState(true);
 
   const contagem = useMemo(
-    () => contarPorTipo(itens.map((i) => ({ tipo: i.tipoEscolhido }))),
-    [itens]
+    () => contarPorTipo(abertos.map((i) => ({ tipo: i.tipo }))),
+    [abertos]
   );
 
   async function aoEscolher(lista: FileList | null) {
@@ -76,10 +87,13 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
       const classificados = await classificarArquivosRecebimentoBrowser(Array.from(lista), {
         onProgresso: (feito, total, nome) => setProgresso({ feito, total, nome }),
       });
-      setItens(classificados);
+      if (substituir || abertos.length === 0) {
+        definirFilaDeClassificados(classificados);
+      } else {
+        acrescentarClassificados(classificados);
+      }
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao classificar os arquivos.");
-      setItens([]);
     } finally {
       setLendo(false);
       setProgresso(null);
@@ -87,25 +101,21 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     }
   }
 
-  function alterarTipo(id: string, tipo: TipoArquivoRecebimento) {
-    setItens((atual) =>
-      atual.map((item) => (item.id === id ? { ...item, tipoEscolhido: tipo } : item))
-    );
-  }
-
-  function remover(id: string) {
-    setItens((atual) => atual.filter((item) => item.id !== id));
-  }
-
-  function limpar() {
-    setItens([]);
-    setErro(null);
+  function abrirItem(id: string, tipo: TipoArquivoRecebimento) {
+    const arquivo = obterArquivoFila(id);
+    if (!arquivo) {
+      setErro("Arquivo não está mais na memória desta sessão. Selecione o lote de novo.");
+      return;
+    }
+    if (tipo === "desconhecido") return;
+    marcarItemEmAndamento(id);
+    onAbrirFluxo({ id, tipo, arquivo });
   }
 
   return (
     <div className="space-y-4">
       <button type="button" className="btn-secundario inline-flex items-center gap-2" onClick={onVoltar}>
-        <ArrowLeft size={18} /> Voltar
+        <ArrowLeft size={18} /> Voltar ao Recebimento
       </button>
 
       <Card className="space-y-3 p-5">
@@ -114,8 +124,8 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
           <div>
             <h2 className="text-lg font-bold">Importar lote (e-mail)</h2>
             <p className="text-sm text-slate-600">
-              Selecione vários arquivos baixados (XML, PDF, foto). O ComprasChef separa por tipo;
-              você confere a triagem e só então abre cada fluxo — nada é gravado automaticamente.
+              Classifique vários arquivos. A fila <strong>A conciliar</strong> fica nesta sessão: você
+              pode cadastrar fornecedor/produto e voltar aos arquivos restantes.
             </p>
           </div>
         </div>
@@ -137,14 +147,32 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
             onClick={() => inputRef.current?.click()}
           >
             {lendo ? <Loader2 size={18} className="animate-spin" /> : <FolderOpen size={18} />}
-            {lendo ? "Classificando…" : "Selecionar arquivos"}
+            {lendo ? "Classificando…" : abertos.length > 0 ? "Adicionar arquivos" : "Selecionar arquivos"}
           </button>
-          {itens.length > 0 && (
-            <button type="button" className="btn-secundario inline-flex items-center gap-2" onClick={limpar}>
-              <Trash2 size={16} /> Limpar lista
+          {abertos.length > 0 && (
+            <button
+              type="button"
+              className="btn-secundario inline-flex items-center gap-2"
+              onClick={() => {
+                limparFilaLote();
+                setErro(null);
+              }}
+            >
+              <Trash2 size={16} /> Limpar fila
             </button>
           )}
         </div>
+
+        {abertos.length > 0 && (
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={substituir}
+              onChange={(e) => setSubstituir(e.target.checked)}
+            />
+            Próxima seleção substitui a fila (desmarque para acrescentar)
+          </label>
+        )}
 
         {lendo && progresso && (
           <p className="text-sm text-slate-600">
@@ -155,9 +183,10 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
         {erro && <p className="text-sm text-red-700">{erro}</p>}
       </Card>
 
-      {itens.length > 0 && (
+      {abertos.length > 0 && (
         <>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge cor="laranja">{abertos.length} a conciliar</Badge>
             {(Object.keys(contagem) as TipoArquivoRecebimento[])
               .filter((t) => contagem[t] > 0)
               .map((tipo) => (
@@ -168,31 +197,34 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
           </div>
 
           <ul className="space-y-3">
-            {itens.map((item) => (
+            {abertos.map((item) => (
               <li key={item.id}>
                 <Card className="space-y-3 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold" title={item.arquivo.name}>
-                        {item.arquivo.name}
+                      <p className="truncate font-semibold" title={item.nome}>
+                        {item.nome}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {(item.arquivo.size / 1024).toFixed(1)} KB
-                        {item.classificacao.detalhe ? ` · ${item.classificacao.detalhe}` : ""}
+                        {(item.tamanho / 1024).toFixed(1)} KB
+                        {item.detalhe ? ` · ${item.detalhe}` : ""}
                       </p>
                     </div>
-                    <Badge cor={corTipo(item.tipoEscolhido)}>
-                      {rotuloTipoArquivoRecebimento(item.tipoEscolhido)}
-                    </Badge>
+                    <div className="flex flex-wrap gap-1">
+                      <Badge cor={item.status === "em_andamento" ? "laranja" : "cinza"}>
+                        {rotuloStatusFilaLote(item.status)}
+                      </Badge>
+                      <Badge cor={corTipo(item.tipo)}>{rotuloTipoArquivoRecebimento(item.tipo)}</Badge>
+                    </div>
                   </div>
 
                   <label className="block text-sm text-slate-700">
                     Tipo na triagem
                     <select
                       className="campo mt-1 w-full max-w-xs"
-                      value={item.tipoEscolhido}
+                      value={item.tipo}
                       onChange={(e) =>
-                        alterarTipo(item.id, e.target.value as TipoArquivoRecebimento)
+                        alterarTipoItemFila(item.id, e.target.value as TipoArquivoRecebimento)
                       }
                     >
                       {TIPOS.map((tipo) => (
@@ -204,11 +236,15 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                   </label>
 
                   <div className="flex flex-wrap gap-2">
-                    {item.tipoEscolhido === "pdf_boleto" ? (
-                      <a href="/financeiro" className="btn-primario inline-flex items-center gap-2 text-sm">
+                    {item.tipo === "pdf_boleto" ? (
+                      <a
+                        href="/financeiro"
+                        className="btn-primario inline-flex items-center gap-2 text-sm"
+                        onClick={() => marcarItemEmAndamento(item.id)}
+                      >
                         <Link2 size={16} /> Abrir no Financeiro
                       </a>
-                    ) : item.tipoEscolhido === "desconhecido" ? (
+                    ) : item.tipo === "desconhecido" ? (
                       <span className="text-sm text-slate-600">
                         Escolha o tipo acima ou descarte o arquivo.
                       </span>
@@ -216,17 +252,15 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                       <button
                         type="button"
                         className="btn-primario text-sm"
-                        onClick={() =>
-                          onAbrirFluxo({ tipo: item.tipoEscolhido, arquivo: item.arquivo })
-                        }
+                        onClick={() => abrirItem(item.id, item.tipo)}
                       >
-                        Abrir neste fluxo
+                        {item.status === "em_andamento" ? "Continuar" : "Abrir neste fluxo"}
                       </button>
                     )}
                     <button
                       type="button"
                       className="btn-secundario text-sm"
-                      onClick={() => remover(item.id)}
+                      onClick={() => descartarItemFila(item.id)}
                     >
                       Descartar
                     </button>
@@ -236,6 +270,12 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
             ))}
           </ul>
         </>
+      )}
+
+      {abertos.length === 0 && !lendo && (
+        <p className="text-center text-sm text-slate-500">
+          Nenhum arquivo a conciliar. Selecione os Downloads do e-mail para começar.
+        </p>
       )}
     </div>
   );

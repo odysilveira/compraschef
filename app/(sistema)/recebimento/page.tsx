@@ -43,6 +43,13 @@ import {
   corrigirFornecedorNotaFiscal,
   indicadorCompletudeNota,
 } from "@/lib/domain/nfe-completude";
+import {
+  marcarItemConcluido,
+  marcarItemPendente,
+  quantidadeFilaAberta,
+  useFilaLoteRecebimento,
+} from "@/lib/domain/lote-recebimento-store";
+import { contarItensAbertos } from "@/lib/domain/lote-recebimento-fila";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { cnpjBR, dataBR, moeda, qtd } from "@/lib/format";
 import type { StatusRecebimento } from "@/lib/types";
@@ -101,6 +108,8 @@ export default function RecebimentoPage() {
   const { papel } = usePapel();
   const verValores = podeVerValores(papel);
   const usuarioId = db.perfis.find((p) => p.papel === papel)?.id ?? "perfil-dono";
+  const filaLote = useFilaLoteRecebimento();
+  const abertosLote = contarItensAbertos(filaLote);
 
   const [pedidoId, setPedidoId] = useState<string | null>(null);
   const [modoNota, setModoNota] = useState(false);
@@ -108,6 +117,7 @@ export default function RecebimentoPage() {
   const [modoNfse, setModoNfse] = useState(false);
   const [modoLote, setModoLote] = useState(false);
   const [arquivoLote, setArquivoLote] = useState<File | null>(null);
+  const [itemLoteId, setItemLoteId] = useState<string | null>(null);
   const [notaConferirId, setNotaConferirId] = useState<string | null>(null);
   const [notaCorrecaoId, setNotaCorrecaoId] = useState<string | null>(null);
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | "pendentes" | "completas">("todas");
@@ -412,6 +422,9 @@ export default function RecebimentoPage() {
     setModoNota(false);
     setModoAvulso(false);
     setModoNfse(false);
+    setModoLote(false);
+    setArquivoLote(null);
+    setItemLoteId(null);
     setNotaConferirId(null);
     setConferencia({});
     setResultado(null);
@@ -419,9 +432,37 @@ export default function RecebimentoPage() {
     setAvisoScanner(null);
   }
 
+  /** Sai do XML/NFS-e/avulso sem concluir — devolve o item à fila e reabre o lote. */
+  function voltarDoFluxoLote() {
+    if (itemLoteId) marcarItemPendente(itemLoteId);
+    setModoNota(false);
+    setModoAvulso(false);
+    setModoNfse(false);
+    setArquivoLote(null);
+    setItemLoteId(null);
+    if (quantidadeFilaAberta() > 0) setModoLote(true);
+  }
+
+  function finalizarItemLoteSeHouver() {
+    if (itemLoteId) marcarItemConcluido(itemLoteId);
+    setArquivoLote(null);
+    setItemLoteId(null);
+  }
+
+  function continuarLoteAposResultado() {
+    setResultado(null);
+    setModoNota(false);
+    setModoAvulso(false);
+    setModoNfse(false);
+    setArquivoLote(null);
+    setItemLoteId(null);
+    setModoLote(true);
+  }
+
   // ---------- Tela final ----------
   if (resultado) {
     const ok = resultado.status === "ok";
+    const restamLote = quantidadeFilaAberta();
     return (
       <div className="mx-auto max-w-lg space-y-4">
         <TituloPagina titulo="Recebimento" />
@@ -447,8 +488,18 @@ export default function RecebimentoPage() {
                   : "A entrada foi registrada com a divergência anotada."}
             </p>
             {resultado.mensagemExtra && <p className="text-sm text-slate-700">{resultado.mensagemExtra}</p>}
+            {restamLote > 0 && (
+              <p className="text-sm font-medium text-primaria-escura">
+                Ainda há {restamLote} arquivo{restamLote === 1 ? "" : "s"} a conciliar no lote.
+              </p>
+            )}
           </div>
         </Card>
+        {restamLote > 0 && (
+          <button className="btn-gigante" onClick={continuarLoteAposResultado}>
+            <FileStack size={28} /> Continuar lote ({restamLote})
+          </button>
+        )}
         <button className="btn-gigante" onClick={recomecar}>
           <PackageCheck size={28} /> Novo recebimento
         </button>
@@ -469,11 +520,14 @@ export default function RecebimentoPage() {
           usuarioId={usuarioId}
           arquivoInicial={arquivoLote}
           onVoltar={() => {
-            setModoNota(false);
-            setArquivoLote(null);
+            if (itemLoteId) voltarDoFluxoLote();
+            else {
+              setModoNota(false);
+              setArquivoLote(null);
+            }
           }}
           aoFinalizar={(r) => {
-            setArquivoLote(null);
+            finalizarItemLoteSeHouver();
             setResultado({
               status: r.status,
               temNota: true,
@@ -496,11 +550,14 @@ export default function RecebimentoPage() {
         <ImportarNfse
           arquivoInicial={arquivoLote}
           onVoltar={() => {
-            setModoNfse(false);
-            setArquivoLote(null);
+            if (itemLoteId) voltarDoFluxoLote();
+            else {
+              setModoNfse(false);
+              setArquivoLote(null);
+            }
           }}
           onConcluido={(r) => {
-            setArquivoLote(null);
+            finalizarItemLoteSeHouver();
             setResultado({
               status: "ok",
               temNota: true,
@@ -553,11 +610,14 @@ export default function RecebimentoPage() {
           verValores={verValores}
           arquivoInicial={arquivoLote}
           onVoltar={() => {
-            setModoAvulso(false);
-            setArquivoLote(null);
+            if (itemLoteId) voltarDoFluxoLote();
+            else {
+              setModoAvulso(false);
+              setArquivoLote(null);
+            }
           }}
           aoFinalizar={(r) => {
-            setArquivoLote(null);
+            finalizarItemLoteSeHouver();
             setResultado({
               status: r.status,
               temNota: r.boletos > 0,
@@ -575,6 +635,7 @@ export default function RecebimentoPage() {
   // ---------- Importar lote (Downloads do e-mail) ----------
   if (modoLote) {
     const abrirDoLote = (acao: AcaoLoteArquivo) => {
+      setItemLoteId(acao.id);
       setArquivoLote(acao.arquivo);
       setModoLote(false);
       if (acao.tipo === "xml_nfe") setModoNota(true);
@@ -589,6 +650,7 @@ export default function RecebimentoPage() {
           onVoltar={() => {
             setModoLote(false);
             setArquivoLote(null);
+            setItemLoteId(null);
           }}
           onAbrirFluxo={abrirDoLote}
         />
@@ -602,6 +664,24 @@ export default function RecebimentoPage() {
       <>
         <div className="space-y-4">
           <TituloPagina titulo="Recebimento" />
+          {abertosLote > 0 && (
+            <button
+              type="button"
+              className="card flex w-full items-center gap-3 border-2 border-destaque bg-destaque-clara p-4 text-left transition-colors hover:opacity-95"
+              onClick={() => setModoLote(true)}
+            >
+              <FileStack size={28} className="shrink-0 text-destaque" />
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-lg font-bold text-primaria-escura">A conciliar</span>
+                  <Badge cor="laranja">{abertosLote}</Badge>
+                </span>
+                <span className="block text-sm text-slate-700">
+                  Arquivos do lote ainda pendentes — volte e termine a conciliação.
+                </span>
+              </span>
+            </button>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <button
             className="card flex items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara"

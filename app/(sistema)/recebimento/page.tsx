@@ -14,6 +14,7 @@ import {
   PackageCheck,
   PackagePlus,
   ReceiptText,
+  FileText,
   TriangleAlert,
 } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
@@ -21,6 +22,7 @@ import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import ReceberPorNota from "@/components/operacao/ReceberPorNota";
 import ReceberAvulso from "@/components/operacao/ReceberAvulso";
+import ImportarNfse from "@/components/operacao/ImportarNfse";
 import {
   estoqueAtual,
   mutate,
@@ -101,6 +103,7 @@ export default function RecebimentoPage() {
   const [pedidoId, setPedidoId] = useState<string | null>(null);
   const [modoNota, setModoNota] = useState(false);
   const [modoAvulso, setModoAvulso] = useState(false);
+  const [modoNfse, setModoNfse] = useState(false);
   const [notaConferirId, setNotaConferirId] = useState<string | null>(null);
   const [notaCorrecaoId, setNotaCorrecaoId] = useState<string | null>(null);
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | "pendentes" | "completas">("todas");
@@ -404,6 +407,7 @@ export default function RecebimentoPage() {
     setPedidoId(null);
     setModoNota(false);
     setModoAvulso(false);
+    setModoNfse(false);
     setNotaConferirId(null);
     setConferencia({});
     setResultado(null);
@@ -468,6 +472,26 @@ export default function RecebimentoPage() {
               mensagemExtra: `Nota de ${r.fornecedorNome} registrada no financeiro${
                 r.boletos > 0 ? ` com ${r.boletos} boleto${r.boletos === 1 ? "" : "s"}` : ""
               }${r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""}.`,
+            })
+          }
+        />
+      </div>
+    );
+  }
+
+  // ---------- NFS-e (serviço / PDF) ----------
+  if (modoNfse) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <TituloPagina titulo="NFS-e — nota de serviço" />
+        <ImportarNfse
+          onVoltar={() => setModoNfse(false)}
+          onConcluido={(r) =>
+            setResultado({
+              status: "ok",
+              temNota: true,
+              boletosLiberados: 1,
+              mensagemExtra: `NFS-e de ${r.fornecedorNome} (${moeda(r.valor)}) registrada · pagamento via ${r.meio.toUpperCase()} · título liberado na agenda (sem estoque).`,
             })
           }
         />
@@ -557,6 +581,18 @@ export default function RecebimentoPage() {
               <span className="block text-lg font-bold">Receber sem XML</span>
               <span className="block text-sm text-slate-600">
                 QR, PDF da DANFE ou foto com OCR — ou preencha à mão (hortifrúti, feira).
+              </span>
+            </span>
+          </button>
+          <button
+            className="card flex items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara sm:col-span-2"
+            onClick={() => setModoNfse(true)}
+          >
+            <FileText size={32} className="shrink-0 text-primaria" />
+            <span>
+              <span className="block text-lg font-bold">Importar NFS-e (PDF)</span>
+              <span className="block text-sm text-slate-600">
+                Nota de serviço da prefeitura — Anota AI, software, etc. Gera título boleto ou PIX, sem estoque.
               </span>
             </span>
           </button>

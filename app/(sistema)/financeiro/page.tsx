@@ -235,6 +235,7 @@ function rotuloOrigemConta(origem: OrigemContaPagar): string {
   return {
     manual: "Manual",
     nfe: "NF-e",
+    nfse: "NFS-e",
     recorrente: "Recorrente",
   }[origem];
 }

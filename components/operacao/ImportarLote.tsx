@@ -5,7 +5,7 @@
 // A fila sobrevive ao cadastro de fornecedor/produto; nada grava só por classificar.
 
 import { useMemo, useRef, useState } from "react";
-import { ArrowLeft, FileStack, FolderOpen, Link2, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, Eye, FileStack, FolderOpen, Link2, Loader2, Trash2 } from "lucide-react";
 import { Badge, Card } from "@/components/ui";
 import { classificarArquivosRecebimentoBrowser } from "@/lib/domain/classificar-arquivo-recebimento-browser";
 import {
@@ -110,6 +110,24 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     if (tipo === "desconhecido") return;
     marcarItemEmAndamento(id);
     onAbrirFluxo({ id, tipo, arquivo });
+  }
+
+  /** Abre PDF/imagem/XML numa nova aba para conferir o tipo à mão. */
+  function verArquivo(id: string) {
+    const arquivo = obterArquivoFila(id);
+    if (!arquivo) {
+      setErro("Arquivo não está mais na memória desta sessão. Selecione o lote de novo.");
+      return;
+    }
+    const url = URL.createObjectURL(arquivo);
+    const janela = window.open(url, "_blank", "noopener,noreferrer");
+    if (!janela) {
+      setErro("O navegador bloqueou a pré-visualização. Permita pop-ups neste site e tente de novo.");
+      URL.revokeObjectURL(url);
+      return;
+    }
+    // Revoga depois que a aba teve tempo de carregar o blob.
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   return (
@@ -245,9 +263,13 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                         <Link2 size={16} /> Abrir no Financeiro
                       </a>
                     ) : item.tipo === "desconhecido" ? (
-                      <span className="text-sm text-slate-600">
-                        Escolha o tipo acima ou descarte o arquivo.
-                      </span>
+                      <button
+                        type="button"
+                        className="btn-primario inline-flex items-center gap-2 text-sm"
+                        onClick={() => verArquivo(item.id)}
+                      >
+                        <Eye size={16} /> Ver arquivo
+                      </button>
                     ) : (
                       <button
                         type="button"
@@ -255,6 +277,15 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                         onClick={() => abrirItem(item.id, item.tipo)}
                       >
                         {item.status === "em_andamento" ? "Continuar" : "Abrir neste fluxo"}
+                      </button>
+                    )}
+                    {item.tipo !== "desconhecido" && (
+                      <button
+                        type="button"
+                        className="btn-secundario inline-flex items-center gap-2 text-sm"
+                        onClick={() => verArquivo(item.id)}
+                      >
+                        <Eye size={16} /> Ver
                       </button>
                     )}
                     <button
@@ -265,6 +296,11 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                       Descartar
                     </button>
                   </div>
+                  {item.tipo === "desconhecido" && (
+                    <p className="text-sm text-slate-600">
+                      Abra o arquivo, confira se é boleto, NFS-e, DANFE ou XML e escolha o tipo acima.
+                    </p>
+                  )}
                 </Card>
               </li>
             ))}

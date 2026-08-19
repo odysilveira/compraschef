@@ -7,6 +7,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import {
+  FileStack,
   ArrowLeft,
   Camera,
   CircleCheck,
@@ -23,6 +24,7 @@ import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import ReceberPorNota from "@/components/operacao/ReceberPorNota";
 import ReceberAvulso from "@/components/operacao/ReceberAvulso";
 import ImportarNfse from "@/components/operacao/ImportarNfse";
+import ImportarLote, { type AcaoLoteArquivo } from "@/components/operacao/ImportarLote";
 import {
   estoqueAtual,
   mutate,
@@ -104,6 +106,8 @@ export default function RecebimentoPage() {
   const [modoNota, setModoNota] = useState(false);
   const [modoAvulso, setModoAvulso] = useState(false);
   const [modoNfse, setModoNfse] = useState(false);
+  const [modoLote, setModoLote] = useState(false);
+  const [arquivoLote, setArquivoLote] = useState<File | null>(null);
   const [notaConferirId, setNotaConferirId] = useState<string | null>(null);
   const [notaCorrecaoId, setNotaCorrecaoId] = useState<string | null>(null);
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | "pendentes" | "completas">("todas");
@@ -463,8 +467,13 @@ export default function RecebimentoPage() {
         <ReceberPorNota
           db={db}
           usuarioId={usuarioId}
-          onVoltar={() => setModoNota(false)}
-          aoFinalizar={(r) =>
+          arquivoInicial={arquivoLote}
+          onVoltar={() => {
+            setModoNota(false);
+            setArquivoLote(null);
+          }}
+          aoFinalizar={(r) => {
+            setArquivoLote(null);
             setResultado({
               status: r.status,
               temNota: true,
@@ -472,8 +481,8 @@ export default function RecebimentoPage() {
               mensagemExtra: `Nota de ${r.fornecedorNome} registrada no financeiro${
                 r.boletos > 0 ? ` com ${r.boletos} boleto${r.boletos === 1 ? "" : "s"}` : ""
               }${r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""}.`,
-            })
-          }
+            });
+          }}
         />
       </div>
     );
@@ -485,15 +494,20 @@ export default function RecebimentoPage() {
       <div className="mx-auto max-w-2xl space-y-4">
         <TituloPagina titulo="NFS-e — nota de serviço" />
         <ImportarNfse
-          onVoltar={() => setModoNfse(false)}
-          onConcluido={(r) =>
+          arquivoInicial={arquivoLote}
+          onVoltar={() => {
+            setModoNfse(false);
+            setArquivoLote(null);
+          }}
+          onConcluido={(r) => {
+            setArquivoLote(null);
             setResultado({
               status: "ok",
               temNota: true,
               boletosLiberados: 1,
               mensagemExtra: `NFS-e de ${r.fornecedorNome} (${moeda(r.valor)}) registrada · pagamento via ${r.meio.toUpperCase()} · título liberado na agenda (sem estoque).`,
-            })
-          }
+            });
+          }}
         />
       </div>
     );
@@ -537,8 +551,13 @@ export default function RecebimentoPage() {
           db={db}
           usuarioId={usuarioId}
           verValores={verValores}
-          onVoltar={() => setModoAvulso(false)}
-          aoFinalizar={(r) =>
+          arquivoInicial={arquivoLote}
+          onVoltar={() => {
+            setModoAvulso(false);
+            setArquivoLote(null);
+          }}
+          aoFinalizar={(r) => {
+            setArquivoLote(null);
             setResultado({
               status: r.status,
               temNota: r.boletos > 0,
@@ -546,8 +565,32 @@ export default function RecebimentoPage() {
               mensagemExtra: `Entrada de ${r.fornecedorNome} registrada${
                 r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""
               }.`,
-            })
-          }
+            });
+          }}
+        />
+      </div>
+    );
+  }
+
+  // ---------- Importar lote (Downloads do e-mail) ----------
+  if (modoLote) {
+    const abrirDoLote = (acao: AcaoLoteArquivo) => {
+      setArquivoLote(acao.arquivo);
+      setModoLote(false);
+      if (acao.tipo === "xml_nfe") setModoNota(true);
+      else if (acao.tipo === "pdf_nfse") setModoNfse(true);
+      else if (acao.tipo === "pdf_danfe" || acao.tipo === "imagem") setModoAvulso(true);
+    };
+
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <TituloPagina titulo="Importar lote" />
+        <ImportarLote
+          onVoltar={() => {
+            setModoLote(false);
+            setArquivoLote(null);
+          }}
+          onAbrirFluxo={abrirDoLote}
         />
       </div>
     );
@@ -593,6 +636,18 @@ export default function RecebimentoPage() {
               <span className="block text-lg font-bold">Importar NFS-e (PDF)</span>
               <span className="block text-sm text-slate-600">
                 Nota de serviço da prefeitura — Anota AI, software, etc. Gera título boleto ou PIX, sem estoque.
+              </span>
+            </span>
+          </button>
+          <button
+            className="card flex items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara sm:col-span-2"
+            onClick={() => setModoLote(true)}
+          >
+            <FileStack size={32} className="shrink-0 text-primaria" />
+            <span>
+              <span className="block text-lg font-bold">Importar lote (e-mail)</span>
+              <span className="block text-sm text-slate-600">
+                Vários XMLs, PDFs e fotos de uma vez — classifica, você confere e abre o fluxo certo.
               </span>
             </span>
           </button>

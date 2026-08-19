@@ -5,7 +5,7 @@
 // - Com a nota impressa (DANFE): QR, PDF ou foto+OCR → chave / fornecedor / nº;
 //   os itens são preenchidos à mão (itens automáticos vêm com XML ou certificado A1).
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Camera, CircleCheck, FileUp, PackagePlus, Plus, ReceiptText, Trash2 } from "lucide-react";
 import { Campo, Card } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
@@ -62,12 +62,15 @@ export default function ReceberAvulso({
   verValores,
   onVoltar,
   aoFinalizar,
+  arquivoInicial,
 }: {
   db: import("@/lib/types").DB;
   usuarioId: string;
   verValores: boolean;
   onVoltar: () => void;
   aoFinalizar: (resultado: ResultadoNota) => void;
+  /** PDF/foto já escolhido na triagem de lote. */
+  arquivoInicial?: File | null;
 }) {
   const [fornecedorId, setFornecedorId] = useState("");
   const [notaIdentificada, setNotaIdentificada] = useState<NotaIdentificadaDanfe | null>(null);
@@ -140,6 +143,12 @@ export default function ReceberAvulso({
       if (inputFotoRef.current) inputFotoRef.current.value = "";
     }
   }
+
+  useEffect(() => {
+    if (!arquivoInicial) return;
+    void aoEscolherArquivo(arquivoInicial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- carrega só o arquivo inicial do lote
+  }, [arquivoInicial]);
 
   function finalizar() {
     if (itens.length === 0) return;

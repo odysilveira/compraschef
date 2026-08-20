@@ -21,7 +21,7 @@ import {
   definirFilaDeClassificados,
   limparFilaLote,
   marcarItemEmAndamento,
-  obterArquivoFila,
+  obterArquivoFilaAsync,
   useFilaLoteRecebimento,
 } from "@/lib/domain/lote-recebimento-store";
 
@@ -101,10 +101,10 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     }
   }
 
-  function abrirItem(id: string, tipo: TipoArquivoRecebimento) {
-    const arquivo = obterArquivoFila(id);
+  async function abrirItem(id: string, tipo: TipoArquivoRecebimento) {
+    const arquivo = await obterArquivoFilaAsync(id);
     if (!arquivo) {
-      setErro("Arquivo não está mais na memória desta sessão. Selecione o lote de novo.");
+      setErro("Não encontrei o arquivo salvo. Selecione o lote de novo.");
       return;
     }
     if (tipo === "desconhecido") return;
@@ -113,10 +113,10 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
   }
 
   /** Abre PDF/imagem/XML numa nova aba para conferir o tipo à mão. */
-  function verArquivo(id: string) {
-    const arquivo = obterArquivoFila(id);
+  async function verArquivo(id: string) {
+    const arquivo = await obterArquivoFilaAsync(id);
     if (!arquivo) {
-      setErro("Arquivo não está mais na memória desta sessão. Selecione o lote de novo.");
+      setErro("Não encontrei o arquivo salvo. Selecione o lote de novo.");
       return;
     }
     const url = URL.createObjectURL(arquivo);
@@ -142,8 +142,9 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
           <div>
             <h2 className="text-lg font-bold">Importar lote (e-mail)</h2>
             <p className="text-sm text-slate-600">
-              Classifique vários arquivos. A fila <strong>A conciliar</strong> fica nesta sessão: você
-              pode cadastrar fornecedor/produto e voltar aos arquivos restantes.
+              Classifique vários arquivos. A fila <strong>A conciliar</strong> fica salva neste
+              navegador (IndexedDB): você pode cadastrar fornecedor/produto, dar F5 e voltar aos
+              arquivos restantes.
             </p>
           </div>
         </div>
@@ -266,7 +267,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                       <button
                         type="button"
                         className="btn-primario inline-flex items-center gap-2 text-sm"
-                        onClick={() => verArquivo(item.id)}
+                        onClick={() => void verArquivo(item.id)}
                       >
                         <Eye size={16} /> Ver arquivo
                       </button>
@@ -274,7 +275,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                       <button
                         type="button"
                         className="btn-primario text-sm"
-                        onClick={() => abrirItem(item.id, item.tipo)}
+                        onClick={() => void abrirItem(item.id, item.tipo)}
                       >
                         {item.status === "em_andamento" ? "Continuar" : "Abrir neste fluxo"}
                       </button>
@@ -283,7 +284,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                       <button
                         type="button"
                         className="btn-secundario inline-flex items-center gap-2 text-sm"
-                        onClick={() => verArquivo(item.id)}
+                        onClick={() => void verArquivo(item.id)}
                       >
                         <Eye size={16} /> Ver
                       </button>

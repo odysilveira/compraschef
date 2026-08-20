@@ -1,6 +1,6 @@
 import type { TipoArquivoRecebimento } from "./classificar-arquivo-recebimento";
 
-/** Status na fila de conciliação do lote (sessão). */
+/** Status na fila de conciliação do lote (persistida no IndexedDB enquanto aberta). */
 export type StatusItemFilaLote = "pendente" | "em_andamento" | "concluido" | "descartado";
 
 export interface ItemFilaLote {

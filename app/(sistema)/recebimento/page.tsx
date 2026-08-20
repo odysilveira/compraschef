@@ -677,7 +677,7 @@ export default function RecebimentoPage() {
                   <Badge cor="laranja">{abertosLote}</Badge>
                 </span>
                 <span className="block text-sm text-slate-700">
-                  Arquivos do lote ainda pendentes — volte e termine a conciliação.
+                  Arquivos do lote ainda pendentes — salvos neste navegador até conciliar.
                 </span>
               </span>
             </button>

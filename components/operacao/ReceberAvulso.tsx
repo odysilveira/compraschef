@@ -78,8 +78,16 @@ export default function ReceberAvulso({
   const [itens, setItens] = useState<ItemAvulso[]>([]);
   const [avisoScanner, setAvisoScanner] = useState<string | null>(null);
   const [lendoArquivo, setLendoArquivo] = useState(false);
+  /** PDF/foto vindos do lote — permite reler sem pedir o arquivo de novo. */
+  const [arquivoLote, setArquivoLote] = useState<File | null>(arquivoInicial ?? null);
   const inputPdfRef = useRef<HTMLInputElement>(null);
   const inputFotoRef = useRef<HTMLInputElement>(null);
+
+  function formatarCnpj(digitos: string): string {
+    const n = somenteDigitos(digitos).slice(0, 14);
+    if (n.length !== 14) return digitos;
+    return n.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  }
 
   function aplicarNota(nota: NotaIdentificadaDanfe, origem: OrigemIdentificacaoDanfe) {
     setNotaIdentificada(nota);
@@ -110,7 +118,7 @@ export default function ReceberAvulso({
   /** QR/código: chave da nota (44 dígitos) ou EAN de produto. */
   function aoLerCodigo(codigo: string) {
     setAvisoScanner(null);
-    const nota = identificarNotaPorTexto(codigo);
+    const nota = identificarNotaPorTexto(codigo, { aceitarSemDv: true });
     if (nota) {
       aplicarNota(nota, "qr");
       return;
@@ -126,6 +134,7 @@ export default function ReceberAvulso({
 
   async function aoEscolherArquivo(arquivo: File | null) {
     if (!arquivo) return;
+    setArquivoLote(arquivo);
     setLendoArquivo(true);
     setAvisoScanner(null);
     try {
@@ -133,6 +142,8 @@ export default function ReceberAvulso({
       if (resultado.nota && resultado.origem) {
         aplicarNota(resultado.nota, resultado.origem);
       } else {
+        setNotaIdentificada(null);
+        setOrigemNota(undefined);
         setAvisoScanner(resultado.detalhe ?? "Não consegui identificar a DANFE neste arquivo.");
       }
     } catch (erro) {
@@ -146,6 +157,7 @@ export default function ReceberAvulso({
 
   useEffect(() => {
     if (!arquivoInicial) return;
+    setArquivoLote(arquivoInicial);
     void aoEscolherArquivo(arquivoInicial);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- carrega só o arquivo inicial do lote
   }, [arquivoInicial]);
@@ -260,20 +272,29 @@ export default function ReceberAvulso({
           <PackagePlus size={22} className="text-primaria" /> Receber sem o arquivo da nota
         </p>
         <p className="text-sm text-slate-600">
-          Identifique a DANFE pelo <strong>QR</strong>, pelo <strong>PDF</strong> ou por uma{" "}
-          <strong>foto com OCR</strong> (luz do escritório). Também dá para bipar o{" "}
-          <strong>código de barras dos produtos</strong>. Os itens ainda são à mão — a lista automática vem do
-          XML/certificado.
+          {arquivoLote
+            ? <>PDF do lote: <strong>{arquivoLote.name}</strong> — a leitura é automática. Se precisar, use <strong>Ler de novo</strong> sem escolher o arquivo outra vez.</>
+            : <>Identifique a DANFE pelo <strong>QR</strong>, pelo <strong>PDF</strong> ou por uma <strong>foto com OCR</strong>. Os itens ainda são à mão — a lista automática vem do XML/certificado.</>}
         </p>
         <CodeScanner rotulo="Ler QR da nota ou código do produto" onLeitura={aoLerCodigo} />
         <div className="flex flex-wrap gap-2">
+          {arquivoLote && (
+            <button
+              type="button"
+              className="btn-primario"
+              disabled={lendoArquivo}
+              onClick={() => void aoEscolherArquivo(arquivoLote)}
+            >
+              <FileUp size={16} /> {lendoArquivo ? "Lendo PDF do lote…" : "Ler de novo o PDF do lote"}
+            </button>
+          )}
           <button
             type="button"
             className="btn-secundario"
             disabled={lendoArquivo}
             onClick={() => inputPdfRef.current?.click()}
           >
-            <FileUp size={16} /> {lendoArquivo ? "Lendo…" : "PDF da DANFE"}
+            <FileUp size={16} /> {lendoArquivo ? "Lendo…" : arquivoLote ? "Trocar PDF…" : "PDF da DANFE"}
           </button>
           <button
             type="button"
@@ -299,18 +320,31 @@ export default function ReceberAvulso({
             onChange={(e) => void aoEscolherArquivo(e.target.files?.[0] ?? null)}
           />
         </div>
+        {lendoArquivo && (
+          <p className="rounded-card bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Lendo o PDF{arquivoLote ? ` (${arquivoLote.name})` : ""} — texto e OCR…
+          </p>
+        )}
         {avisoScanner && (
           <p className="rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">{avisoScanner}</p>
         )}
         {notaIdentificada && (
-          <p className="rounded-card bg-sucesso-clara px-3 py-2 text-sm text-primaria-escura">
-            <ReceiptText size={14} className="mr-1 inline" />
-            Nota nº {notaIdentificada.numero} identificada {rotuloOrigem(origemNota)}
-            {fornecedorId
-              ? ` — ${nomeFornecedor(db, fornecedorId)}`
-              : ` (CNPJ ${notaIdentificada.cnpj} não está nos seus fornecedores)`}
-            . Os itens você preenche abaixo — a busca automática virá com o certificado digital.
-          </p>
+          <div className="space-y-1 rounded-card bg-sucesso-clara px-3 py-2 text-sm text-primaria-escura">
+            <p>
+              <ReceiptText size={14} className="mr-1 inline" />
+              Nota nº {notaIdentificada.numero} identificada {rotuloOrigem(origemNota)}
+              {arquivoLote ? " a partir do arquivo do lote" : ""}.
+            </p>
+            <p className="text-xs text-slate-600">
+              Chave …{notaIdentificada.chave.slice(-8)} · CNPJ {formatarCnpj(notaIdentificada.cnpj)}
+              {fornecedorId
+                ? ` — ${nomeFornecedor(db, fornecedorId)}`
+                : " — cadastre ou escolha o fornecedor abaixo (ainda não está nos Cadastros)."}
+            </p>
+            <p className="text-xs text-slate-600">
+              Os itens você preenche abaixo — a lista automática de itens vem com o XML ou certificado.
+            </p>
+          </div>
         )}
       </Card>
 

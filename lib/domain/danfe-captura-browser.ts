@@ -86,6 +86,7 @@ export async function renderizarPaginaPdfParaCanvas(buffer: ArrayBuffer, pagina 
 
 /**
  * Identifica a DANFE a partir de PDF (texto → OCR da 1ª página) ou foto (OCR).
+ * Só aceita chave com DV válido no PDF/OCR (evita chave falsa que pedia arquivo de novo).
  */
 export async function identificarDanfeDeArquivo(arquivo: File): Promise<ResultadoCapturaDanfe> {
   const nome = arquivo.name.toLowerCase();
@@ -93,9 +94,10 @@ export async function identificarDanfeDeArquivo(arquivo: File): Promise<Resultad
 
   if (ehPdf) {
     const buffer = await arquivo.arrayBuffer();
+    let textoPdf = "";
     try {
-      const texto = await extrairTextoPdfBrowser(buffer);
-      const notaTexto = identificarNotaPorTexto(texto);
+      textoPdf = await extrairTextoPdfBrowser(buffer);
+      const notaTexto = identificarNotaPorTexto(textoPdf);
       if (notaTexto) {
         return { nota: notaTexto, origem: "pdf_texto" };
       }
@@ -105,15 +107,20 @@ export async function identificarDanfeDeArquivo(arquivo: File): Promise<Resultad
 
     try {
       const canvas = await renderizarPaginaPdfParaCanvas(buffer, 1);
-      const ocr = await ocrImagemDataUrl(canvas);
-      const notaOcr = identificarNotaPorTexto(ocr);
+      const ocrLivre = await ocrImagemTextoCompleto(canvas).catch(() => "");
+      const ocrDigitos = await ocrImagemDataUrl(canvas).catch(() => "");
+      const notaOcr =
+        identificarNotaPorTexto(`${textoPdf}\n${ocrLivre}\n${ocrDigitos}`) ||
+        identificarNotaPorTexto(ocrLivre) ||
+        identificarNotaPorTexto(ocrDigitos);
       if (notaOcr) {
         return { nota: notaOcr, origem: "pdf_ocr" };
       }
       return {
         nota: null,
         origem: "pdf_ocr",
-        detalhe: "PDF lido, mas não encontrei a chave de acesso (44 dígitos). Tente o QR ou uma foto mais nítida.",
+        detalhe:
+          "PDF lido, mas não encontrei uma chave de acesso válida (44 dígitos com DV). Use o QR da DANFE ou uma foto mais nítida.",
       };
     } catch (erro) {
       return {
@@ -129,15 +136,16 @@ export async function identificarDanfeDeArquivo(arquivo: File): Promise<Resultad
 
   try {
     const dataUrl = await arquivoParaDataUrl(arquivo);
-    const ocr = await ocrImagemDataUrl(dataUrl);
-    const nota = identificarNotaPorTexto(ocr);
+    const ocrLivre = await ocrImagemTextoCompleto(dataUrl).catch(() => "");
+    const ocrDigitos = ocrLivre ? "" : await ocrImagemDataUrl(dataUrl);
+    const nota = identificarNotaPorTexto(ocrLivre || ocrDigitos);
     if (nota) {
       return { nota, origem: "foto_ocr" };
     }
     return {
       nota: null,
       origem: "foto_ocr",
-      detalhe: "OCR concluído, mas não encontrei a chave de 44 dígitos. Enquadre a chave ou o QR com boa luz.",
+      detalhe: "OCR concluído, mas não encontrei a chave válida. Enquadre a chave ou o QR com boa luz.",
     };
   } catch (erro) {
     return {

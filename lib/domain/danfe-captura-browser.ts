@@ -2,6 +2,7 @@
 
 import { extrairTextoPdfBrowser } from "./folha-recibo-pdf-browser";
 import { configurarWorkerPdfjs } from "./pdfjs-worker";
+import { extrairDadosDanfeDoTexto, type DadosDanfeExtraidos } from "./danfe-extracao";
 import { identificarNotaPorTexto, type NotaIdentificadaDanfe } from "./danfe-identificacao";
 
 export type OrigemIdentificacaoDanfe = "pdf_texto" | "pdf_ocr" | "foto_ocr" | "qr";
@@ -10,6 +11,8 @@ export interface ResultadoCapturaDanfe {
   nota: NotaIdentificadaDanfe | null;
   origem?: OrigemIdentificacaoDanfe;
   detalhe?: string;
+  /** Extração ampliada (emitente, itens) quando o PDF tem texto. */
+  dados?: DadosDanfeExtraidos;
 }
 
 async function arquivoParaDataUrl(arquivo: File): Promise<string> {
@@ -97,9 +100,9 @@ export async function identificarDanfeDeArquivo(arquivo: File): Promise<Resultad
     let textoPdf = "";
     try {
       textoPdf = await extrairTextoPdfBrowser(buffer);
-      const notaTexto = identificarNotaPorTexto(textoPdf);
-      if (notaTexto) {
-        return { nota: notaTexto, origem: "pdf_texto" };
+      const dados = extrairDadosDanfeDoTexto(textoPdf);
+      if (dados.nota) {
+        return { nota: dados.nota, origem: "pdf_texto", dados };
       }
     } catch {
       // segue para OCR
@@ -109,16 +112,23 @@ export async function identificarDanfeDeArquivo(arquivo: File): Promise<Resultad
       const canvas = await renderizarPaginaPdfParaCanvas(buffer, 1);
       const ocrLivre = await ocrImagemTextoCompleto(canvas).catch(() => "");
       const ocrDigitos = await ocrImagemDataUrl(canvas).catch(() => "");
+      const textoCombinado = `${textoPdf}\n${ocrLivre}\n${ocrDigitos}`;
+      const dados = extrairDadosDanfeDoTexto(textoCombinado);
       const notaOcr =
-        identificarNotaPorTexto(`${textoPdf}\n${ocrLivre}\n${ocrDigitos}`) ||
+        dados.nota ||
         identificarNotaPorTexto(ocrLivre) ||
         identificarNotaPorTexto(ocrDigitos);
       if (notaOcr) {
-        return { nota: notaOcr, origem: "pdf_ocr" };
+        return {
+          nota: notaOcr,
+          origem: "pdf_ocr",
+          dados: { ...dados, nota: notaOcr },
+        };
       }
       return {
         nota: null,
         origem: "pdf_ocr",
+        dados: dados.origemTexto ? dados : undefined,
         detalhe:
           "PDF lido, mas não encontrei uma chave de acesso válida (44 dígitos com DV). Use o QR da DANFE ou uma foto mais nítida.",
       };

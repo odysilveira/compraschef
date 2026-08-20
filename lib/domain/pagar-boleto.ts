@@ -1,4 +1,4 @@
-import { obterCodigoCanonico, validarBoleto } from "./boletos";
+import { obterCodigoCanonico } from "./boletos";
 import type { Boleto, DB, DocumentoBoleto, HistoricoPagamentoBoleto, StatusBoleto } from "../types";
 
 export type MotivoBloqueioPagamentoBoleto =

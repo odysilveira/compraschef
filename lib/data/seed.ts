@@ -1,5 +1,5 @@
 import type { DB } from "@/lib/types";
-import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_SACO } from "./catalogo";
+import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_PACOTE, UNIDADE_SACO } from "./catalogo";
 
 // Datas relativas a "hoje" para a demonstração ficar sempre atual.
 // Horário fixado ao meio-dia para servidor e navegador gerarem o MESMO valor
@@ -35,6 +35,7 @@ export const seedDB: DB = {
     { id: "un-cx", codigo_externo: "CX", nome: "caixa", sigla: "cx" },
     { id: "un-fd", codigo_externo: "FD", nome: "fardo", sigla: "fd" },
     UNIDADE_SACO,
+    UNIDADE_PACOTE,
   ],
 
   categorias_produtos: [

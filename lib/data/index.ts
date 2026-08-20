@@ -7,7 +7,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { Caixa, ContaPagar, ContaPagarHistorico, DB, Produto, StatusContaPagar } from "@/lib/types";
 import { seedDB } from "./seed";
-import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_SACO } from "./catalogo";
+import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_PACOTE, UNIDADE_SACO } from "./catalogo";
 import { compararPrioridadeConsumo, saldoDosLotes } from "../domain/estoque";
 import { validarPosicaoFisicaBox, validarTipoBox } from "../domain/estoque-boxes";
 import { extrairCnpjEmitenteDaChaveAcesso } from "../domain/nfe-parcelas";
@@ -353,6 +353,14 @@ export function atualizarComNovidades(db: DB): boolean {
   }
   if (!db.unidades.some((u) => u.id === UNIDADE_SACO.id)) {
     db.unidades.push({ ...UNIDADE_SACO });
+    mudou = true;
+  }
+  if (!db.unidades.some((u) => u.id === UNIDADE_PACOTE.id)) {
+    db.unidades.push({ ...UNIDADE_PACOTE });
+    mudou = true;
+  }
+  if (!Array.isArray(db.fornecedor_produtos)) {
+    db.fornecedor_produtos = [];
     mudou = true;
   }
   if (!db.locais.some((l) => l.id === LOCAL_ESTOQUE_SECO.id)) {

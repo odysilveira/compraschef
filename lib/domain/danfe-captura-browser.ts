@@ -40,7 +40,25 @@ export async function ocrImagemDataUrl(dataUrlOuCanvas: string | HTMLCanvasEleme
   }
 }
 
-async function renderizarPaginaPdfParaCanvas(buffer: ArrayBuffer, pagina = 1): Promise<HTMLCanvasElement> {
+/** OCR em português completo (NFS-e, boleto, rótulos) — sem whitelist só de dígitos. */
+export async function ocrImagemTextoCompleto(
+  dataUrlOuCanvas: string | HTMLCanvasElement
+): Promise<string> {
+  const tesseract = await import("tesseract.js").catch(() => null);
+  if (!tesseract?.createWorker) {
+    throw new Error("OCR indisponível neste navegador.");
+  }
+
+  const worker = await tesseract.createWorker("por");
+  try {
+    const resultado = await worker.recognize(dataUrlOuCanvas);
+    return resultado.data.text ?? "";
+  } finally {
+    await worker.terminate().catch(() => undefined);
+  }
+}
+
+export async function renderizarPaginaPdfParaCanvas(buffer: ArrayBuffer, pagina = 1): Promise<HTMLCanvasElement> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => null);
   if (!pdfjs?.getDocument) {
     throw new Error("Não foi possível carregar o leitor de PDF.");

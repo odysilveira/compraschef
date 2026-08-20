@@ -147,6 +147,14 @@ export function alterarTipoItemFila(id: string, tipo: TipoArquivoRecebimento) {
   atualizarItem(id, { tipo });
 }
 
+export function atualizarClassificacaoItemFila(
+  id: string,
+  tipo: TipoArquivoRecebimento,
+  detalhe?: string
+) {
+  atualizarItem(id, { tipo, detalhe, status: "pendente" });
+}
+
 export function marcarItemEmAndamento(id: string) {
   atualizarItem(id, { status: "em_andamento" });
 }

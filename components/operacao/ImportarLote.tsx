@@ -5,9 +5,12 @@
 // A fila sobrevive ao cadastro de fornecedor/produto; nada grava só por classificar.
 
 import { useMemo, useRef, useState } from "react";
-import { ArrowLeft, Eye, FileStack, FolderOpen, Link2, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, Eye, FileStack, FolderOpen, Link2, Loader2, ScanSearch, Trash2 } from "lucide-react";
 import { Badge, Card } from "@/components/ui";
-import { classificarArquivosRecebimentoBrowser } from "@/lib/domain/classificar-arquivo-recebimento-browser";
+import {
+  classificarArquivosRecebimentoBrowser,
+  reclassificarArquivoRecebimentoBrowser,
+} from "@/lib/domain/classificar-arquivo-recebimento-browser";
 import {
   contarPorTipo,
   rotuloTipoArquivoRecebimento,
@@ -17,6 +20,7 @@ import { filtrarItensAbertos, rotuloStatusFilaLote } from "@/lib/domain/lote-rec
 import {
   acrescentarClassificados,
   alterarTipoItemFila,
+  atualizarClassificacaoItemFila,
   descartarItemFila,
   definirFilaDeClassificados,
   limparFilaLote,
@@ -72,6 +76,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
   );
   const [erro, setErro] = useState<string | null>(null);
   const [substituir, setSubstituir] = useState(true);
+  const [reconhecendoId, setReconhecendoId] = useState<string | null>(null);
 
   const contagem = useMemo(
     () => contarPorTipo(abertos.map((i) => ({ tipo: i.tipo }))),
@@ -130,6 +135,34 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
+  /** OCR/leitura de novo no arquivo já salvo na fila (sem rebaixar). */
+  async function reconhecerDeNovo(id: string) {
+    setErro(null);
+    setReconhecendoId(id);
+    try {
+      const arquivo = await obterArquivoFilaAsync(id);
+      if (!arquivo) {
+        setErro("Não encontrei o arquivo salvo. Selecione o lote de novo.");
+        return;
+      }
+      const resultado = await reclassificarArquivoRecebimentoBrowser(arquivo);
+      atualizarClassificacaoItemFila(
+        id,
+        resultado.tipoEscolhido,
+        resultado.classificacao.detalhe
+      );
+      if (resultado.tipoEscolhido === "desconhecido") {
+        setErro(
+          "Ainda não reconheci este arquivo. Use Ver arquivo e escolha o tipo na lista."
+        );
+      }
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Falha ao reconhecer o arquivo.");
+    } finally {
+      setReconhecendoId(null);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <button type="button" className="btn-secundario inline-flex items-center gap-2" onClick={onVoltar}>
@@ -166,7 +199,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
             onClick={() => inputRef.current?.click()}
           >
             {lendo ? <Loader2 size={18} className="animate-spin" /> : <FolderOpen size={18} />}
-            {lendo ? "Classificando…" : abertos.length > 0 ? "Adicionar arquivos" : "Selecionar arquivos"}
+            {lendo ? "Classificando… (PDF pode usar OCR)" : abertos.length > 0 ? "Adicionar arquivos" : "Selecionar arquivos"}
           </button>
           {abertos.length > 0 && (
             <button
@@ -264,13 +297,28 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                         <Link2 size={16} /> Abrir no Financeiro
                       </a>
                     ) : item.tipo === "desconhecido" ? (
-                      <button
-                        type="button"
-                        className="btn-primario inline-flex items-center gap-2 text-sm"
-                        onClick={() => void verArquivo(item.id)}
-                      >
-                        <Eye size={16} /> Ver arquivo
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="btn-primario inline-flex items-center gap-2 text-sm"
+                          onClick={() => void verArquivo(item.id)}
+                        >
+                          <Eye size={16} /> Ver arquivo
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secundario inline-flex items-center gap-2 text-sm"
+                          disabled={reconhecendoId === item.id}
+                          onClick={() => void reconhecerDeNovo(item.id)}
+                        >
+                          {reconhecendoId === item.id ? (
+                            <Loader2 size={16} className="animate-spin" />
+                          ) : (
+                            <ScanSearch size={16} />
+                          )}
+                          {reconhecendoId === item.id ? "Lendo…" : "Reconhecer (OCR)"}
+                        </button>
+                      </>
                     ) : (
                       <button
                         type="button"
@@ -299,7 +347,8 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
                   </div>
                   {item.tipo === "desconhecido" && (
                     <p className="text-sm text-slate-600">
-                      Abra o arquivo, confira se é boleto, NFS-e, DANFE ou XML e escolha o tipo acima.
+                      PDFs sem texto passam por OCR automático. Se ainda falhar, use Ver arquivo /
+                      Reconhecer (OCR) e escolha o tipo acima — sem baixar de novo.
                     </p>
                   )}
                 </Card>

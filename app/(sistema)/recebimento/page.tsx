@@ -23,6 +23,7 @@ import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import ReceberPorNota from "@/components/operacao/ReceberPorNota";
 import ReceberAvulso from "@/components/operacao/ReceberAvulso";
+import ReceberDanfe from "@/components/operacao/ReceberDanfe";
 import ImportarNfse from "@/components/operacao/ImportarNfse";
 import ImportarLote, { type AcaoLoteArquivo } from "@/components/operacao/ImportarLote";
 import {
@@ -114,6 +115,7 @@ export default function RecebimentoPage() {
   const [pedidoId, setPedidoId] = useState<string | null>(null);
   const [modoNota, setModoNota] = useState(false);
   const [modoAvulso, setModoAvulso] = useState(false);
+  const [modoDanfe, setModoDanfe] = useState(false);
   const [modoNfse, setModoNfse] = useState(false);
   const [modoLote, setModoLote] = useState(false);
   const [arquivoLote, setArquivoLote] = useState<File | null>(null);
@@ -421,6 +423,7 @@ export default function RecebimentoPage() {
     setPedidoId(null);
     setModoNota(false);
     setModoAvulso(false);
+    setModoDanfe(false);
     setModoNfse(false);
     setModoLote(false);
     setArquivoLote(null);
@@ -437,6 +440,7 @@ export default function RecebimentoPage() {
     if (itemLoteId) marcarItemPendente(itemLoteId);
     setModoNota(false);
     setModoAvulso(false);
+    setModoDanfe(false);
     setModoNfse(false);
     setArquivoLote(null);
     setItemLoteId(null);
@@ -453,6 +457,7 @@ export default function RecebimentoPage() {
     setResultado(null);
     setModoNota(false);
     setModoAvulso(false);
+    setModoDanfe(false);
     setModoNfse(false);
     setArquivoLote(null);
     setItemLoteId(null);
@@ -599,6 +604,39 @@ export default function RecebimentoPage() {
     );
   }
 
+  // ---------- Conferência DANFE (PDF/foto ao lado + itens como no XML) ----------
+  if (modoDanfe && arquivoLote) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-4">
+        <TituloPagina titulo="Conferir DANFE" />
+        <ReceberDanfe
+          db={db}
+          usuarioId={usuarioId}
+          arquivoInicial={arquivoLote}
+          onVoltar={() => {
+            if (itemLoteId) voltarDoFluxoLote();
+            else {
+              setModoDanfe(false);
+              setArquivoLote(null);
+            }
+          }}
+          aoFinalizar={(r) => {
+            finalizarItemLoteSeHouver();
+            setModoDanfe(false);
+            setResultado({
+              status: r.status,
+              temNota: true,
+              boletosLiberados: r.boletosLiberados,
+              mensagemExtra: `DANFE de ${r.fornecedorNome} conferida${
+                r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""
+              }.`,
+            });
+          }}
+        />
+      </div>
+    );
+  }
+
   // ---------- Modo avulso (QR da nota ou sem nota) ----------
   if (modoAvulso) {
     return (
@@ -640,7 +678,7 @@ export default function RecebimentoPage() {
       setModoLote(false);
       if (acao.tipo === "xml_nfe") setModoNota(true);
       else if (acao.tipo === "pdf_nfse") setModoNfse(true);
-      else if (acao.tipo === "pdf_danfe" || acao.tipo === "imagem") setModoAvulso(true);
+      else if (acao.tipo === "pdf_danfe" || acao.tipo === "imagem") setModoDanfe(true);
     };
 
     return (

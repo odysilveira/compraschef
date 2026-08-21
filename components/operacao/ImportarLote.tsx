@@ -4,9 +4,10 @@
 // multi-seleção → classifica → fila “A conciliar” (sessão) → abre o fluxo.
 // A fila sobrevive ao cadastro de fornecedor/produto; nada grava só por classificar.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Eye, FileStack, FolderOpen, Link2, Loader2, ScanSearch, Trash2 } from "lucide-react";
-import { Badge, Card } from "@/components/ui";
+import { Badge, Card, Modal } from "@/components/ui";
 import {
   classificarArquivosRecebimentoBrowser,
   reclassificarArquivoRecebimentoBrowser,
@@ -67,6 +68,7 @@ interface Props {
 }
 
 export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const fila = useFilaLoteRecebimento();
   const abertos = useMemo(() => filtrarItensAbertos(fila), [fila]);
@@ -77,11 +79,28 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
   const [erro, setErro] = useState<string | null>(null);
   const [substituir, setSubstituir] = useState(true);
   const [reconhecendoId, setReconhecendoId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{
+    url: string;
+    nome: string;
+    mime: string;
+    textoXml?: string;
+  } | null>(null);
 
   const contagem = useMemo(
     () => contarPorTipo(abertos.map((i) => ({ tipo: i.tipo }))),
     [abertos]
   );
+
+  useEffect(() => {
+    return () => {
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+    };
+  }, [preview?.url]);
+
+  function fecharPreview() {
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  }
 
   async function aoEscolher(lista: FileList | null) {
     if (!lista?.length) return;
@@ -117,22 +136,32 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     onAbrirFluxo({ id, tipo, arquivo });
   }
 
-  /** Abre PDF/imagem/XML numa nova aba para conferir o tipo à mão. */
+  /** Pré-visualiza no modal (sem pop-up — evita bloqueio do navegador). */
   async function verArquivo(id: string) {
+    setErro(null);
     const arquivo = await obterArquivoFilaAsync(id);
     if (!arquivo) {
       setErro("Não encontrei o arquivo salvo. Selecione o lote de novo.");
       return;
     }
-    const url = URL.createObjectURL(arquivo);
-    const janela = window.open(url, "_blank", "noopener,noreferrer");
-    if (!janela) {
-      setErro("O navegador bloqueou a pré-visualização. Permita pop-ups neste site e tente de novo.");
-      URL.revokeObjectURL(url);
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+
+    const nome = arquivo.name.toLowerCase();
+    const ehXml =
+      arquivo.type.includes("xml") || nome.endsWith(".xml");
+    if (ehXml) {
+      const textoXml = await arquivo.text();
+      setPreview({ url: "", nome: arquivo.name, mime: arquivo.type || "application/xml", textoXml });
       return;
     }
-    // Revoga depois que a aba teve tempo de carregar o blob.
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+    const url = URL.createObjectURL(arquivo);
+    setPreview({ url, nome: arquivo.name, mime: arquivo.type || "application/octet-stream" });
+  }
+
+  function levarBoletoAoFinanceiro(id: string) {
+    marcarItemEmAndamento(id);
+    router.push(`/financeiro?importarLoteBoleto=${encodeURIComponent(id)}`);
   }
 
   /** OCR/leitura de novo no arquivo já salvo na fila (sem rebaixar). */
@@ -289,13 +318,13 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
 
                   <div className="flex flex-wrap gap-2">
                     {item.tipo === "pdf_boleto" ? (
-                      <a
-                        href="/financeiro"
+                      <button
+                        type="button"
                         className="btn-primario inline-flex items-center gap-2 text-sm"
-                        onClick={() => marcarItemEmAndamento(item.id)}
+                        onClick={() => levarBoletoAoFinanceiro(item.id)}
                       >
-                        <Link2 size={16} /> Abrir no Financeiro
-                      </a>
+                        <Link2 size={16} /> Levar ao Financeiro
+                      </button>
                     ) : item.tipo === "desconhecido" ? (
                       <>
                         <button
@@ -363,6 +392,40 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
           Nenhum arquivo a conciliar. Selecione os Downloads do e-mail para começar.
         </p>
       )}
+
+      <Modal
+        aberto={preview !== null}
+        titulo={preview?.nome ?? "Pré-visualização"}
+        onFechar={fecharPreview}
+      >
+        {preview && (
+          <div className="space-y-3">
+            {preview.textoXml !== undefined ? (
+              <pre className="max-h-[70vh] overflow-auto rounded-card bg-slate-50 p-3 text-xs text-slate-800">
+                {preview.textoXml.slice(0, 80_000)}
+                {preview.textoXml.length > 80_000 ? "\n… (truncado)" : ""}
+              </pre>
+            ) : preview.mime.startsWith("image/") ||
+              /\.(png|jpe?g|webp|gif)$/i.test(preview.nome) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={preview.url}
+                alt={preview.nome}
+                className="max-h-[70vh] w-full object-contain bg-slate-100"
+              />
+            ) : (
+              <iframe
+                title={preview.nome}
+                src={preview.url}
+                className="h-[70vh] w-full rounded-card border border-slate-200 bg-slate-100"
+              />
+            )}
+            <p className="text-sm text-slate-600">
+              Arquivo já está na fila — não precisa baixar de novo. Feche para voltar à triagem.
+            </p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

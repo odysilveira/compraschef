@@ -456,7 +456,9 @@ describe("preparação de NF-e e parcelas", () => {
     expect(db.boletos.find((b) => b.id === "bol-leg-1")?.numero_parcela).toBe("003");
     expect(db.boletos.find((b) => b.id === "bol-leg-3")?.numero_parcela).toBe("007");
 
-    const depoisCampos = db.boletos.map((boleto) => ({
+    const depoisCampos = db.boletos
+      .filter((boleto) => boleto.id.startsWith("bol-leg-"))
+      .map((boleto) => ({
       id: boleto.id,
       nota_id: boleto.nota_id,
       valor: boleto.valor,
@@ -466,9 +468,13 @@ describe("preparação de NF-e e parcelas", () => {
     }));
     expect(depoisCampos).toEqual(antesCampos);
 
-    const numeroParcelaAposPrimeira = db.boletos.map((boleto) => ({ id: boleto.id, numero_parcela: boleto.numero_parcela }));
+    const numeroParcelaAposPrimeira = db.boletos
+      .filter((boleto) => boleto.id.startsWith("bol-leg-"))
+      .map((boleto) => ({ id: boleto.id, numero_parcela: boleto.numero_parcela }));
     atualizarComNovidades(db);
-    const numeroParcelaAposSegunda = db.boletos.map((boleto) => ({ id: boleto.id, numero_parcela: boleto.numero_parcela }));
+    const numeroParcelaAposSegunda = db.boletos
+      .filter((boleto) => boleto.id.startsWith("bol-leg-"))
+      .map((boleto) => ({ id: boleto.id, numero_parcela: boleto.numero_parcela }));
 
     expect(numeroParcelaAposSegunda).toEqual(numeroParcelaAposPrimeira);
   });

@@ -387,6 +387,35 @@ export function atualizarComNovidades(db: DB): boolean {
       mudou = true;
     }
   }
+
+  // Fornecedores novos do seed (ex.: ADG) — injeta em DBs já persistidos sem sobrescrever.
+  for (const semente of seedDB.fornecedores) {
+    const cnpjSemente = (semente.cnpj ?? "").replace(/\D/g, "");
+    const jaTem = db.fornecedores.some((f) => {
+      if (f.id === semente.id) return true;
+      const cnpj = (f.cnpj ?? "").replace(/\D/g, "");
+      return cnpjSemente.length === 14 && cnpj === cnpjSemente;
+    });
+    if (!jaTem) {
+      db.fornecedores.push(structuredClone(semente));
+      mudou = true;
+    }
+  }
+  for (const semente of seedDB.notas_fiscais) {
+    if (semente.id !== "nf-adg-613") continue;
+    if (!db.notas_fiscais.some((n) => n.id === semente.id)) {
+      db.notas_fiscais.push(structuredClone(semente));
+      mudou = true;
+    }
+  }
+  for (const semente of seedDB.boletos) {
+    if (semente.id !== "bol-adg-613") continue;
+    if (!db.boletos.some((b) => b.id === semente.id)) {
+      db.boletos.push(structuredClone(semente));
+      mudou = true;
+    }
+  }
+
   return mudou;
 }
 

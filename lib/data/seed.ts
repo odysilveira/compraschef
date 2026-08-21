@@ -110,6 +110,16 @@ export const seedDB: DB = {
       prazo_boleto_dias: 14,
       ativo: true,
     },
+    // Cadastro real para testar import do boleto PDF (CNPJ 37.681.455/0001-20)
+    {
+      id: "forn-adg-cakes",
+      codigo_externo: "F005",
+      nome: "ADG Cakes Embalagens",
+      cnpj: "37.681.455/0001-20",
+      forma_pagamento: "boleto",
+      prazo_boleto_dias: 14,
+      ativo: true,
+    },
   ],
 
   produtos: [
@@ -286,6 +296,20 @@ export const seedDB: DB = {
       itens_importados: [
         { descricao: "FILE MIGNON BOVINO RESFRIADO KG", codigo: "FBF-0101", ean: "7891000200201", unidade: "kg", quantidade: 20, preco_unitario: 62.0 },
       ] },
+    // NF correspondente ao boleto real ADG (R$ 613,34 · venc. 07/08/2026 pelo fator)
+    {
+      id: "nf-adg-613",
+      fornecedor_id: "forn-adg-cakes",
+      numero: "61334",
+      chave_acesso: "35260737681455000120550010000613341000613349",
+      cnpj_emitente: "37.681.455/0001-20",
+      razao_social_emitente: "ADG CAKES EMBALAGENS LTDA",
+      valor_total: 613.34,
+      emitida_em: soData(diasAtras(10)),
+      importada_em: diasAtras(2),
+      status: "conferida",
+      origem: "manual",
+    },
   ],
 
   boletos: [
@@ -295,6 +319,16 @@ export const seedDB: DB = {
     { id: "bol-2", nota_id: "nf-3", valor: 1240.0, vencimento: soData(diasAFrente(3)), cnpj_beneficiario: "99.888.777/0001-66", linha_digitavel: "23791.22928 60000.123456 77000.045678 1 98760000124000", status: "suspeito", observacao: "CNPJ do beneficiário difere do CNPJ do fornecedor na nota — NÃO PAGAR sem confirmar por telefone" },
     // Liberado: conferência OK
     { id: "bol-3", nota_id: "nf-1", valor: 318.4, vencimento: soData(diasAFrente(2)), cnpj_beneficiario: "12.345.678/0001-90", status: "liberado" },
+    // Parcela liberada para casar com o PDF real (sem linha — o import anexa)
+    {
+      id: "bol-adg-613",
+      nota_id: "nf-adg-613",
+      numero_parcela: "001",
+      valor: 613.34,
+      vencimento: "2026-08-07",
+      cnpj_beneficiario: "37.681.455/0001-20",
+      status: "liberado",
+    },
   ],
 
   contas_pagar: [],

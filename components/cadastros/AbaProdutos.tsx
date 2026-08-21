@@ -2,7 +2,7 @@
 
 // Aba Produtos — requisitos 2 e 3 (vínculo fornecedor × produto).
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link2, Plus, X } from "lucide-react";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
@@ -37,11 +37,20 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
   const [codigoBarrasForm, setCodigoBarrasForm] = useState<ProdutoCodigoBarras[]>([]);
   const [novoCodigoBarras, setNovoCodigoBarras] = useState("");
   const [fornecedorParaVincular, setFornecedorParaVincular] = useState("");
+  const produtoAbertoPorUrl = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!produtoParaAbrirId) return;
+    if (!produtoParaAbrirId) {
+      produtoAbertoPorUrl.current = undefined;
+      return;
+    }
+    // Evita reabrir (e zerar o select de vínculo) a cada atualização do DB.
+    if (produtoAbertoPorUrl.current === produtoParaAbrirId) return;
     const produto = db.produtos.find((p) => p.id === produtoParaAbrirId);
-    if (produto) abrir(produto);
+    if (produto) {
+      produtoAbertoPorUrl.current = produtoParaAbrirId;
+      abrir(produto);
+    }
   }, [produtoParaAbrirId, db.produtos]);
 
   const categorias = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
@@ -161,10 +170,11 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
   }
 
   const vinculos = form?.id ? db.fornecedor_produtos.filter((fp) => fp.produto_id === form.id) : [];
+  const idsJaVinculados = new Set(vinculos.map((fp) => fp.fornecedor_id));
   const fornecedoresDisponiveis = form?.id
-    ? db.fornecedores.filter(
-        (f) => f.ativo && !vinculos.some((fp) => fp.fornecedor_id === f.id)
-      )
+    ? db.fornecedores
+        .filter((f) => f.ativo !== false && !idsJaVinculados.has(f.id))
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
     : [];
 
   return (
@@ -570,6 +580,7 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                       {fornecedoresDisponiveis.map((f) => (
                         <option key={f.id} value={f.id}>
                           {f.nome}
+                          {f.cnpj ? ` · ${f.cnpj}` : ""}
                         </option>
                       ))}
                     </select>
@@ -582,6 +593,13 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                       <Link2 size={16} /> Vincular
                     </button>
                   </div>
+                )}
+                {fornecedoresDisponiveis.length === 0 && (
+                  <p className="text-xs text-slate-500">
+                    {vinculos.length > 0
+                      ? "Todos os fornecedores ativos já estão vinculados. Cadastre um novo em Cadastros → Fornecedores."
+                      : "Nenhum fornecedor cadastrado ainda. Cadastre em Cadastros → Fornecedores."}
+                  </p>
                 )}
               </div>
             ) : (

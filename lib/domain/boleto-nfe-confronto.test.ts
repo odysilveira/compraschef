@@ -3,13 +3,16 @@ import { seedDB } from "../data/seed";
 import type { DB } from "../types";
 import {
   confrontarBoletoComNfe,
+  dataDoFatorVencimentoBoleto,
   extrairDadosEstruturadosDoBoleto,
   extrairValorDoCodigoBoleto,
+  extrairVencimentoDoCodigoBoleto,
   validarChaveAcessoNfe,
 } from "./boleto-nfe-confronto";
 
 const CODIGO_BARRAS_44 = "34191123400000010001234567890123456789012345";
 const LINHA_BANCARIA_47 = "34191.23454 67890.123457 67890.123457 1 12340000001000";
+const LINHA_ADG_613 = "34191090080144719315000034870006115310000061334";
 
 function gerarChaveNfeValida(base43: string): string {
   let soma = 0;
@@ -71,6 +74,25 @@ describe("extração estruturada de boleto", () => {
 
   it("extrai vencimento rotulado", () => {
     const dados = extrairDadosEstruturadosDoBoleto(CODIGO_BARRAS_44, "Data de vencimento: 10/08/2026");
+    expect(dados.vencimento_extraido).toBe("2026-08-10");
+  });
+
+  it("extrai vencimento pelo fator quando o PDF não rotula a data", () => {
+    expect(dataDoFatorVencimentoBoleto(1531)).toBe("2026-08-07");
+    expect(extrairVencimentoDoCodigoBoleto(LINHA_ADG_613)).toBe("2026-08-07");
+    expect(extrairValorDoCodigoBoleto(LINHA_ADG_613)).toBe(613.34);
+
+    const dados = extrairDadosEstruturadosDoBoleto(LINHA_ADG_613, "Beneficiário: 37.681.455/0001-20");
+    expect(dados.vencimento_extraido).toBe("2026-08-07");
+    expect(dados.valor_codificado).toBe(613.34);
+    expect(dados.cnpj_beneficiario).toBe("37681455000120");
+  });
+
+  it("prioriza vencimento rotulado único sobre o fator do código", () => {
+    const dados = extrairDadosEstruturadosDoBoleto(
+      LINHA_ADG_613,
+      "Data de vencimento: 10/08/2026\nBeneficiário: 37.681.455/0001-20"
+    );
     expect(dados.vencimento_extraido).toBe("2026-08-10");
   });
 

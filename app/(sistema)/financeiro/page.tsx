@@ -12,16 +12,17 @@ import {
   CircleCheckBig,
   Clock3,
   Copy,
+  Eye,
+  EyeOff,
+  Link2,
   Lock,
   Phone,
   Plus,
   ReceiptText,
-  Search,
-  ScanLine,
-  ShieldAlert,
-  Eye,
-  EyeOff,
   RefreshCcw,
+  ScanLine,
+  Search,
+  ShieldAlert,
   TriangleAlert,
   Upload,
 } from "lucide-react";
@@ -1672,11 +1673,34 @@ export default function FinanceiroPage() {
           <div className="space-y-1">
             <h2>Conferência NF-e × boleto</h2>
             <p className="text-sm text-slate-600">
-              Conferência = vincular o PDF/linha à parcela da nota. À esquerda: parcelas sem documento
-              conferido. À direita: documentos importados e boletos da fila do lote.{" "}
+              Conferência = vincular o PDF/linha à parcela da nota.{" "}
               <strong>Conciliação</strong> é só bancária (pagamento já informado na agenda).
             </p>
           </div>
+
+          <Card className="space-y-2 border-2 border-primaria/30 bg-primaria-clara/40 p-4">
+            <p className="font-bold text-primaria-escura">Como dizer que boleto e NF-e são da mesma compra</p>
+            <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
+              <li>
+                À <strong>direita</strong>, abra o boleto do lote → <strong>Ver boleto</strong> (confira) →{" "}
+                <strong>Reconhecer e vincular à NF-e</strong>.
+              </li>
+              <li>
+                O sistema lê a linha digitável e <strong>procura sozinho</strong> a NF-e/parcela (valor,
+                vencimento, chave…).
+              </li>
+              <li>
+                No modal, revise o resultado e clique em <strong>Confirmar vínculo</strong> — aí os dois
+                ficam da mesma compra.
+              </li>
+            </ol>
+            <p className="text-sm text-slate-600">
+              A lista da esquerda é a “fila de espera” das parcelas sem PDF. Não é para casar à mão
+              lado a lado: use o reconhecimento do boleto. Só use{" "}
+              <strong>Importar boleto desta parcela</strong> se o PDF ainda não estiver na fila da
+              direita.
+            </p>
+          </Card>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <Card className="py-3">
@@ -1773,7 +1797,7 @@ export default function FinanceiroPage() {
                           className="btn-primario"
                           onClick={() => levarBoletoLoteAoImportar(item.id)}
                         >
-                          <Upload size={16} /> Analisar neste Financeiro
+                          <Link2 size={16} /> Reconhecer e vincular à NF-e
                         </button>
                       </div>
                     </Card>
@@ -2560,10 +2584,17 @@ export default function FinanceiroPage() {
               }
             >
               <Upload size={16} />
-              {estadoImportacaoBoleto.confronto?.classificacao === "parcial" ||
-              estadoImportacaoBoleto.confronto?.classificacao === "multiplas_possibilidades"
-                ? "Confirmar vínculo e adicionar aos boletos a vencer"
-                : "Confirmar e adicionar aos boletos a vencer"}
+              {estadoImportacaoBoleto.confronto?.classificacao === "exata"
+                ? `Confirmar vínculo: NF-e ${
+                    db.notas_fiscais.find((n) => n.id === estadoImportacaoBoleto.confronto?.nota_id)?.numero ?? "—"
+                  } · parcela ${
+                    db.boletos.find((b) => b.id === estadoImportacaoBoleto.confronto?.parcela_id)?.numero_parcela ??
+                    "—"
+                  }`
+                : estadoImportacaoBoleto.confronto?.classificacao === "parcial" ||
+                    estadoImportacaoBoleto.confronto?.classificacao === "multiplas_possibilidades"
+                  ? "Confirmar vínculo e adicionar aos boletos a vencer"
+                  : "Confirmar e adicionar aos boletos a vencer"}
             </button>
           </div>
         </form>

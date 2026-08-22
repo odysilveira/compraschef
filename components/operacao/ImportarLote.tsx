@@ -24,6 +24,7 @@ import {
   atualizarClassificacaoItemFila,
   descartarItemFila,
   definirFilaDeClassificados,
+  hidratarFilaLoteDoIdb,
   limparFilaLote,
   marcarItemEmAndamento,
   obterArquivoFilaAsync,
@@ -108,9 +109,15 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     setLendo(true);
     setProgresso({ feito: 0, total: lista.length, nome: "" });
     try {
+      // Evita a hidratação do IndexedDB apagar a seleção no meio da classificação.
+      await hidratarFilaLoteDoIdb();
       const classificados = await classificarArquivosRecebimentoBrowser(Array.from(lista), {
         onProgresso: (feito, total, nome) => setProgresso({ feito, total, nome }),
       });
+      if (classificados.length === 0) {
+        setErro("Nenhum arquivo foi classificado. Tente de novo.");
+        return;
+      }
       if (substituir || abertos.length === 0) {
         definirFilaDeClassificados(classificados);
       } else {

@@ -1,5 +1,5 @@
 /**
- * Fila de conciliação do lote: memória + IndexedDB.
+ * Fila de conferência do lote: memória + IndexedDB.
  * Sobrevive a F5 e a sair/voltar do Recebimento enquanto os itens estão abertos.
  */
 
@@ -31,6 +31,11 @@ const ouvintes = new Set<() => void>();
 let hidratado = false;
 let hidratando: Promise<void> | null = null;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+/** Incrementa a cada mutação local (import/limpar) — impede a hidratação de apagar a fila. */
+let geracaoLocal = 0;
+/** Versão da persistência: só a última agenda grava (evita clear vazio sobrescrever). */
+let persistVersao = 0;
+let cadeiaPersistencia: Promise<void> = Promise.resolve();
 let versaoFila = 0;
 
 function notificar() {
@@ -38,12 +43,23 @@ function notificar() {
   ouvintes.forEach((ouvinte) => ouvinte());
 }
 
+function marcarMutacaoLocal() {
+  geracaoLocal += 1;
+}
+
 function agendarPersistencia() {
   if (typeof indexedDB === "undefined") return;
+  persistVersao += 1;
+  const versao = persistVersao;
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     persistTimer = null;
-    void persistirFilaAgora();
+    cadeiaPersistencia = cadeiaPersistencia
+      .then(async () => {
+        if (versao !== persistVersao) return;
+        await persistirFilaAgora();
+      })
+      .catch(() => undefined);
   }, 80);
 }
 
@@ -65,21 +81,27 @@ async function persistirFilaAgora() {
 function atualizarItem(id: string, mudanca: Partial<ItemFilaLote>) {
   const idx = itens.findIndex((i) => i.id === id);
   if (idx < 0) return;
+  marcarMutacaoLocal();
   itens = itens.map((item, i) => (i === idx ? { ...item, ...mudanca } : item));
   notificar();
   agendarPersistencia();
 }
 
-/** Carrega a fila do IndexedDB (uma vez). Não sobrescreve se a memória já tem itens. */
+/** Carrega a fila do IndexedDB (uma vez). Nunca sobrescreve mutação local recente. */
 export function hidratarFilaLoteDoIdb(): Promise<void> {
   if (hidratado) return Promise.resolve();
   if (hidratando) return hidratando;
 
+  const geracaoAoIniciar = geracaoLocal;
+
   hidratando = (async () => {
     try {
-      if (itens.length > 0) return;
+      if (itens.length > 0 || geracaoLocal !== geracaoAoIniciar) return;
+
       const registros = await listarRegistrosLoteIdb();
-      if (itens.length > 0) return;
+
+      // TOCTOU: o usuário pode ter importado enquanto o IDB lia.
+      if (itens.length > 0 || geracaoLocal !== geracaoAoIniciar) return;
 
       const restaurados: ItemFilaLote[] = [];
       for (const registro of registros) {
@@ -88,6 +110,9 @@ export function hidratarFilaLoteDoIdb(): Promise<void> {
         arquivosPorId.set(registro.id, arquivo);
         restaurados.push(registroIdbParaItem(registro));
       }
+
+      if (itens.length > 0 || geracaoLocal !== geracaoAoIniciar) return;
+
       itens = restaurados;
       notificar();
     } catch {
@@ -108,6 +133,7 @@ export function filaLoteJaHidratada(): boolean {
 
 /** Substitui a fila pelos arquivos recém-classificados (nova seleção). */
 export function definirFilaDeClassificados(classificados: ItemLoteClassificado[]) {
+  marcarMutacaoLocal();
   arquivosPorId.clear();
   itens = classificados.map((c) => {
     arquivosPorId.set(c.id, c.arquivo);
@@ -126,6 +152,7 @@ export function definirFilaDeClassificados(classificados: ItemLoteClassificado[]
 
 /** Acrescenta à fila sem apagar os ainda abertos. */
 export function acrescentarClassificados(classificados: ItemLoteClassificado[]) {
+  marcarMutacaoLocal();
   const novos: ItemFilaLote[] = classificados.map((c) => {
     arquivosPorId.set(c.id, c.arquivo);
     return {
@@ -166,6 +193,7 @@ export function marcarItemPendente(id: string) {
 }
 
 export function marcarItemConcluido(id: string) {
+  marcarMutacaoLocal();
   itens = itens.filter((i) => i.id !== id);
   arquivosPorId.delete(id);
   notificar();
@@ -174,6 +202,7 @@ export function marcarItemConcluido(id: string) {
 }
 
 export function descartarItemFila(id: string) {
+  marcarMutacaoLocal();
   itens = itens.filter((i) => i.id !== id);
   arquivosPorId.delete(id);
   notificar();
@@ -182,6 +211,7 @@ export function descartarItemFila(id: string) {
 }
 
 export function limparFilaLote() {
+  marcarMutacaoLocal();
   arquivosPorId.clear();
   itens = [];
   notificar();
@@ -189,6 +219,7 @@ export function limparFilaLote() {
 }
 
 export function limparConcluidosEDescartados() {
+  marcarMutacaoLocal();
   itens = filtrarItensAbertos(itens);
   notificar();
   agendarPersistencia();

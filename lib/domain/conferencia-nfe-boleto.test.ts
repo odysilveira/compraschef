@@ -6,8 +6,8 @@ import {
   listarDocumentosAguardandoVinculo,
   listarNotasComBoletoPendente,
   listarParcelasAguardandoDocumento,
-  montarResumoFilasConcilicaoNfeBoleto,
-} from "./concilicao-nfe-boleto";
+  montarResumoFilasConferenciaNfeBoleto,
+} from "./conferencia-nfe-boleto";
 
 function notaBase(overrides: Partial<NotaFiscal> = {}): NotaFiscal {
   return {
@@ -59,7 +59,7 @@ function dbTeste(parcial: Partial<DB> = {}): DB {
   return db;
 }
 
-describe("filas conciliação NF-e × boleto", () => {
+describe("filas conferência NF-e × boleto", () => {
   it("lista parcela liberada sem documento conferido", () => {
     const db = dbTeste({ boletos: [boletoBase()] });
     const lista = listarParcelasAguardandoDocumento(db);
@@ -123,7 +123,7 @@ describe("filas conciliação NF-e × boleto", () => {
       boletos: [boletoBase()],
       documentos_boleto: [documentoBase()],
     });
-    const resumo = montarResumoFilasConcilicaoNfeBoleto(db);
+    const resumo = montarResumoFilasConferenciaNfeBoleto(db);
     expect(resumo.totalParcelas).toBe(1);
     expect(resumo.totalDocumentos).toBe(1);
     expect(resumo.totalNotas).toBe(1);

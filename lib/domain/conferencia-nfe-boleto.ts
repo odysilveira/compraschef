@@ -1,11 +1,12 @@
 /**
- * Filas de trabalho NF-e × boleto (mesma fonte de verdade — sem BD duplicado).
+ * Filas de trabalho de **conferência** NF-e × boleto (mesma fonte de verdade — sem BD duplicado).
+ *
+ * Conferência = vincular/validar o PDF ou linha digitável com a parcela da nota.
+ * Conciliação = sempre bancária (status aguardando_conciliacao = pagamento já informado).
  *
  * 1) Parcelas da agenda ainda sem documento conferido
  * 2) Documentos de boleto ainda sem vínculo confirmado com parcela
  * 3) Notas com pelo menos uma parcela nessa pendência
- *
- * Diferente de status "aguardando_conciliacao" (= pagamento já informado).
  */
 
 import type { Boleto, DB, DocumentoBoleto, NotaFiscal } from "../types";
@@ -50,7 +51,7 @@ export interface NotaComBoletoPendente {
   valorPendente: number;
 }
 
-export interface ResumoFilasConcilicaoNfeBoleto {
+export interface ResumoFilasConferenciaNfeBoleto {
   parcelas: ParcelaAguardandoDocumento[];
   documentos: DocumentoAguardandoVinculo[];
   notas: NotaComBoletoPendente[];
@@ -210,7 +211,7 @@ export function listarNotasComBoletoPendente(db: DB): NotaComBoletoPendente[] {
   return notas.sort((a, b) => b.quantidadePendentes - a.quantidadePendentes);
 }
 
-export function montarResumoFilasConcilicaoNfeBoleto(db: DB): ResumoFilasConcilicaoNfeBoleto {
+export function montarResumoFilasConferenciaNfeBoleto(db: DB): ResumoFilasConferenciaNfeBoleto {
   const parcelas = listarParcelasAguardandoDocumento(db);
   const documentos = listarDocumentosAguardandoVinculo(db);
   const notas = listarNotasComBoletoPendente(db);

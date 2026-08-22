@@ -59,7 +59,7 @@ import {
   mascararLinhaDigitavel,
   valorValidadoComoMoeda,
 } from "@/lib/domain/importar-boleto-ui";
-import { listarBoletosLoteAguardandoVinculo, montarResumoFilasConcilicaoNfeBoleto } from "@/lib/domain/concilicao-nfe-boleto";
+import { listarBoletosLoteAguardandoVinculo, montarResumoFilasConferenciaNfeBoleto } from "@/lib/domain/conferencia-nfe-boleto";
 import {
   alternarCodigoAberto,
   acoesPagamentoDisponiveisNoLayout,
@@ -141,7 +141,7 @@ const STATUS_CONTA_OPCOES: Array<{ valor: StatusContaPagar | "todos"; rotulo: st
   { valor: "compativel", rotulo: "Compatível" },
   { valor: "divergente", rotulo: "Divergente" },
   { valor: "bloqueado", rotulo: "Bloqueado" },
-  { valor: "aguardando_conciliacao", rotulo: "Aguardando conciliação" },
+  { valor: "aguardando_conciliacao", rotulo: "Aguardando conciliação bancária" },
   { valor: "conciliado", rotulo: "Conciliado" },
   { valor: "cancelado", rotulo: "Cancelado" },
 ];
@@ -255,7 +255,7 @@ function rotuloStatusConta(status: StatusContaPagar): string {
     compativel: "Compatível",
     divergente: "Divergente",
     bloqueado: "Bloqueado",
-    aguardando_conciliacao: "Aguardando conciliação",
+    aguardando_conciliacao: "Aguardando conciliação bancária",
     conciliado: "Conciliado",
     cancelado: "Cancelado",
   }[status];
@@ -302,7 +302,7 @@ function BadgeStatusConta({ status }: { status: StatusContaPagar }) {
     case "aguardando_conciliacao":
       return (
         <Badge cor="azul">
-          <Clock3 size={14} /> aguardando conciliação
+          <Clock3 size={14} /> aguardando conciliação bancária
         </Badge>
       );
     case "conciliado":
@@ -403,7 +403,7 @@ function BadgeStatus({ boleto }: { boleto: Boleto }) {
     case "aguardando_conciliacao":
       return (
         <Badge cor="azul">
-          <Clock3 size={14} /> aguardando conciliação
+          <Clock3 size={14} /> aguardando conciliação bancária
         </Badge>
       );
     case "suspeito":
@@ -422,7 +422,7 @@ export default function FinanceiroPage() {
   const handoffLoteProcessado = useRef<string | null>(null);
   const [itemLoteBoletoId, setItemLoteBoletoId] = useState<string | null>(null);
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
-  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas" | "conciliacao">("boletos");
+  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas" | "conferencia">("boletos");
   const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
   const [buscaConta, setBuscaConta] = useState("");
   const [filtroStatusConta, setFiltroStatusConta] = useState<StatusContaPagar | "todos">("todos");
@@ -697,31 +697,32 @@ export default function FinanceiroPage() {
   const boletosPendentesAgenda = boletosAtivos.filter(
     (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
   );
-  const filasConcilicaoNfe = useMemo(() => montarResumoFilasConcilicaoNfeBoleto(db), [db]);
+  const filasConferenciaNfe = useMemo(() => montarResumoFilasConferenciaNfeBoleto(db), [db]);
   const boletosLotePendentes = useMemo(() => listarBoletosLoteAguardandoVinculo(filaLote), [filaLote]);
-  const totalPendenciasConcilicao =
-    filasConcilicaoNfe.totalParcelas + filasConcilicaoNfe.totalDocumentos + boletosLotePendentes.length;
+  const totalPendenciasConferencia =
+    filasConferenciaNfe.totalParcelas + filasConferenciaNfe.totalDocumentos + boletosLotePendentes.length;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const aba = new URLSearchParams(window.location.search).get("aba");
-    if (aba === "conciliacao") setAbaFinanceira("conciliacao");
+    // "conciliacao" legado → mesma aba de conferência NF-e × boleto
+    if (aba === "conferencia" || aba === "conciliacao") setAbaFinanceira("conferencia");
     else if (aba === "contas") setAbaFinanceira("contas");
     else if (aba === "notas") setAbaFinanceira("notas");
     else if (aba === "boletos") setAbaFinanceira("boletos");
   }, []);
 
-  function abrirAbaConcilicao() {
-    setAbaFinanceira("conciliacao");
+  function abrirAbaConferencia() {
+    setAbaFinanceira("conferencia");
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
-      url.searchParams.set("aba", "conciliacao");
+      url.searchParams.set("aba", "conferencia");
       window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
     }
   }
 
   function levarBoletoLoteAoImportar(itemId: string) {
-    window.location.assign(`/financeiro?importarLoteBoleto=${encodeURIComponent(itemId)}&aba=conciliacao`);
+    window.location.assign(`/financeiro?importarLoteBoleto=${encodeURIComponent(itemId)}&aba=conferencia`);
   }
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
@@ -1391,7 +1392,7 @@ export default function FinanceiroPage() {
                 )}
                 {boleto.status === "aguardando_conciliacao" && (
                   <button className="btn-secundario" type="button" disabled>
-                    <Clock3 size={16} /> Aguardando conciliação
+                    <Clock3 size={16} /> Aguardando conciliação bancária
                   </button>
                 )}
                 {boleto.status === "travado" && (
@@ -1596,36 +1597,35 @@ export default function FinanceiroPage() {
         <button
           type="button"
           className={`btn-secundario inline-flex items-center gap-2 ${
-            abaFinanceira === "conciliacao" ? "border-primaria bg-primaria-clara text-primaria" : ""
+            abaFinanceira === "conferencia" ? "border-primaria bg-primaria-clara text-primaria" : ""
           }`}
-          onClick={abrirAbaConcilicao}
+          onClick={abrirAbaConferencia}
         >
-          Conciliação NF-e × boleto
-          {totalPendenciasConcilicao > 0 && <Badge cor="laranja">{totalPendenciasConcilicao}</Badge>}
+          Conferência NF-e × boleto
+          {totalPendenciasConferencia > 0 && <Badge cor="laranja">{totalPendenciasConferencia}</Badge>}
         </button>
       </div>
 
-      {abaFinanceira === "conciliacao" ? (
+      {abaFinanceira === "conferencia" ? (
         <div className="space-y-4">
           <div className="space-y-1">
-            <h2>Conciliação NF-e × boleto</h2>
+            <h2>Conferência NF-e × boleto</h2>
             <p className="text-sm text-slate-600">
-              Duas filas sobre os mesmos cadastros — sem banco duplicado. À esquerda: parcelas da nota
-              ainda sem PDF/linha conferido. À direita: documentos importados e boletos da fila do
-              lote ainda sem vínculo. Isso é diferente de <strong>Aguardando conciliação bancária</strong>{" "}
-              na agenda (= pagamento já informado).
+              Conferência = vincular o PDF/linha à parcela da nota. À esquerda: parcelas sem documento
+              conferido. À direita: documentos importados e boletos da fila do lote.{" "}
+              <strong>Conciliação</strong> é só bancária (pagamento já informado na agenda).
             </p>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <Card className="py-3">
               <p className="rotulo">Parcelas sem boleto conferido</p>
-              <p className="text-2xl font-bold text-destaque">{filasConcilicaoNfe.totalParcelas}</p>
-              <p className="text-sm text-slate-600">{moeda(filasConcilicaoNfe.valorParcelasPendentes)}</p>
+              <p className="text-2xl font-bold text-destaque">{filasConferenciaNfe.totalParcelas}</p>
+              <p className="text-sm text-slate-600">{moeda(filasConferenciaNfe.valorParcelasPendentes)}</p>
             </Card>
             <Card className="py-3">
               <p className="rotulo">Documentos sem vínculo</p>
-              <p className="text-2xl font-bold text-blue-700">{filasConcilicaoNfe.totalDocumentos}</p>
+              <p className="text-2xl font-bold text-blue-700">{filasConferenciaNfe.totalDocumentos}</p>
             </Card>
             <Card className="py-3">
               <p className="rotulo">Boletos na fila do lote</p>
@@ -1633,17 +1633,17 @@ export default function FinanceiroPage() {
             </Card>
             <Card className="py-3">
               <p className="rotulo">Notas com pendência</p>
-              <p className="text-2xl font-bold text-primaria-escura">{filasConcilicaoNfe.totalNotas}</p>
+              <p className="text-2xl font-bold text-primaria-escura">{filasConferenciaNfe.totalNotas}</p>
             </Card>
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <section className="space-y-3">
               <h3 className="text-base font-bold">Parcelas aguardando documento</h3>
-              {filasConcilicaoNfe.parcelas.length === 0 ? (
+              {filasConferenciaNfe.parcelas.length === 0 ? (
                 <Vazio mensagem="Nenhuma parcela aguardando PDF/linha do boleto." />
               ) : (
-                filasConcilicaoNfe.parcelas.map((item) => (
+                filasConferenciaNfe.parcelas.map((item) => (
                   <Card key={item.boleto.id} className="space-y-2 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -1700,10 +1700,10 @@ export default function FinanceiroPage() {
                 </div>
               )}
 
-              {filasConcilicaoNfe.documentos.length === 0 && boletosLotePendentes.length === 0 ? (
+              {filasConferenciaNfe.documentos.length === 0 && boletosLotePendentes.length === 0 ? (
                 <Vazio mensagem="Nenhum documento de boleto pendente de vínculo." />
               ) : (
-                filasConcilicaoNfe.documentos.map((item) => (
+                filasConferenciaNfe.documentos.map((item) => (
                   <Card key={item.documento.id} className="space-y-2 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -1742,10 +1742,10 @@ export default function FinanceiroPage() {
 
           <section className="space-y-3">
             <h3 className="text-base font-bold">Notas com boleto ainda não conferido</h3>
-            {filasConcilicaoNfe.notas.length === 0 ? (
+            {filasConferenciaNfe.notas.length === 0 ? (
               <Vazio mensagem="Todas as notas com parcela já têm boleto conferido (ou não têm parcela)." />
             ) : (
-              filasConcilicaoNfe.notas.map((item) => (
+              filasConferenciaNfe.notas.map((item) => (
                 <Card key={item.nota.id} className="space-y-2 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -1790,22 +1790,22 @@ export default function FinanceiroPage() {
             </button>
           </div>
 
-          {totalPendenciasConcilicao > 0 && (
+          {totalPendenciasConferencia > 0 && (
             <button
               type="button"
               className="card flex w-full items-center justify-between gap-3 border-2 border-destaque bg-destaque-clara p-4 text-left transition-colors hover:opacity-95"
-              onClick={abrirAbaConcilicao}
+              onClick={abrirAbaConferencia}
             >
               <span>
                 <span className="block text-lg font-bold text-primaria-escura">
-                  {totalPendenciasConcilicao} pendência
-                  {totalPendenciasConcilicao === 1 ? "" : "s"} de conciliação NF-e × boleto
+                  {totalPendenciasConferencia} pendência
+                  {totalPendenciasConferencia === 1 ? "" : "s"} de conferência NF-e × boleto
                 </span>
                 <span className="block text-sm text-slate-700">
                   Parcelas sem PDF, documentos sem vínculo ou boletos na fila do lote.
                 </span>
               </span>
-              <Badge cor="laranja">{totalPendenciasConcilicao}</Badge>
+              <Badge cor="laranja">{totalPendenciasConferencia}</Badge>
             </button>
           )}
 
@@ -1854,7 +1854,7 @@ export default function FinanceiroPage() {
             </Card>
             <Card className="py-3">
               <p className="rotulo flex items-center gap-1">
-                <Clock3 size={13} /> Aguardando conciliação
+                <Clock3 size={13} /> Aguardando conciliação bancária
               </p>
               <p className="text-xl font-bold text-blue-700">{moeda(totais.aguardando_conciliacao)}</p>
             </Card>
@@ -1917,7 +1917,7 @@ export default function FinanceiroPage() {
             <div className="space-y-2">
               <p className="rotulo text-blue-700">Aguardando conciliação bancária</p>
               <p className="text-xs text-slate-500">
-                Pagamento já informado no app — não confundir com a aba Conciliação NF-e × boleto.
+                Pagamento já informado no app — não confundir com a aba Conferência NF-e × boleto.
               </p>
               {boletosAguardandoConciliacao.length === 0 ? (
                 <Vazio mensagem="Nenhum boleto com pagamento informado aguardando baixa bancária." />
@@ -1982,7 +1982,7 @@ export default function FinanceiroPage() {
             </Card>
             <Card className="space-y-2 py-3">
               <p className="rotulo flex items-center gap-1 text-blue-700">
-                <CircleCheckBig size={14} /> Aguardando conciliação
+                <CircleCheckBig size={14} /> Aguardando conciliação bancária
               </p>
               <p className="text-2xl font-bold text-blue-700">{resumoContas.aguardandoConciliacao.quantidade}</p>
               <p className="text-sm text-slate-600">{moeda(resumoContas.aguardandoConciliacao.total)}</p>
@@ -2499,7 +2499,7 @@ export default function FinanceiroPage() {
             </Card>
 
             <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
-              Informar pagamento não significa baixa financeira final. Este boleto ficará em aguardando conciliação até confirmação bancária.
+              Informar pagamento não significa baixa financeira final. Este boleto ficará em aguardando conciliação bancária até confirmação no banco.
             </div>
 
             <label className="block rounded-card border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">

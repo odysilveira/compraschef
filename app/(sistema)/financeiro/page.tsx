@@ -423,6 +423,12 @@ export default function FinanceiroPage() {
   const filaLote = useFilaLoteRecebimento();
   const handoffLoteProcessado = useRef<string | null>(null);
   const [itemLoteBoletoId, setItemLoteBoletoId] = useState<string | null>(null);
+  const [previewArquivoLote, setPreviewArquivoLote] = useState<{
+    url: string;
+    nome: string;
+    mime: string;
+  } | null>(null);
+  const [previewDocumentoId, setPreviewDocumentoId] = useState<string | null>(null);
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
   const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas" | "conferencia">("boletos");
   const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
@@ -752,6 +758,32 @@ export default function FinanceiroPage() {
       await analisarImportacaoBoleto(arquivo);
     })();
   }
+
+  async function verArquivoLote(itemId: string) {
+    const arquivo = await obterArquivoFilaAsync(itemId);
+    if (!arquivo) {
+      setMensagemReceberBoleto(
+        "Não achei o arquivo do lote neste navegador. Volte em Recebimento → A conciliar."
+      );
+      return;
+    }
+    if (previewArquivoLote?.url) URL.revokeObjectURL(previewArquivoLote.url);
+    const url = URL.createObjectURL(arquivo);
+    setPreviewArquivoLote({
+      url,
+      nome: arquivo.name,
+      mime: arquivo.type || "application/pdf",
+    });
+  }
+
+  function fecharPreviewArquivoLote() {
+    if (previewArquivoLote?.url) URL.revokeObjectURL(previewArquivoLote.url);
+    setPreviewArquivoLote(null);
+  }
+
+  const previewDocumento = previewDocumentoId
+    ? db.documentos_boleto.find((d) => d.id === previewDocumentoId) ?? null
+    : null;
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
@@ -1685,13 +1717,24 @@ export default function FinanceiroPage() {
                       </div>
                       <Badge cor="laranja">{item.rotuloMotivo}</Badge>
                     </div>
-                    <button
-                      type="button"
-                      className="btn-primario"
-                      onClick={() => abrirImportarBoleto(item.boleto.id)}
-                    >
-                      <Upload size={16} /> Importar boleto desta parcela
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      {item.nota && (
+                        <button
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() => abrirDetalhesNfe(item.nota!.id)}
+                        >
+                          <Eye size={16} /> Ver NF-e
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-primario"
+                        onClick={() => abrirImportarBoleto(item.boleto.id)}
+                      >
+                        <Upload size={16} /> Importar boleto desta parcela
+                      </button>
+                    </div>
                   </Card>
                 ))
               )}
@@ -1717,13 +1760,22 @@ export default function FinanceiroPage() {
                         </div>
                         <Badge cor="laranja">lote</Badge>
                       </div>
-                      <button
-                        type="button"
-                        className="btn-primario"
-                        onClick={() => levarBoletoLoteAoImportar(item.id)}
-                      >
-                        <Upload size={16} /> Analisar neste Financeiro
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() => void verArquivoLote(item.id)}
+                        >
+                          <Eye size={16} /> Ver boleto
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-primario"
+                          onClick={() => levarBoletoLoteAoImportar(item.id)}
+                        >
+                          <Upload size={16} /> Analisar neste Financeiro
+                        </button>
+                      </div>
                     </Card>
                   ))}
                 </div>
@@ -1754,15 +1806,33 @@ export default function FinanceiroPage() {
                         {item.rotuloMotivo}
                       </Badge>
                     </div>
-                    <button
-                      type="button"
-                      className="btn-secundario"
-                      onClick={() =>
-                        abrirImportarBoleto(item.boleto?.id ?? item.documento.boleto_id ?? undefined)
-                      }
-                    >
-                      <Upload size={16} /> Reimportar / concluir vínculo
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn-secundario"
+                        onClick={() => setPreviewDocumentoId(item.documento.id)}
+                      >
+                        <Eye size={16} /> Ver dados
+                      </button>
+                      {item.nota && (
+                        <button
+                          type="button"
+                          className="btn-secundario"
+                          onClick={() => abrirDetalhesNfe(item.nota!.id)}
+                        >
+                          <Eye size={16} /> Ver NF-e
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-secundario"
+                        onClick={() =>
+                          abrirImportarBoleto(item.boleto?.id ?? item.documento.boleto_id ?? undefined)
+                        }
+                      >
+                        <Upload size={16} /> Reimportar / concluir vínculo
+                      </button>
+                    </div>
                   </Card>
                 ))
               )}
@@ -1786,7 +1856,16 @@ export default function FinanceiroPage() {
                         {item.quantidadePendentes === 1 ? "" : "s"} · {moeda(item.valorPendente)}
                       </p>
                     </div>
-                    <Badge cor="laranja">pendente</Badge>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn-secundario text-sm"
+                        onClick={() => abrirDetalhesNfe(item.nota.id)}
+                      >
+                        <Eye size={16} /> Ver NF-e
+                      </button>
+                      <Badge cor="laranja">pendente</Badge>
+                    </div>
                   </div>
                   <ul className="space-y-1 text-sm text-slate-700">
                     {item.parcelasPendentes.map((parcela) => (
@@ -2617,6 +2696,69 @@ export default function FinanceiroPage() {
               </button>
             </div>
           </form>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={previewArquivoLote !== null}
+        titulo={previewArquivoLote?.nome ?? "Boleto"}
+        onFechar={fecharPreviewArquivoLote}
+      >
+        {previewArquivoLote && (
+          <div className="space-y-3">
+            {previewArquivoLote.mime.startsWith("image/") ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewArquivoLote.url}
+                alt={previewArquivoLote.nome}
+                className="max-h-[70vh] w-full object-contain bg-slate-100"
+              />
+            ) : (
+              <iframe
+                title={previewArquivoLote.nome}
+                src={previewArquivoLote.url}
+                className="h-[70vh] w-full rounded-card border border-slate-200 bg-slate-100"
+              />
+            )}
+            <p className="text-sm text-slate-600">Arquivo da fila A conciliar — feche para voltar à conferência.</p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        aberto={previewDocumento !== null}
+        titulo={previewDocumento?.nome_arquivo ?? "Documento do boleto"}
+        onFechar={() => setPreviewDocumentoId(null)}
+      >
+        {previewDocumento && (
+          <div className="space-y-3">
+            <Card className="space-y-2 bg-slate-50 py-3">
+              <p className="text-sm text-slate-700">Arquivo: {previewDocumento.nome_arquivo}</p>
+              <p className="text-sm text-slate-700">
+                Linha:{" "}
+                {previewDocumento.linha_informada
+                  ? mascararLinhaDigitavel(previewDocumento.linha_informada, true)
+                  : "—"}
+              </p>
+              <p className="text-sm text-slate-700">
+                Confronto: {previewDocumento.resultado_confronto?.replace(/_/g, " ") ?? "—"}
+              </p>
+              {previewDocumento.divergencias && previewDocumento.divergencias.length > 0 && (
+                <div className="text-sm text-erro">
+                  {previewDocumento.divergencias.map((d, i) => (
+                    <p key={`${d}-${i}`}>{d}</p>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                O PDF original não fica salvo neste registro — use a fila do lote ou reimporte para ver a
+                imagem.
+              </p>
+            </Card>
+            <button type="button" className="btn-secundario" onClick={() => setPreviewDocumentoId(null)}>
+              Fechar
+            </button>
+          </div>
         )}
       </Modal>
 

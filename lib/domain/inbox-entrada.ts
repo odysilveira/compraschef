@@ -70,6 +70,22 @@ export function pastaOneDriveDoTipo(tipo: TipoDestinoInbox): PastaRelativaInbox 
   return PASTA_POR_TIPO[tipo] ?? null;
 }
 
+/** Pasta padrão ao usar o atalho “Enviar ao OneDrive” (compra → a identificar). */
+export function pastaPadraoEnvioOneDrive(tipo: TipoDestinoInbox): PastaRelativaInbox {
+  return PASTA_POR_TIPO[tipo] ?? "_a-identificar";
+}
+
+export const ROTULOS_PASTA_INBOX: Record<PastaRelativaInbox, string> = {
+  "_a-identificar": "A identificar",
+  "restaurante/fotos": "Restaurante / fotos",
+  "restaurante/documentos": "Restaurante / documentos",
+  pessoal: "Pessoal",
+};
+
+export function rotuloPastaInbox(pasta: PastaRelativaInbox): string {
+  return ROTULOS_PASTA_INBOX[pasta];
+}
+
 export function taxonomiaPastasInbox(): readonly PastaRelativaInbox[] {
   return PASTAS_INBOX;
 }

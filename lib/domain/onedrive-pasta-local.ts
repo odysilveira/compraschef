@@ -19,6 +19,8 @@ export type PastaRelativaInbox = (typeof PASTAS_INBOX)[number];
 
 type ShowDirectoryPickerOptions = {
   mode?: "read" | "readwrite";
+  /** Pasta inicial do diálogo (Chrome/Edge). */
+  startIn?: FileSystemHandle | "desktop" | "documents" | "downloads";
 };
 
 type WindowComPasta = Window & {
@@ -235,4 +237,58 @@ export async function copiarArquivoParaInboxOneDrive(
     caminhoRelativo: `${NOME_PASTA_INBOX}/${pastaRelativa}/${nomeGravado}`,
     nomeGravado,
   };
+}
+
+/** Abre o diálogo do sistema para o usuário navegar e escolher a pasta de destino. */
+export async function escolherPastaDestinoEscrita(
+  startIn?: FileSystemHandle | null
+): Promise<FileSystemDirectoryHandle> {
+  if (!apiDisponivel()) {
+    throw new Error(
+      "Este navegador não permite escolher pasta local. Use Chrome ou Edge no computador."
+    );
+  }
+  const w = windowComPasta()!;
+  const options: ShowDirectoryPickerOptions = { mode: "readwrite" };
+  if (startIn) options.startIn = startIn;
+  return w.showDirectoryPicker!(options);
+}
+
+/**
+ * Resolve a subpasta sugerida sob a raiz (para abrir o diálogo já “dentro” dela).
+ * Se falhar, devolve a raiz ou null.
+ */
+export async function obterPastaSugestaoParaPicker(
+  raizOneDrive: FileSystemDirectoryHandle | null,
+  pastaRelativa: PastaRelativaInbox
+): Promise<FileSystemDirectoryHandle | null> {
+  if (!raizOneDrive) return null;
+  try {
+    const ok = await garantirPermissaoEscrita(raizOneDrive);
+    if (!ok) return raizOneDrive;
+    const inbox = await garantirArvoreInbox(raizOneDrive);
+    return await obterOuCriarSubpastas(inbox, pastaRelativa.split("/"));
+  } catch {
+    return raizOneDrive;
+  }
+}
+
+/** Copia o arquivo para uma pasta qualquer escolhida no diálogo. */
+export async function copiarArquivoParaPastaHandle(
+  pastaDestino: FileSystemDirectoryHandle,
+  arquivo: File
+): Promise<{ nomeGravado: string; pastaNome: string }> {
+  const ok = await garantirPermissaoEscrita(pastaDestino);
+  if (!ok) {
+    throw new Error("Sem permissão de escrita nesta pasta. Escolha outra.");
+  }
+  const nomeGravado = await nomeUnicoNaPasta(pastaDestino, arquivo.name);
+  const fileHandle = await pastaDestino.getFileHandle(nomeGravado, { create: true });
+  const writable = await fileHandle.createWritable();
+  try {
+    await writable.write(await arquivo.arrayBuffer());
+  } finally {
+    await writable.close();
+  }
+  return { nomeGravado, pastaNome: pastaDestino.name };
 }

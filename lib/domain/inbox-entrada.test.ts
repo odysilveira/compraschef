@@ -87,4 +87,10 @@ describe("sugestão caixa de entrada", () => {
     expect(tipoRecebimentoDaCompra("xml_nfe")).toBe("xml_nfe");
     expect(tipoRecebimentoDaCompra("foto_restaurante")).toBeNull();
   });
+
+  it("pastaPadraoEnvioOneDrive usa a identificar para compra", async () => {
+    const { pastaPadraoEnvioOneDrive } = await import("./inbox-entrada");
+    expect(pastaPadraoEnvioOneDrive("pdf_boleto")).toBe("_a-identificar");
+    expect(pastaPadraoEnvioOneDrive("foto_restaurante")).toBe("restaurante/fotos");
+  });
 });

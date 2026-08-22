@@ -5,9 +5,9 @@
 // - Com a nota impressa (DANFE): QR, PDF ou foto+OCR → chave / fornecedor / nº;
 //   os itens são preenchidos à mão (itens automáticos vêm com XML ou certificado A1).
 
-import { useRef, useState } from "react";
-import { ArrowLeft, Camera, CircleCheck, FileUp, PackagePlus, Plus, ReceiptText, Trash2 } from "lucide-react";
-import { Campo, Card } from "@/components/ui";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { ArrowLeft, Camera, CircleCheck, FileUp, PackagePlus, Plus, ReceiptText, Trash2, Building2 } from "lucide-react";
+import { Campo, Card, Modal } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import CampoMoeda from "@/components/operacao/CampoMoeda";
@@ -18,6 +18,7 @@ import {
   identificarDanfeDeArquivo,
   type OrigemIdentificacaoDanfe,
 } from "@/lib/domain/danfe-captura-browser";
+import type { DadosDanfeExtraidos, ItemDanfeExtraido } from "@/lib/domain/danfe-extracao";
 import { identificarNotaPorTexto, type NotaIdentificadaDanfe } from "@/lib/domain/danfe-identificacao";
 import { moeda, qtd } from "@/lib/format";
 import type { StatusRecebimento } from "@/lib/types";
@@ -62,28 +63,104 @@ export default function ReceberAvulso({
   verValores,
   onVoltar,
   aoFinalizar,
+  arquivoInicial,
 }: {
   db: import("@/lib/types").DB;
   usuarioId: string;
   verValores: boolean;
   onVoltar: () => void;
   aoFinalizar: (resultado: ResultadoNota) => void;
+  /** PDF/foto já escolhido na triagem de lote. */
+  arquivoInicial?: File | null;
 }) {
   const [fornecedorId, setFornecedorId] = useState("");
   const [notaIdentificada, setNotaIdentificada] = useState<NotaIdentificadaDanfe | null>(null);
   const [origemNota, setOrigemNota] = useState<OrigemIdentificacaoDanfe | undefined>(undefined);
+  const [dadosDanfe, setDadosDanfe] = useState<DadosDanfeExtraidos | null>(null);
+  const [itensSugeridos, setItensSugeridos] = useState<ItemDanfeExtraido[]>([]);
+  const [cadastroFornecedorAberto, setCadastroFornecedorAberto] = useState(false);
+  const [nomeFornecedorNovo, setNomeFornecedorNovo] = useState("");
   const [itens, setItens] = useState<ItemAvulso[]>([]);
   const [avisoScanner, setAvisoScanner] = useState<string | null>(null);
   const [lendoArquivo, setLendoArquivo] = useState(false);
+  /** PDF/foto vindos do lote — permite reler sem pedir o arquivo de novo. */
+  const [arquivoLote, setArquivoLote] = useState<File | null>(arquivoInicial ?? null);
   const inputPdfRef = useRef<HTMLInputElement>(null);
   const inputFotoRef = useRef<HTMLInputElement>(null);
 
-  function aplicarNota(nota: NotaIdentificadaDanfe, origem: OrigemIdentificacaoDanfe) {
+  function formatarCnpj(digitos: string): string {
+    const n = somenteDigitos(digitos).slice(0, 14);
+    if (n.length !== 14) return digitos;
+    return n.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  }
+
+  function aplicarNota(
+    nota: NotaIdentificadaDanfe,
+    origem: OrigemIdentificacaoDanfe,
+    dados?: DadosDanfeExtraidos
+  ) {
     setNotaIdentificada(nota);
     setOrigemNota(origem);
     setAvisoScanner(null);
+    if (dados) {
+      setDadosDanfe(dados);
+      setItensSugeridos(dados.itens);
+      if (dados.nomeEmitente) setNomeFornecedorNovo(dados.nomeEmitente);
+    }
     const forn = db.fornecedores.find((f) => somenteDigitos(f.cnpj) === nota.cnpj);
     if (forn) setFornecedorId(forn.id);
+    else if (dados?.nomeEmitente) setNomeFornecedorNovo(dados.nomeEmitente);
+  }
+
+  function salvarFornecedorRapido(e: FormEvent) {
+    e.preventDefault();
+    if (!notaIdentificada?.cnpj || !nomeFornecedorNovo.trim()) return;
+    const novoId = uid("forn");
+    mutate((banco) => {
+      if (!Array.isArray(banco.fornecedores)) banco.fornecedores = [];
+      banco.fornecedores.push({
+        id: novoId,
+        nome: nomeFornecedorNovo.trim(),
+        cnpj: formatarCnpj(notaIdentificada.cnpj),
+        forma_pagamento: "boleto",
+        ativo: true,
+      });
+    });
+    setFornecedorId(novoId);
+    setCadastroFornecedorAberto(false);
+  }
+
+  function casarProdutoPorDescricao(descricao: string, codigo: string): string | undefined {
+    const norm = descricao.toLowerCase();
+    const porCodigo = db.produtos.find(
+      (p) => p.ativo && (p.codigo_externo === codigo || p.codigo_barras === codigo)
+    );
+    if (porCodigo) return porCodigo.id;
+    const porNome = db.produtos.find(
+      (p) => p.ativo && (p.nome.toLowerCase() === norm || p.nome.toLowerCase().includes(norm.slice(0, 12)))
+    );
+    return porNome?.id;
+  }
+
+  function adicionarItensSugeridosDoPdf() {
+    for (const sug of itensSugeridos) {
+      const produtoId = casarProdutoPorDescricao(sug.descricao, sug.codigo);
+      if (!produtoId) continue;
+      const produto = db.produtos.find((p) => p.id === produtoId);
+      setItens((atual) => {
+        if (atual.some((i) => i.produtoId === produtoId)) return atual;
+        return [
+          ...atual,
+          {
+            id: uid("ia"),
+            produtoId,
+            quantidade: sug.quantidade,
+            validade: hojeMais(produto?.validade_padrao_dias ?? 30),
+            preco: verValores ? sug.valorUnitario : undefined,
+          },
+        ];
+      });
+    }
   }
 
   function adicionarProduto(produtoId: string) {
@@ -107,7 +184,7 @@ export default function ReceberAvulso({
   /** QR/código: chave da nota (44 dígitos) ou EAN de produto. */
   function aoLerCodigo(codigo: string) {
     setAvisoScanner(null);
-    const nota = identificarNotaPorTexto(codigo);
+    const nota = identificarNotaPorTexto(codigo, { aceitarSemDv: true });
     if (nota) {
       aplicarNota(nota, "qr");
       return;
@@ -123,13 +200,18 @@ export default function ReceberAvulso({
 
   async function aoEscolherArquivo(arquivo: File | null) {
     if (!arquivo) return;
+    setArquivoLote(arquivo);
     setLendoArquivo(true);
     setAvisoScanner(null);
     try {
       const resultado = await identificarDanfeDeArquivo(arquivo);
       if (resultado.nota && resultado.origem) {
-        aplicarNota(resultado.nota, resultado.origem);
+        aplicarNota(resultado.nota, resultado.origem, resultado.dados);
       } else {
+        setNotaIdentificada(null);
+        setOrigemNota(undefined);
+        setDadosDanfe(resultado.dados ?? null);
+        setItensSugeridos(resultado.dados?.itens ?? []);
         setAvisoScanner(resultado.detalhe ?? "Não consegui identificar a DANFE neste arquivo.");
       }
     } catch (erro) {
@@ -140,6 +222,13 @@ export default function ReceberAvulso({
       if (inputFotoRef.current) inputFotoRef.current.value = "";
     }
   }
+
+  useEffect(() => {
+    if (!arquivoInicial) return;
+    setArquivoLote(arquivoInicial);
+    void aoEscolherArquivo(arquivoInicial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- carrega só o arquivo inicial do lote
+  }, [arquivoInicial]);
 
   function finalizar() {
     if (itens.length === 0) return;
@@ -251,20 +340,29 @@ export default function ReceberAvulso({
           <PackagePlus size={22} className="text-primaria" /> Receber sem o arquivo da nota
         </p>
         <p className="text-sm text-slate-600">
-          Identifique a DANFE pelo <strong>QR</strong>, pelo <strong>PDF</strong> ou por uma{" "}
-          <strong>foto com OCR</strong> (luz do escritório). Também dá para bipar o{" "}
-          <strong>código de barras dos produtos</strong>. Os itens ainda são à mão — a lista automática vem do
-          XML/certificado.
+          {arquivoLote
+            ? <>PDF do lote: <strong>{arquivoLote.name}</strong> — a leitura é automática. Se precisar, use <strong>Ler de novo</strong> sem escolher o arquivo outra vez.</>
+            : <>Identifique a DANFE pelo <strong>QR</strong>, pelo <strong>PDF</strong> ou por uma <strong>foto com OCR</strong>. Os itens ainda são à mão — a lista automática vem do XML/certificado.</>}
         </p>
         <CodeScanner rotulo="Ler QR da nota ou código do produto" onLeitura={aoLerCodigo} />
         <div className="flex flex-wrap gap-2">
+          {arquivoLote && (
+            <button
+              type="button"
+              className="btn-primario"
+              disabled={lendoArquivo}
+              onClick={() => void aoEscolherArquivo(arquivoLote)}
+            >
+              <FileUp size={16} /> {lendoArquivo ? "Lendo PDF do lote…" : "Ler de novo o PDF do lote"}
+            </button>
+          )}
           <button
             type="button"
             className="btn-secundario"
             disabled={lendoArquivo}
             onClick={() => inputPdfRef.current?.click()}
           >
-            <FileUp size={16} /> {lendoArquivo ? "Lendo…" : "PDF da DANFE"}
+            <FileUp size={16} /> {lendoArquivo ? "Lendo…" : arquivoLote ? "Trocar PDF…" : "PDF da DANFE"}
           </button>
           <button
             type="button"
@@ -290,18 +388,34 @@ export default function ReceberAvulso({
             onChange={(e) => void aoEscolherArquivo(e.target.files?.[0] ?? null)}
           />
         </div>
+        {lendoArquivo && (
+          <p className="rounded-card bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Lendo o PDF{arquivoLote ? ` (${arquivoLote.name})` : ""} — texto e OCR…
+          </p>
+        )}
         {avisoScanner && (
           <p className="rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">{avisoScanner}</p>
         )}
         {notaIdentificada && (
-          <p className="rounded-card bg-sucesso-clara px-3 py-2 text-sm text-primaria-escura">
-            <ReceiptText size={14} className="mr-1 inline" />
-            Nota nº {notaIdentificada.numero} identificada {rotuloOrigem(origemNota)}
-            {fornecedorId
-              ? ` — ${nomeFornecedor(db, fornecedorId)}`
-              : ` (CNPJ ${notaIdentificada.cnpj} não está nos seus fornecedores)`}
-            . Os itens você preenche abaixo — a busca automática virá com o certificado digital.
-          </p>
+          <div className="space-y-2 rounded-card bg-sucesso-clara px-3 py-2 text-sm text-primaria-escura">
+            <p>
+              <ReceiptText size={14} className="mr-1 inline" />
+              Nota nº {notaIdentificada.numero} identificada {rotuloOrigem(origemNota)}
+              {arquivoLote ? " a partir do arquivo do lote" : ""}.
+            </p>
+            <p className="text-xs text-slate-600">
+              Chave …{notaIdentificada.chave.slice(-8)} · CNPJ {formatarCnpj(notaIdentificada.cnpj)}
+              {dadosDanfe?.nomeEmitente ? ` · ${dadosDanfe.nomeEmitente}` : ""}
+              {dadosDanfe?.valorTotalNota !== undefined
+                ? ` · total ${moeda(dadosDanfe.valorTotalNota)}`
+                : ""}
+            </p>
+            <p className="text-xs text-slate-600">
+              A DANFE em PDF <strong>não é o XML</strong> — a conferência item a item completa (como no
+              XML) só vem com o arquivo XML ou certificado. Aqui lemos chave/fornecedor e, quando o PDF
+              tem texto, sugerimos produtos.
+            </p>
+          </div>
         )}
       </Card>
 
@@ -318,6 +432,41 @@ export default function ReceberAvulso({
               ))}
           </select>
         </Campo>
+        {notaIdentificada && !fornecedorId && (
+          <button
+            type="button"
+            className="btn-primario inline-flex items-center gap-2 text-sm"
+            onClick={() => {
+              setNomeFornecedorNovo(dadosDanfe?.nomeEmitente ?? "");
+              setCadastroFornecedorAberto(true);
+            }}
+          >
+            <Building2 size={16} /> Cadastrar fornecedor com este CNPJ
+          </button>
+        )}
+
+        {itensSugeridos.length > 0 && (
+          <div className="space-y-2 rounded-card border border-slate-200 p-3">
+            <p className="text-sm font-semibold text-slate-800">
+              {itensSugeridos.length} produto(s) lido(s) do PDF
+            </p>
+            <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-slate-600">
+              {itensSugeridos.map((sug) => (
+                <li key={`${sug.codigo}-${sug.descricao}`}>
+                  {sug.codigo} · {sug.descricao} · {sug.quantidade} {sug.unidade}
+                  {sug.valorUnitario !== undefined ? ` · ${moeda(sug.valorUnitario)}` : ""}
+                </li>
+              ))}
+            </ul>
+            <button type="button" className="btn-secundario text-sm" onClick={adicionarItensSugeridosDoPdf}>
+              Incluir os que já existem no cadastro
+            </button>
+            <p className="text-xs text-slate-500">
+              Só entra item cujo nome/código já está em Cadastros → Produtos. Os demais você adiciona à
+              mão abaixo (ou cadastre o produto antes).
+            </p>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <Plus className="h-4 w-4 shrink-0 text-slate-400" />
@@ -333,6 +482,34 @@ export default function ReceberAvulso({
           </select>
         </div>
       </Card>
+
+      <Modal
+        aberto={cadastroFornecedorAberto}
+        titulo="Cadastrar fornecedor"
+        onFechar={() => setCadastroFornecedorAberto(false)}
+      >
+        <form onSubmit={salvarFornecedorRapido} className="space-y-3">
+          <Campo rotulo="CNPJ">
+            <input
+              className="campo"
+              readOnly
+              value={notaIdentificada ? formatarCnpj(notaIdentificada.cnpj) : ""}
+            />
+          </Campo>
+          <Campo rotulo="Razão social / nome *">
+            <input
+              className="campo"
+              required
+              value={nomeFornecedorNovo}
+              onChange={(e) => setNomeFornecedorNovo(e.target.value)}
+              placeholder="Ex.: Ferreira Produtos de Limpeza Ltda"
+            />
+          </Campo>
+          <button type="submit" className="btn-primario w-full">
+            Salvar fornecedor
+          </button>
+        </form>
+      </Modal>
 
       {itens.map((item) => {
         const sigla = siglaUnidadeUso(db, item.produtoId);

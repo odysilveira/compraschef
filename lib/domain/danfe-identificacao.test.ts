@@ -34,4 +34,15 @@ describe("identificarNotaPorTexto", () => {
     const comO = `${CHAVE.slice(0, idx)}O${CHAVE.slice(idx + 1)}`;
     expect(identificarNotaPorTexto(`chave ${comO}`)?.chave).toBe(CHAVE);
   });
+
+  it("não aceita 44 dígitos inválidos sem aceitarSemDv (evita chave falsa do PDF)", () => {
+    const falsa = "3526071234567800019055001000045231100045239"; // DV errado de propósito
+    expect(identificarNotaPorTexto(`lixo ${falsa} mais texto`)).toBeNull();
+  });
+
+  it("aceita chave sem DV só com opção de QR", () => {
+    const quase = CHAVE.slice(0, 43) + (CHAVE[43] === "0" ? "1" : "0");
+    expect(identificarNotaPorTexto(quase)).toBeNull();
+    expect(identificarNotaPorTexto(quase, { aceitarSemDv: true })?.chave).toBe(quase);
+  });
 });

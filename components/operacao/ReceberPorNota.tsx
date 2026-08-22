@@ -5,7 +5,7 @@
 // toca ✓ Confirmar ou ✗ Recusar em cada item → entrada no estoque, nota no
 // financeiro (boletos liberados se tudo OK) e vínculo com o pedido do fornecedor.
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Building2, CircleCheck, CircleX, FileUp, FlaskConical, PackagePlus, ReceiptText } from "lucide-react";
 import { Badge, Campo, Card, Modal, Vazio } from "@/components/ui";
@@ -238,6 +238,7 @@ export default function ReceberPorNota({
   db,
   usuarioId,
   notaImportadaId,
+  arquivoInicial,
   onVoltar,
   aoFinalizar,
 }: {
@@ -245,6 +246,8 @@ export default function ReceberPorNota({
   usuarioId: string;
   /** Quando vem de uma DANFE já baixada da Receita: pula o upload e usa os itens da nota. */
   notaImportadaId?: string;
+  /** XML já escolhido na triagem de lote. */
+  arquivoInicial?: File | null;
   onVoltar: () => void;
   aoFinalizar: (resultado: ResultadoNota) => void;
 }) {
@@ -261,6 +264,12 @@ export default function ReceberPorNota({
   const fornecedor = nota
     ? db.fornecedores.find((f) => somenteDigitos(f.cnpj) === somenteDigitos(nota.emitCnpj))
     : undefined;
+
+  useEffect(() => {
+    if (!arquivoInicial || notaImportadaId) return;
+    void arquivoInicial.text().then((texto) => carregarNota(texto));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- carrega só o arquivo inicial do lote
+  }, [arquivoInicial, notaImportadaId]);
 
   function carregarNota(xmlTexto: string) {
     const lida = lerNFe(xmlTexto);

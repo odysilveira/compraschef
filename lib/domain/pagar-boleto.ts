@@ -1,4 +1,4 @@
-import { validarBoleto } from "./boletos";
+import { obterCodigoCanonico } from "./boletos";
 import type { Boleto, DB, DocumentoBoleto, HistoricoPagamentoBoleto, StatusBoleto } from "../types";
 
 export type MotivoBloqueioPagamentoBoleto =
@@ -85,17 +85,39 @@ function rotuloStatus(status: StatusBoleto): string {
 function codigoCanonicoValido(codigo?: string): string | undefined {
   const candidato = (codigo ?? "").trim();
   if (!candidato) return undefined;
-  const validacao = validarBoleto(candidato);
-  if (!validacao.valido || validacao.formato !== "codigo_barras_bancario_44") {
-    return undefined;
-  }
-  return validacao.codigoCanonico;
+  // Aceita 44 direto ou linha 47 convertida — antes só 44 “cru” e o botão sumia.
+  return obterCodigoCanonico(candidato);
 }
 
 export function obterCodigoCanonicoConfirmadoDoDocumento(documento?: DocumentoBoleto): string | undefined {
   if (!documento) return undefined;
   if (!documento.confirmado_em || !documento.confirmado_por) return undefined;
-  return codigoCanonicoValido(documento.codigo_canonico);
+  return (
+    codigoCanonicoValido(documento.codigo_canonico) ||
+    codigoCanonicoValido(documento.linha_informada)
+  );
+}
+
+/**
+ * Resolve o código de barras (44) para exibir na agenda.
+ * 1) Documento confirmado; 2) boleto já conferido com linha/código gravados.
+ */
+export function resolverCodigoCanonicoParaPagamento(
+  boleto: Boleto,
+  documento?: DocumentoBoleto
+): string | undefined {
+  const doDocumento = obterCodigoCanonicoConfirmadoDoDocumento(documento);
+  if (doDocumento) return doDocumento;
+
+  if (boleto.status !== "liberado" || boleto.status_conferencia !== "conferido") {
+    return undefined;
+  }
+
+  return (
+    codigoCanonicoValido(boleto.linha_digitavel) ||
+    codigoCanonicoValido(documento?.codigo_canonico) ||
+    codigoCanonicoValido(documento?.linha_informada)
+  );
 }
 
 export function montarEstadoAgendaPagamentoBoleto(boleto: Boleto, documento?: DocumentoBoleto): EstadoAgendaPagamentoBoleto {
@@ -146,7 +168,7 @@ export function montarEstadoAgendaPagamentoBoleto(boleto: Boleto, documento?: Do
     };
   }
 
-  const codigoCanonico = obterCodigoCanonicoConfirmadoDoDocumento(documento);
+  const codigoCanonico = resolverCodigoCanonicoParaPagamento(boleto, documento);
   if (!codigoCanonico) {
     const semCodigoEmRegistroConferido = boleto.status_conferencia === "conferido";
     return {
@@ -156,8 +178,8 @@ export function montarEstadoAgendaPagamentoBoleto(boleto: Boleto, documento?: Do
       mostrarImportarBoleto: true,
       rotuloImportarBoleto: semCodigoEmRegistroConferido ? "Reimportar boleto" : "Importar boleto",
       motivoBloqueio: semCodigoEmRegistroConferido
-        ? "Código não preservado na importação anterior."
-        : "Boleto ainda não recebido.",
+        ? "Código não preservado na importação anterior — reimporte o PDF ou a linha digitável."
+        : "Boleto ainda não recebido — importe o PDF/linha para exibir o código.",
     };
   }
 

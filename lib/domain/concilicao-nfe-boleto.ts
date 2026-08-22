@@ -9,6 +9,7 @@
  */
 
 import type { Boleto, DB, DocumentoBoleto, NotaFiscal } from "../types";
+import { filtrarItensAbertos, type ItemFilaLote } from "./lote-recebimento-fila";
 
 const MARCA_GOLPE = "GOLPE CONFIRMADO";
 
@@ -226,4 +227,11 @@ export function montarResumoFilasConcilicaoNfeBoleto(db: DB): ResumoFilasConcili
       0
     ),
   };
+}
+
+/** PDFs de boleto ainda abertos na fila do lote (Recebimento → A conciliar). */
+export function listarBoletosLoteAguardandoVinculo(itens: ItemFilaLote[]): ItemFilaLote[] {
+  return filtrarItensAbertos(itens)
+    .filter((item) => item.tipo === "pdf_boleto")
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }

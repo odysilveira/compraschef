@@ -59,7 +59,7 @@ import {
   mascararLinhaDigitavel,
   valorValidadoComoMoeda,
 } from "@/lib/domain/importar-boleto-ui";
-import { montarResumoFilasConcilicaoNfeBoleto } from "@/lib/domain/concilicao-nfe-boleto";
+import { listarBoletosLoteAguardandoVinculo, montarResumoFilasConcilicaoNfeBoleto } from "@/lib/domain/concilicao-nfe-boleto";
 import {
   alternarCodigoAberto,
   acoesPagamentoDisponiveisNoLayout,
@@ -83,6 +83,7 @@ import {
   hidratarFilaLoteDoIdb,
   marcarItemConcluido,
   obterArquivoFilaAsync,
+  useFilaLoteRecebimento,
 } from "@/lib/domain/lote-recebimento-store";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { cnpjBR, dataBR, diasAte, moeda } from "@/lib/format";
@@ -417,6 +418,7 @@ function BadgeStatus({ boleto }: { boleto: Boleto }) {
 export default function FinanceiroPage() {
   const db = useDB();
   const { papel } = usePapel();
+  const filaLote = useFilaLoteRecebimento();
   const handoffLoteProcessado = useRef<string | null>(null);
   const [itemLoteBoletoId, setItemLoteBoletoId] = useState<string | null>(null);
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
@@ -696,6 +698,31 @@ export default function FinanceiroPage() {
     (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
   );
   const filasConcilicaoNfe = useMemo(() => montarResumoFilasConcilicaoNfeBoleto(db), [db]);
+  const boletosLotePendentes = useMemo(() => listarBoletosLoteAguardandoVinculo(filaLote), [filaLote]);
+  const totalPendenciasConcilicao =
+    filasConcilicaoNfe.totalParcelas + filasConcilicaoNfe.totalDocumentos + boletosLotePendentes.length;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const aba = new URLSearchParams(window.location.search).get("aba");
+    if (aba === "conciliacao") setAbaFinanceira("conciliacao");
+    else if (aba === "contas") setAbaFinanceira("contas");
+    else if (aba === "notas") setAbaFinanceira("notas");
+    else if (aba === "boletos") setAbaFinanceira("boletos");
+  }, []);
+
+  function abrirAbaConcilicao() {
+    setAbaFinanceira("conciliacao");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("aba", "conciliacao");
+      window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
+    }
+  }
+
+  function levarBoletoLoteAoImportar(itemId: string) {
+    window.location.assign(`/financeiro?importarLoteBoleto=${encodeURIComponent(itemId)}&aba=conciliacao`);
+  }
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
@@ -1571,14 +1598,10 @@ export default function FinanceiroPage() {
           className={`btn-secundario inline-flex items-center gap-2 ${
             abaFinanceira === "conciliacao" ? "border-primaria bg-primaria-clara text-primaria" : ""
           }`}
-          onClick={() => setAbaFinanceira("conciliacao")}
+          onClick={abrirAbaConcilicao}
         >
           Conciliação NF-e × boleto
-          {(filasConcilicaoNfe.totalParcelas > 0 || filasConcilicaoNfe.totalDocumentos > 0) && (
-            <Badge cor="laranja">
-              {filasConcilicaoNfe.totalParcelas + filasConcilicaoNfe.totalDocumentos}
-            </Badge>
-          )}
+          {totalPendenciasConcilicao > 0 && <Badge cor="laranja">{totalPendenciasConcilicao}</Badge>}
         </button>
       </div>
 
@@ -1588,13 +1611,13 @@ export default function FinanceiroPage() {
             <h2>Conciliação NF-e × boleto</h2>
             <p className="text-sm text-slate-600">
               Duas filas sobre os mesmos cadastros — sem banco duplicado. À esquerda: parcelas da nota
-              ainda sem PDF/linha conferido. À direita: documentos importados ainda sem vínculo
-              confirmado. Isso é diferente de <strong>Aguardando conciliação</strong> na agenda
-              (= pagamento já informado).
+              ainda sem PDF/linha conferido. À direita: documentos importados e boletos da fila do
+              lote ainda sem vínculo. Isso é diferente de <strong>Aguardando conciliação bancária</strong>{" "}
+              na agenda (= pagamento já informado).
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <Card className="py-3">
               <p className="rotulo">Parcelas sem boleto conferido</p>
               <p className="text-2xl font-bold text-destaque">{filasConcilicaoNfe.totalParcelas}</p>
@@ -1603,6 +1626,10 @@ export default function FinanceiroPage() {
             <Card className="py-3">
               <p className="rotulo">Documentos sem vínculo</p>
               <p className="text-2xl font-bold text-blue-700">{filasConcilicaoNfe.totalDocumentos}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="rotulo">Boletos na fila do lote</p>
+              <p className="text-2xl font-bold text-primaria">{boletosLotePendentes.length}</p>
             </Card>
             <Card className="py-3">
               <p className="rotulo">Notas com pendência</p>
@@ -1642,8 +1669,38 @@ export default function FinanceiroPage() {
             </section>
 
             <section className="space-y-3">
-              <h3 className="text-base font-bold">Documentos aguardando NF-e</h3>
-              {filasConcilicaoNfe.documentos.length === 0 ? (
+              <h3 className="text-base font-bold">Documentos e lote aguardando NF-e</h3>
+
+              {boletosLotePendentes.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-slate-700">Da fila A conciliar (Recebimento)</p>
+                  {boletosLotePendentes.map((item) => (
+                    <Card key={item.id} className="space-y-2 border border-destaque/40 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-bold" title={item.nome}>
+                            {item.nome}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {(item.tamanho / 1024).toFixed(1)} KB
+                            {item.detalhe ? ` · ${item.detalhe}` : ""}
+                          </p>
+                        </div>
+                        <Badge cor="laranja">lote</Badge>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-primario"
+                        onClick={() => levarBoletoLoteAoImportar(item.id)}
+                      >
+                        <Upload size={16} /> Analisar neste Financeiro
+                      </button>
+                    </Card>
+                  ))}
+                </div>
+              )}
+
+              {filasConcilicaoNfe.documentos.length === 0 && boletosLotePendentes.length === 0 ? (
                 <Vazio mensagem="Nenhum documento de boleto pendente de vínculo." />
               ) : (
                 filasConcilicaoNfe.documentos.map((item) => (
@@ -1732,6 +1789,25 @@ export default function FinanceiroPage() {
               <Upload size={18} /> Importar boleto
             </button>
           </div>
+
+          {totalPendenciasConcilicao > 0 && (
+            <button
+              type="button"
+              className="card flex w-full items-center justify-between gap-3 border-2 border-destaque bg-destaque-clara p-4 text-left transition-colors hover:opacity-95"
+              onClick={abrirAbaConcilicao}
+            >
+              <span>
+                <span className="block text-lg font-bold text-primaria-escura">
+                  {totalPendenciasConcilicao} pendência
+                  {totalPendenciasConcilicao === 1 ? "" : "s"} de conciliação NF-e × boleto
+                </span>
+                <span className="block text-sm text-slate-700">
+                  Parcelas sem PDF, documentos sem vínculo ou boletos na fila do lote.
+                </span>
+              </span>
+              <Badge cor="laranja">{totalPendenciasConcilicao}</Badge>
+            </button>
+          )}
 
           {mensagemReceberBoleto && (
             <div className="rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">

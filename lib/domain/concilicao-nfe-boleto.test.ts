@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Boleto, DB, DocumentoBoleto, NotaFiscal } from "../types";
 import { seedDB } from "../data/seed";
 import {
+  listarBoletosLoteAguardandoVinculo,
   listarDocumentosAguardandoVinculo,
   listarNotasComBoletoPendente,
   listarParcelasAguardandoDocumento,
@@ -127,5 +128,32 @@ describe("filas conciliação NF-e × boleto", () => {
     expect(resumo.totalDocumentos).toBe(1);
     expect(resumo.totalNotas).toBe(1);
     expect(resumo.valorParcelasPendentes).toBe(100);
+  });
+
+  it("lista boletos abertos na fila do lote", () => {
+    const lista = listarBoletosLoteAguardandoVinculo([
+      {
+        id: "1",
+        nome: "boleto-a.pdf",
+        tamanho: 10,
+        tipo: "pdf_boleto",
+        status: "pendente",
+      },
+      {
+        id: "2",
+        nome: "nota.xml",
+        tamanho: 10,
+        tipo: "xml_nfe",
+        status: "pendente",
+      },
+      {
+        id: "3",
+        nome: "boleto-ok.pdf",
+        tamanho: 10,
+        tipo: "pdf_boleto",
+        status: "concluido",
+      },
+    ]);
+    expect(lista.map((i) => i.id)).toEqual(["1"]);
   });
 });

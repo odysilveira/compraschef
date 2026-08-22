@@ -63,6 +63,20 @@ function agendarPersistencia() {
   }, 80);
 }
 
+/** Grava a fila atual no IndexedDB imediatamente (antes de navegar para o Financeiro). */
+export async function flushPersistenciaFilaLote(): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  persistVersao += 1;
+  const versao = persistVersao;
+  await cadeiaPersistencia.catch(() => undefined);
+  if (versao !== persistVersao) return;
+  await persistirFilaAgora();
+}
+
 async function persistirFilaAgora() {
   try {
     const abertos = filtrarItensAbertos(itens);

@@ -80,8 +80,10 @@ import {
   type EstadoCodigoAmpliado,
 } from "@/lib/domain/codigo-pagamento-ui";
 import {
+  flushPersistenciaFilaLote,
   hidratarFilaLoteDoIdb,
   marcarItemConcluido,
+  marcarItemEmAndamento,
   obterArquivoFilaAsync,
   useFilaLoteRecebimento,
 } from "@/lib/domain/lote-recebimento-store";
@@ -722,7 +724,33 @@ export default function FinanceiroPage() {
   }
 
   function levarBoletoLoteAoImportar(itemId: string) {
-    window.location.assign(`/financeiro?importarLoteBoleto=${encodeURIComponent(itemId)}&aba=conferencia`);
+    void (async () => {
+      marcarItemEmAndamento(itemId);
+      try {
+        await flushPersistenciaFilaLote();
+      } catch {
+        // memória local segue
+      }
+      const arquivo = await obterArquivoFilaAsync(itemId);
+      if (!arquivo) {
+        setMensagemReceberBoleto(
+          "Não achei o PDF do lote neste navegador. Volte em Recebimento → A conciliar."
+        );
+        return;
+      }
+      setAbaFinanceira("conferencia");
+      setItemLoteBoletoId(itemId);
+      setBoletoImportacaoAlvoId(null);
+      setModalImportarBoletoAberto(true);
+      setEstadoImportacaoBoleto(novoEstadoImportacaoBoleto());
+      setMensagemImportacaoBoleto(null);
+      setJustificativaImportacao("");
+      setParcelaSelecionadaMultipla("");
+      setMostrarLinhaCompletaImportada(false);
+      setMostrarDetalhesTecnicos(false);
+      setMensagemReceberBoleto(`Analisando boleto do lote: ${arquivo.name}`);
+      await analisarImportacaoBoleto(arquivo);
+    })();
   }
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
@@ -1149,7 +1177,7 @@ export default function FinanceiroPage() {
     const id = params.get("importarLoteBoleto");
     if (!id || handoffLoteProcessado.current === id) return;
     handoffLoteProcessado.current = id;
-    window.history.replaceState({}, "", "/financeiro");
+    window.history.replaceState({}, "", "/financeiro?aba=conferencia");
 
     void (async () => {
       await hidratarFilaLoteDoIdb();
@@ -1160,6 +1188,7 @@ export default function FinanceiroPage() {
         );
         return;
       }
+      setAbaFinanceira("conferencia");
       setItemLoteBoletoId(id);
       setBoletoImportacaoAlvoId(null);
       setModalImportarBoletoAberto(true);

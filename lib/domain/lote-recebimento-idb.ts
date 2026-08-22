@@ -96,7 +96,12 @@ export async function salvarRegistrosLoteIdb(registros: RegistroLoteIdb[]): Prom
   try {
     const tx = db.transaction(STORE, "readwrite");
     const store = tx.objectStore(STORE);
-    store.clear();
+    const chaves = await reqParaPromise(store.getAllKeys() as IDBRequest<IDBValidKey[]>);
+    const idsNovos = new Set(registros.map((r) => r.id));
+    for (const chave of chaves ?? []) {
+      const id = String(chave);
+      if (!idsNovos.has(id)) store.delete(id);
+    }
     for (const registro of registros) {
       store.put(registro);
     }

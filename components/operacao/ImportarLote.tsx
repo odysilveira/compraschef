@@ -25,6 +25,7 @@ import {
   descartarItemFila,
   definirFilaDeClassificados,
   hidratarFilaLoteDoIdb,
+  flushPersistenciaFilaLote,
   limparFilaLote,
   marcarItemEmAndamento,
   obterArquivoFilaAsync,
@@ -78,7 +79,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     null
   );
   const [erro, setErro] = useState<string | null>(null);
-  const [substituir, setSubstituir] = useState(true);
+  const [substituir, setSubstituir] = useState(false);
   const [reconhecendoId, setReconhecendoId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     url: string;
@@ -166,9 +167,14 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     setPreview({ url, nome: arquivo.name, mime: arquivo.type || "application/octet-stream" });
   }
 
-  function levarBoletoAoFinanceiro(id: string) {
+  async function levarBoletoAoFinanceiro(id: string) {
     marcarItemEmAndamento(id);
-    router.push(`/financeiro?importarLoteBoleto=${encodeURIComponent(id)}`);
+    try {
+      await flushPersistenciaFilaLote();
+    } catch {
+      // segue mesmo se o IDB falhar — a memória do módulo ainda tem a fila
+    }
+    router.push(`/financeiro?importarLoteBoleto=${encodeURIComponent(id)}&aba=conferencia`);
   }
 
   /** OCR/leitura de novo no arquivo já salvo na fila (sem rebaixar). */
@@ -258,7 +264,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
               checked={substituir}
               onChange={(e) => setSubstituir(e.target.checked)}
             />
-            Próxima seleção substitui a fila (desmarque para acrescentar)
+            Próxima seleção substitui a fila (deixe desmarcado para acumular)
           </label>
         )}
 

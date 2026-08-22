@@ -3,7 +3,7 @@
 // Importação de NFS-e (nota de serviço) via PDF — sem estoque.
 // Gera título liberado na agenda financeira (boleto ou PIX).
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowLeft, FileUp, FlaskConical, ReceiptText, Wallet } from "lucide-react";
 import { Badge, Campo, Card } from "@/components/ui";
 import { mutate, uid, useDB } from "@/lib/data";
@@ -45,9 +45,11 @@ export interface ResultadoImportacaoNfse {
 interface Props {
   onVoltar: () => void;
   onConcluido: (resultado: ResultadoImportacaoNfse) => void;
+  /** PDF já escolhido na triagem de lote. */
+  arquivoInicial?: File | null;
 }
 
-export default function ImportarNfse({ onVoltar, onConcluido }: Props) {
+export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: Props) {
   const db = useDB();
   const [arquivoNome, setArquivoNome] = useState<string | null>(null);
   const [textoExtraido, setTextoExtraido] = useState("");
@@ -107,6 +109,12 @@ export default function ImportarNfse({ onVoltar, onConcluido }: Props) {
       setLendo(false);
     }
   }
+
+  useEffect(() => {
+    if (!arquivoInicial) return;
+    void aoEscolherPdf(arquivoInicial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- carrega só o PDF inicial do lote
+  }, [arquivoInicial]);
 
   function carregarDemo() {
     setTextoExtraido(TEXTO_NFSE_DEMO_ANOTA_AI);

@@ -78,6 +78,11 @@ import {
   montarConfiguracaoSvgCodigo,
   type EstadoCodigoAmpliado,
 } from "@/lib/domain/codigo-pagamento-ui";
+import {
+  hidratarFilaLoteDoIdb,
+  marcarItemConcluido,
+  obterArquivoFilaAsync,
+} from "@/lib/domain/lote-recebimento-store";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { cnpjBR, dataBR, diasAte, moeda } from "@/lib/format";
 import type { Boleto, ContaPagar, DB, OrigemContaPagar, StatusBoleto, StatusContaPagar } from "@/lib/types";
@@ -411,6 +416,8 @@ function BadgeStatus({ boleto }: { boleto: Boleto }) {
 export default function FinanceiroPage() {
   const db = useDB();
   const { papel } = usePapel();
+  const handoffLoteProcessado = useRef<string | null>(null);
+  const [itemLoteBoletoId, setItemLoteBoletoId] = useState<string | null>(null);
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
   const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas">("boletos");
   const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
@@ -1105,6 +1112,39 @@ export default function FinanceiroPage() {
     void analisarImportacaoBoleto(arquivo);
   }
 
+  /** PDF do lote (Recebimento → A conciliar): abre o modal e analisa sem pedir upload de novo. */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("importarLoteBoleto");
+    if (!id || handoffLoteProcessado.current === id) return;
+    handoffLoteProcessado.current = id;
+    window.history.replaceState({}, "", "/financeiro");
+
+    void (async () => {
+      await hidratarFilaLoteDoIdb();
+      const arquivo = await obterArquivoFilaAsync(id);
+      if (!arquivo) {
+        setMensagemReceberBoleto(
+          "Não achei o PDF do lote neste navegador. Volte em Recebimento → A conciliar e use Levar ao Financeiro de novo."
+        );
+        return;
+      }
+      setItemLoteBoletoId(id);
+      setBoletoImportacaoAlvoId(null);
+      setModalImportarBoletoAberto(true);
+      setEstadoImportacaoBoleto(novoEstadoImportacaoBoleto());
+      setMensagemImportacaoBoleto(null);
+      setJustificativaImportacao("");
+      setParcelaSelecionadaMultipla("");
+      setMostrarLinhaCompletaImportada(false);
+      setMostrarDetalhesTecnicos(false);
+      setMensagemReceberBoleto(`Analisando boleto do lote: ${arquivo.name}`);
+      await analisarImportacaoBoleto(arquivo);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handoff único na entrada da página
+  }, []);
+
   async function confirmarImportacaoPrincipal() {
     if (processandoImportacaoBoleto) return;
     const arquivo = estadoImportacaoBoleto.arquivo;
@@ -1163,6 +1203,11 @@ export default function FinanceiroPage() {
       mutate((atual) => {
         Object.assign(atual, proximo);
       });
+
+      if (itemLoteBoletoId) {
+        marcarItemConcluido(itemLoteBoletoId);
+        setItemLoteBoletoId(null);
+      }
 
       setMensagemReceberBoleto("Boleto conferido e adicionado aos boletos a vencer");
       setModalImportarBoletoAberto(false);
@@ -2006,6 +2051,13 @@ export default function FinanceiroPage() {
         >
           <label className="block">
             <span className="rotulo mb-1 block">Arquivo do boleto (PDF, JPG ou PNG)</span>
+            {estadoImportacaoBoleto.arquivo && (
+              <p className="mb-2 rounded-card bg-sucesso-clara px-3 py-2 text-sm text-slate-800">
+                Já carregado{itemLoteBoletoId ? " do lote" : ""}:{" "}
+                <strong>{estadoImportacaoBoleto.arquivo.name}</strong>
+                {processandoImportacaoBoleto ? " · analisando…" : ""}
+              </p>
+            )}
             <input
               type="file"
               accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"

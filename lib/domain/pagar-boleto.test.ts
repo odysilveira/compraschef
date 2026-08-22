@@ -283,14 +283,36 @@ describe("Interleaved 2 of 5", () => {
 });
 
 describe("estado da agenda de pagamento", () => {
-  it("bloqueia pagamento e mostra importar quando não há código canônico confirmado", () => {
+  it("libera código pela linha digitável quando boleto já está conferido (sem documento)", () => {
     const estado = montarEstadoAgendaPagamentoBoleto(boletoBase(), undefined);
+
+    expect(estado.podeExibirCodigo).toBe(true);
+    expect(estado.podeInformarPagamento).toBe(true);
+    expect(estado.mostrarImportarBoleto).toBe(false);
+    expect(estado.codigoCanonico).toHaveLength(44);
+  });
+
+  it("pede importar quando conferido mas sem linha/código utilizável", () => {
+    const estado = montarEstadoAgendaPagamentoBoleto(
+      boletoBase({ linha_digitavel: undefined, documento_boleto_id: undefined }),
+      undefined
+    );
 
     expect(estado.podeExibirCodigo).toBe(false);
     expect(estado.podeInformarPagamento).toBe(false);
     expect(estado.mostrarImportarBoleto).toBe(true);
     expect(estado.rotuloImportarBoleto).toBe("Reimportar boleto");
-    expect(estado.motivoBloqueio).toBe("Código não preservado na importação anterior.");
+  });
+
+  it("converte linha 47 gravada como canônico do documento para código 44", () => {
+    const linha47 = "34191234546789012345767890123457112340000001000";
+    const documento = documentoBase({
+      codigo_canonico: linha47,
+      linha_informada: linha47,
+    });
+    const estado = montarEstadoAgendaPagamentoBoleto(boletoBase({ linha_digitavel: undefined }), documento);
+    expect(estado.podeExibirCodigo).toBe(true);
+    expect(estado.codigoCanonico).toHaveLength(44);
   });
 
   it("libera ações quando boleto está elegível e documento confirmado com código canônico válido", () => {

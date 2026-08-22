@@ -37,6 +37,7 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
   const [codigoBarrasForm, setCodigoBarrasForm] = useState<ProdutoCodigoBarras[]>([]);
   const [novoCodigoBarras, setNovoCodigoBarras] = useState("");
   const [fornecedorParaVincular, setFornecedorParaVincular] = useState("");
+  const [mensagemVinculo, setMensagemVinculo] = useState<string | null>(null);
   const produtoAbertoPorUrl = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -75,6 +76,8 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
       setForm({ ...produtoVazio(db.unidades[0]?.id ?? ""), categoria_id: categoriaPadrao });
       setCodigoBarrasForm([]);
       setNovoCodigoBarras("");
+      setFornecedorParaVincular("");
+      setMensagemVinculo(null);
       return;
     }
     const codigos = (Array.isArray(db.produto_codigos_barras) ? db.produto_codigos_barras : []).filter((c) => c.produto_id === p.id);
@@ -85,6 +88,7 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
       : [];
     const principalCodigo = codigoPadrao.find((c) => c.principal)?.codigo_barras;
     setFornecedorParaVincular("");
+    setMensagemVinculo(null);
     setForm({ ...p, codigo_barras: principalCodigo ?? p.codigo_barras });
     setCodigoBarrasForm(codigoPadrao);
     setNovoCodigoBarras("");
@@ -93,11 +97,14 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
   function salvar(e: FormEvent) {
     e.preventDefault();
     if (!form) return;
+    const eraNovo = !form.id;
+    let produtoIdSalvo = form.id || "";
     mutate((banco) => {
       const categoriaSelecionada = form.categoria_id
         ? banco.categorias_produtos.find((c) => c.id === form.categoria_id)
         : undefined;
       const produtoId = form.id || uid("prod");
+      produtoIdSalvo = produtoId;
       const codigos = codigoBarrasForm.length
         ? codigoBarrasForm
         : form.codigo_barras
@@ -118,6 +125,7 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
         banco.produtos.push(produtoParaSalvar);
       }
 
+      if (!Array.isArray(banco.produto_codigos_barras)) banco.produto_codigos_barras = [];
       banco.produto_codigos_barras = banco.produto_codigos_barras.filter((c) => c.produto_id !== produtoId);
       if (codigos.length > 0) {
         const principalExists = codigos.some((c) => c.principal);
@@ -134,7 +142,13 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
 
       associarCategoriasProdutos(banco);
     });
-    setForm(null);
+    // Após salvar (novo ou edição), mantém o modal aberto para vincular fornecedor.
+    setForm({
+      ...form,
+      id: produtoIdSalvo,
+      codigo_barras: form.codigo_barras,
+    });
+    if (eraNovo) setMensagemVinculo("Produto salvo. Agora você pode vincular o fornecedor.");
   }
 
   function excluir() {
@@ -147,11 +161,12 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
     setForm(null);
   }
 
-  function vincularFornecedor() {
-    if (!form?.id || !fornecedorParaVincular) return;
+  function vincularFornecedor(fornecedorIdEscolhido?: string) {
+    const fornecedorId = fornecedorIdEscolhido || fornecedorParaVincular;
+    if (!form?.id || !fornecedorId) return;
     const produtoId = form.id;
-    const fornecedorId = fornecedorParaVincular;
     mutate((banco) => {
+      if (!Array.isArray(banco.fornecedor_produtos)) banco.fornecedor_produtos = [];
       const jaExiste = banco.fornecedor_produtos.some(
         (fp) => fp.produto_id === produtoId && fp.fornecedor_id === fornecedorId
       );
@@ -160,16 +175,22 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
       }
     });
     setFornecedorParaVincular("");
+    setMensagemVinculo("Fornecedor vinculado.");
   }
 
   function desvincularFornecedor(fpId: string, nome: string) {
     if (!window.confirm(`Desvincular o fornecedor "${nome}" deste produto?`)) return;
     mutate((banco) => {
+      if (!Array.isArray(banco.fornecedor_produtos)) banco.fornecedor_produtos = [];
       banco.fornecedor_produtos = banco.fornecedor_produtos.filter((fp) => fp.id !== fpId);
     });
   }
 
-  const vinculos = form?.id ? db.fornecedor_produtos.filter((fp) => fp.produto_id === form.id) : [];
+  const vinculos = form?.id
+    ? (Array.isArray(db.fornecedor_produtos) ? db.fornecedor_produtos : []).filter(
+        (fp) => fp.produto_id === form.id
+      )
+    : [];
   const idsJaVinculados = new Set(vinculos.map((fp) => fp.fornecedor_id));
   const fornecedoresDisponiveis = form?.id
     ? db.fornecedores
@@ -569,12 +590,19 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                     ))}
                   </ul>
                 )}
+                {mensagemVinculo && (
+                  <p className="mb-2 text-sm text-primaria-escura">{mensagemVinculo}</p>
+                )}
                 {fornecedoresDisponiveis.length > 0 && (
                   <div className="flex items-center gap-2">
                     <select
                       className="campo flex-1"
                       value={fornecedorParaVincular}
-                      onChange={(e) => setFornecedorParaVincular(e.target.value)}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setFornecedorParaVincular(id);
+                        if (id) vincularFornecedor(id);
+                      }}
                     >
                       <option value="">Escolher fornecedor…</option>
                       {fornecedoresDisponiveis.map((f) => (
@@ -588,7 +616,11 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                       type="button"
                       className="btn-secundario"
                       disabled={!fornecedorParaVincular}
-                      onClick={vincularFornecedor}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        vincularFornecedor();
+                      }}
                     >
                       <Link2 size={16} /> Vincular
                     </button>
@@ -604,7 +636,8 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
               </div>
             ) : (
               <p className="text-xs text-slate-500 sm:col-span-2">
-                Salve o produto para depois vincular os fornecedores que o vendem.
+                Salve o produto (botão Salvar) para liberar o vínculo com fornecedores — o formulário
+                permanece aberto.
               </p>
             )}
 

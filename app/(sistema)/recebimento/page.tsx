@@ -7,6 +7,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import {
+  FileStack,
   ArrowLeft,
   Camera,
   CircleCheck,
@@ -22,7 +23,9 @@ import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import ReceberPorNota from "@/components/operacao/ReceberPorNota";
 import ReceberAvulso from "@/components/operacao/ReceberAvulso";
+import ReceberDanfe from "@/components/operacao/ReceberDanfe";
 import ImportarNfse from "@/components/operacao/ImportarNfse";
+import ImportarLote, { type AcaoLoteArquivo } from "@/components/operacao/ImportarLote";
 import {
   estoqueAtual,
   mutate,
@@ -41,6 +44,13 @@ import {
   corrigirFornecedorNotaFiscal,
   indicadorCompletudeNota,
 } from "@/lib/domain/nfe-completude";
+import {
+  marcarItemConcluido,
+  marcarItemPendente,
+  quantidadeFilaAberta,
+  useFilaLoteRecebimento,
+} from "@/lib/domain/lote-recebimento-store";
+import { contarItensAbertos } from "@/lib/domain/lote-recebimento-fila";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { cnpjBR, dataBR, moeda, qtd } from "@/lib/format";
 import type { StatusRecebimento } from "@/lib/types";
@@ -99,11 +109,17 @@ export default function RecebimentoPage() {
   const { papel } = usePapel();
   const verValores = podeVerValores(papel);
   const usuarioId = db.perfis.find((p) => p.papel === papel)?.id ?? "perfil-dono";
+  const filaLote = useFilaLoteRecebimento();
+  const abertosLote = contarItensAbertos(filaLote);
 
   const [pedidoId, setPedidoId] = useState<string | null>(null);
   const [modoNota, setModoNota] = useState(false);
   const [modoAvulso, setModoAvulso] = useState(false);
+  const [modoDanfe, setModoDanfe] = useState(false);
   const [modoNfse, setModoNfse] = useState(false);
+  const [modoLote, setModoLote] = useState(false);
+  const [arquivoLote, setArquivoLote] = useState<File | null>(null);
+  const [itemLoteId, setItemLoteId] = useState<string | null>(null);
   const [notaConferirId, setNotaConferirId] = useState<string | null>(null);
   const [notaCorrecaoId, setNotaCorrecaoId] = useState<string | null>(null);
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | "pendentes" | "completas">("todas");
@@ -407,7 +423,11 @@ export default function RecebimentoPage() {
     setPedidoId(null);
     setModoNota(false);
     setModoAvulso(false);
+    setModoDanfe(false);
     setModoNfse(false);
+    setModoLote(false);
+    setArquivoLote(null);
+    setItemLoteId(null);
     setNotaConferirId(null);
     setConferencia({});
     setResultado(null);
@@ -415,9 +435,39 @@ export default function RecebimentoPage() {
     setAvisoScanner(null);
   }
 
+  /** Sai do XML/NFS-e/avulso sem concluir — devolve o item à fila e reabre o lote. */
+  function voltarDoFluxoLote() {
+    if (itemLoteId) marcarItemPendente(itemLoteId);
+    setModoNota(false);
+    setModoAvulso(false);
+    setModoDanfe(false);
+    setModoNfse(false);
+    setArquivoLote(null);
+    setItemLoteId(null);
+    if (quantidadeFilaAberta() > 0) setModoLote(true);
+  }
+
+  function finalizarItemLoteSeHouver() {
+    if (itemLoteId) marcarItemConcluido(itemLoteId);
+    setArquivoLote(null);
+    setItemLoteId(null);
+  }
+
+  function continuarLoteAposResultado() {
+    setResultado(null);
+    setModoNota(false);
+    setModoAvulso(false);
+    setModoDanfe(false);
+    setModoNfse(false);
+    setArquivoLote(null);
+    setItemLoteId(null);
+    setModoLote(true);
+  }
+
   // ---------- Tela final ----------
   if (resultado) {
     const ok = resultado.status === "ok";
+    const restamLote = quantidadeFilaAberta();
     return (
       <div className="mx-auto max-w-lg space-y-4">
         <TituloPagina titulo="Recebimento" />
@@ -443,8 +493,18 @@ export default function RecebimentoPage() {
                   : "A entrada foi registrada com a divergência anotada."}
             </p>
             {resultado.mensagemExtra && <p className="text-sm text-slate-700">{resultado.mensagemExtra}</p>}
+            {restamLote > 0 && (
+              <p className="text-sm font-medium text-primaria-escura">
+                Ainda há {restamLote} arquivo{restamLote === 1 ? "" : "s"} a conciliar no lote.
+              </p>
+            )}
           </div>
         </Card>
+        {restamLote > 0 && (
+          <button className="btn-gigante" onClick={continuarLoteAposResultado}>
+            <FileStack size={28} /> Continuar lote ({restamLote})
+          </button>
+        )}
         <button className="btn-gigante" onClick={recomecar}>
           <PackageCheck size={28} /> Novo recebimento
         </button>
@@ -463,8 +523,16 @@ export default function RecebimentoPage() {
         <ReceberPorNota
           db={db}
           usuarioId={usuarioId}
-          onVoltar={() => setModoNota(false)}
-          aoFinalizar={(r) =>
+          arquivoInicial={arquivoLote}
+          onVoltar={() => {
+            if (itemLoteId) voltarDoFluxoLote();
+            else {
+              setModoNota(false);
+              setArquivoLote(null);
+            }
+          }}
+          aoFinalizar={(r) => {
+            finalizarItemLoteSeHouver();
             setResultado({
               status: r.status,
               temNota: true,
@@ -472,8 +540,8 @@ export default function RecebimentoPage() {
               mensagemExtra: `Nota de ${r.fornecedorNome} registrada no financeiro${
                 r.boletos > 0 ? ` com ${r.boletos} boleto${r.boletos === 1 ? "" : "s"}` : ""
               }${r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""}.`,
-            })
-          }
+            });
+          }}
         />
       </div>
     );
@@ -485,15 +553,23 @@ export default function RecebimentoPage() {
       <div className="mx-auto max-w-2xl space-y-4">
         <TituloPagina titulo="NFS-e — nota de serviço" />
         <ImportarNfse
-          onVoltar={() => setModoNfse(false)}
-          onConcluido={(r) =>
+          arquivoInicial={arquivoLote}
+          onVoltar={() => {
+            if (itemLoteId) voltarDoFluxoLote();
+            else {
+              setModoNfse(false);
+              setArquivoLote(null);
+            }
+          }}
+          onConcluido={(r) => {
+            finalizarItemLoteSeHouver();
             setResultado({
               status: "ok",
               temNota: true,
               boletosLiberados: 1,
               mensagemExtra: `NFS-e de ${r.fornecedorNome} (${moeda(r.valor)}) registrada · pagamento via ${r.meio.toUpperCase()} · título liberado na agenda (sem estoque).`,
-            })
-          }
+            });
+          }}
         />
       </div>
     );
@@ -528,6 +604,39 @@ export default function RecebimentoPage() {
     );
   }
 
+  // ---------- Conferência DANFE (PDF/foto ao lado + itens como no XML) ----------
+  if (modoDanfe && arquivoLote) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-4">
+        <TituloPagina titulo="Conferir DANFE" />
+        <ReceberDanfe
+          db={db}
+          usuarioId={usuarioId}
+          arquivoInicial={arquivoLote}
+          onVoltar={() => {
+            if (itemLoteId) voltarDoFluxoLote();
+            else {
+              setModoDanfe(false);
+              setArquivoLote(null);
+            }
+          }}
+          aoFinalizar={(r) => {
+            finalizarItemLoteSeHouver();
+            setModoDanfe(false);
+            setResultado({
+              status: r.status,
+              temNota: true,
+              boletosLiberados: r.boletosLiberados,
+              mensagemExtra: `DANFE de ${r.fornecedorNome} conferida${
+                r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""
+              }.`,
+            });
+          }}
+        />
+      </div>
+    );
+  }
+
   // ---------- Modo avulso (QR da nota ou sem nota) ----------
   if (modoAvulso) {
     return (
@@ -537,8 +646,16 @@ export default function RecebimentoPage() {
           db={db}
           usuarioId={usuarioId}
           verValores={verValores}
-          onVoltar={() => setModoAvulso(false)}
-          aoFinalizar={(r) =>
+          arquivoInicial={arquivoLote}
+          onVoltar={() => {
+            if (itemLoteId) voltarDoFluxoLote();
+            else {
+              setModoAvulso(false);
+              setArquivoLote(null);
+            }
+          }}
+          aoFinalizar={(r) => {
+            finalizarItemLoteSeHouver();
             setResultado({
               status: r.status,
               temNota: r.boletos > 0,
@@ -546,8 +663,34 @@ export default function RecebimentoPage() {
               mensagemExtra: `Entrada de ${r.fornecedorNome} registrada${
                 r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""
               }.`,
-            })
-          }
+            });
+          }}
+        />
+      </div>
+    );
+  }
+
+  // ---------- Importar lote (Downloads do e-mail) ----------
+  if (modoLote) {
+    const abrirDoLote = (acao: AcaoLoteArquivo) => {
+      setItemLoteId(acao.id);
+      setArquivoLote(acao.arquivo);
+      setModoLote(false);
+      if (acao.tipo === "xml_nfe") setModoNota(true);
+      else if (acao.tipo === "pdf_nfse") setModoNfse(true);
+      else if (acao.tipo === "pdf_danfe" || acao.tipo === "imagem") setModoDanfe(true);
+    };
+
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <TituloPagina titulo="Importar lote" />
+        <ImportarLote
+          onVoltar={() => {
+            setModoLote(false);
+            setArquivoLote(null);
+            setItemLoteId(null);
+          }}
+          onAbrirFluxo={abrirDoLote}
         />
       </div>
     );
@@ -559,6 +702,24 @@ export default function RecebimentoPage() {
       <>
         <div className="space-y-4">
           <TituloPagina titulo="Recebimento" />
+          {abertosLote > 0 && (
+            <button
+              type="button"
+              className="card flex w-full items-center gap-3 border-2 border-destaque bg-destaque-clara p-4 text-left transition-colors hover:opacity-95"
+              onClick={() => setModoLote(true)}
+            >
+              <FileStack size={28} className="shrink-0 text-destaque" />
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-lg font-bold text-primaria-escura">A conciliar</span>
+                  <Badge cor="laranja">{abertosLote}</Badge>
+                </span>
+                <span className="block text-sm text-slate-700">
+                  Arquivos do lote ainda pendentes — salvos neste navegador até conciliar.
+                </span>
+              </span>
+            </button>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <button
             className="card flex items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara"
@@ -593,6 +754,18 @@ export default function RecebimentoPage() {
               <span className="block text-lg font-bold">Importar NFS-e (PDF)</span>
               <span className="block text-sm text-slate-600">
                 Nota de serviço da prefeitura — Anota AI, software, etc. Gera título boleto ou PIX, sem estoque.
+              </span>
+            </span>
+          </button>
+          <button
+            className="card flex items-center gap-3 border-2 border-dashed border-primaria p-5 text-left transition-colors hover:bg-primaria-clara sm:col-span-2"
+            onClick={() => setModoLote(true)}
+          >
+            <FileStack size={32} className="shrink-0 text-primaria" />
+            <span>
+              <span className="block text-lg font-bold">Importar lote (e-mail)</span>
+              <span className="block text-sm text-slate-600">
+                Vários XMLs, PDFs e fotos de uma vez — classifica, você confere e abre o fluxo certo.
               </span>
             </span>
           </button>

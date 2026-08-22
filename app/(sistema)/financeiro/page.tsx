@@ -59,6 +59,7 @@ import {
   mascararLinhaDigitavel,
   valorValidadoComoMoeda,
 } from "@/lib/domain/importar-boleto-ui";
+import { montarResumoFilasConcilicaoNfeBoleto } from "@/lib/domain/concilicao-nfe-boleto";
 import {
   alternarCodigoAberto,
   acoesPagamentoDisponiveisNoLayout,
@@ -419,7 +420,7 @@ export default function FinanceiroPage() {
   const handoffLoteProcessado = useRef<string | null>(null);
   const [itemLoteBoletoId, setItemLoteBoletoId] = useState<string | null>(null);
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
-  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas">("boletos");
+  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas" | "conciliacao">("boletos");
   const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
   const [buscaConta, setBuscaConta] = useState("");
   const [filtroStatusConta, setFiltroStatusConta] = useState<StatusContaPagar | "todos">("todos");
@@ -694,6 +695,7 @@ export default function FinanceiroPage() {
   const boletosPendentesAgenda = boletosAtivos.filter(
     (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
   );
+  const filasConcilicaoNfe = useMemo(() => montarResumoFilasConcilicaoNfeBoleto(db), [db]);
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
@@ -1564,9 +1566,165 @@ export default function FinanceiroPage() {
         >
           Notas fiscais
         </button>
+        <button
+          type="button"
+          className={`btn-secundario inline-flex items-center gap-2 ${
+            abaFinanceira === "conciliacao" ? "border-primaria bg-primaria-clara text-primaria" : ""
+          }`}
+          onClick={() => setAbaFinanceira("conciliacao")}
+        >
+          Conciliação NF-e × boleto
+          {(filasConcilicaoNfe.totalParcelas > 0 || filasConcilicaoNfe.totalDocumentos > 0) && (
+            <Badge cor="laranja">
+              {filasConcilicaoNfe.totalParcelas + filasConcilicaoNfe.totalDocumentos}
+            </Badge>
+          )}
+        </button>
       </div>
 
-      {abaFinanceira === "boletos" ? (
+      {abaFinanceira === "conciliacao" ? (
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <h2>Conciliação NF-e × boleto</h2>
+            <p className="text-sm text-slate-600">
+              Duas filas sobre os mesmos cadastros — sem banco duplicado. À esquerda: parcelas da nota
+              ainda sem PDF/linha conferido. À direita: documentos importados ainda sem vínculo
+              confirmado. Isso é diferente de <strong>Aguardando conciliação</strong> na agenda
+              (= pagamento já informado).
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Card className="py-3">
+              <p className="rotulo">Parcelas sem boleto conferido</p>
+              <p className="text-2xl font-bold text-destaque">{filasConcilicaoNfe.totalParcelas}</p>
+              <p className="text-sm text-slate-600">{moeda(filasConcilicaoNfe.valorParcelasPendentes)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="rotulo">Documentos sem vínculo</p>
+              <p className="text-2xl font-bold text-blue-700">{filasConcilicaoNfe.totalDocumentos}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="rotulo">Notas com pendência</p>
+              <p className="text-2xl font-bold text-primaria-escura">{filasConcilicaoNfe.totalNotas}</p>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <section className="space-y-3">
+              <h3 className="text-base font-bold">Parcelas aguardando documento</h3>
+              {filasConcilicaoNfe.parcelas.length === 0 ? (
+                <Vazio mensagem="Nenhuma parcela aguardando PDF/linha do boleto." />
+              ) : (
+                filasConcilicaoNfe.parcelas.map((item) => (
+                  <Card key={item.boleto.id} className="space-y-2 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-bold">{item.fornecedorNome}</p>
+                        <p className="text-sm text-slate-600">
+                          NF-e {item.nota?.numero ?? "s/n"} · Parcela {item.boleto.numero_parcela ?? "—"} ·{" "}
+                          {moeda(item.boleto.valor)}
+                        </p>
+                        <p className="text-sm text-slate-600">Vence {dataBR(item.boleto.vencimento)}</p>
+                      </div>
+                      <Badge cor="laranja">{item.rotuloMotivo}</Badge>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-primario"
+                      onClick={() => abrirImportarBoleto(item.boleto.id)}
+                    >
+                      <Upload size={16} /> Importar boleto desta parcela
+                    </button>
+                  </Card>
+                ))
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-base font-bold">Documentos aguardando NF-e</h3>
+              {filasConcilicaoNfe.documentos.length === 0 ? (
+                <Vazio mensagem="Nenhum documento de boleto pendente de vínculo." />
+              ) : (
+                filasConcilicaoNfe.documentos.map((item) => (
+                  <Card key={item.documento.id} className="space-y-2 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-bold" title={item.documento.nome_arquivo}>
+                          {item.documento.nome_arquivo}
+                        </p>
+                        <p className="text-sm text-slate-600">
+                          {item.fornecedorNome ?? "Fornecedor ainda não identificado"}
+                          {item.nota ? ` · NF-e ${item.nota.numero}` : ""}
+                          {item.boleto ? ` · Parcela ${item.boleto.numero_parcela ?? "—"}` : ""}
+                        </p>
+                        {item.documento.resultado_confronto && (
+                          <p className="text-xs text-slate-500">
+                            Confronto: {item.documento.resultado_confronto.replace(/_/g, " ")}
+                          </p>
+                        )}
+                      </div>
+                      <Badge cor={item.motivo === "confronto_bloqueado" ? "vermelho" : "azul"}>
+                        {item.rotuloMotivo}
+                      </Badge>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      onClick={() =>
+                        abrirImportarBoleto(item.boleto?.id ?? item.documento.boleto_id ?? undefined)
+                      }
+                    >
+                      <Upload size={16} /> Reimportar / concluir vínculo
+                    </button>
+                  </Card>
+                ))
+              )}
+            </section>
+          </div>
+
+          <section className="space-y-3">
+            <h3 className="text-base font-bold">Notas com boleto ainda não conferido</h3>
+            {filasConcilicaoNfe.notas.length === 0 ? (
+              <Vazio mensagem="Todas as notas com parcela já têm boleto conferido (ou não têm parcela)." />
+            ) : (
+              filasConcilicaoNfe.notas.map((item) => (
+                <Card key={item.nota.id} className="space-y-2 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-bold">
+                        NF-e {item.nota.numero} · {item.fornecedorNome}
+                      </p>
+                      <p className="text-sm text-slate-600">
+                        {item.quantidadePendentes} parcela
+                        {item.quantidadePendentes === 1 ? "" : "s"} · {moeda(item.valorPendente)}
+                      </p>
+                    </div>
+                    <Badge cor="laranja">pendente</Badge>
+                  </div>
+                  <ul className="space-y-1 text-sm text-slate-700">
+                    {item.parcelasPendentes.map((parcela) => (
+                      <li key={parcela.id} className="flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          Parcela {parcela.numero_parcela ?? "—"} · {moeda(parcela.valor)} · vence{" "}
+                          {dataBR(parcela.vencimento)}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-secundario text-sm"
+                          onClick={() => abrirImportarBoleto(parcela.id)}
+                        >
+                          Importar
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              ))
+            )}
+          </section>
+        </div>
+      ) : abaFinanceira === "boletos" ? (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2>Boletos a vencer</h2>
@@ -1681,9 +1839,12 @@ export default function FinanceiroPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="rotulo text-blue-700">Aguardando conciliação</p>
+              <p className="rotulo text-blue-700">Aguardando conciliação bancária</p>
+              <p className="text-xs text-slate-500">
+                Pagamento já informado no app — não confundir com a aba Conciliação NF-e × boleto.
+              </p>
               {boletosAguardandoConciliacao.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto aguardando conciliação." />
+                <Vazio mensagem="Nenhum boleto com pagamento informado aguardando baixa bancária." />
               ) : (
                 [...boletosAguardandoConciliacao]
                   .sort((a, b) => a.vencimento.localeCompare(b.vencimento))

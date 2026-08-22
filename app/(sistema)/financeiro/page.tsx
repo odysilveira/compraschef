@@ -14,7 +14,6 @@ import {
   Copy,
   Eye,
   EyeOff,
-  Link2,
   Lock,
   Phone,
   Plus,
@@ -60,7 +59,6 @@ import {
   mascararLinhaDigitavel,
   valorValidadoComoMoeda,
 } from "@/lib/domain/importar-boleto-ui";
-import { listarBoletosLoteAguardandoVinculo, montarResumoFilasConferenciaNfeBoleto } from "@/lib/domain/conferencia-nfe-boleto";
 import {
   alternarCodigoAberto,
   acoesPagamentoDisponiveisNoLayout,
@@ -81,12 +79,9 @@ import {
   type EstadoCodigoAmpliado,
 } from "@/lib/domain/codigo-pagamento-ui";
 import {
-  flushPersistenciaFilaLote,
   hidratarFilaLoteDoIdb,
   marcarItemConcluido,
-  marcarItemEmAndamento,
   obterArquivoFilaAsync,
-  useFilaLoteRecebimento,
 } from "@/lib/domain/lote-recebimento-store";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { cnpjBR, dataBR, diasAte, moeda } from "@/lib/format";
@@ -421,17 +416,12 @@ function BadgeStatus({ boleto }: { boleto: Boleto }) {
 export default function FinanceiroPage() {
   const db = useDB();
   const { papel } = usePapel();
-  const filaLote = useFilaLoteRecebimento();
   const handoffLoteProcessado = useRef<string | null>(null);
   const [itemLoteBoletoId, setItemLoteBoletoId] = useState<string | null>(null);
-  const [previewArquivoLote, setPreviewArquivoLote] = useState<{
-    url: string;
-    nome: string;
-    mime: string;
-  } | null>(null);
-  const [previewDocumentoId, setPreviewDocumentoId] = useState<string | null>(null);
+
+
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
-  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas" | "conferencia">("boletos");
+  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas">("boletos");
   const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
   const [buscaConta, setBuscaConta] = useState("");
   const [filtroStatusConta, setFiltroStatusConta] = useState<StatusContaPagar | "todos">("todos");
@@ -706,85 +696,14 @@ export default function FinanceiroPage() {
   const boletosPendentesAgenda = boletosAtivos.filter(
     (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
   );
-  const filasConferenciaNfe = useMemo(() => montarResumoFilasConferenciaNfeBoleto(db), [db]);
-  const boletosLotePendentes = useMemo(() => listarBoletosLoteAguardandoVinculo(filaLote), [filaLote]);
-  const totalPendenciasConferencia =
-    filasConferenciaNfe.totalParcelas + filasConferenciaNfe.totalDocumentos + boletosLotePendentes.length;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const aba = new URLSearchParams(window.location.search).get("aba");
-    // "conciliacao" legado → mesma aba de conferência NF-e × boleto
-    if (aba === "conferencia" || aba === "conciliacao") setAbaFinanceira("conferencia");
-    else if (aba === "contas") setAbaFinanceira("contas");
+    if (aba === "contas") setAbaFinanceira("contas");
     else if (aba === "notas") setAbaFinanceira("notas");
-    else if (aba === "boletos") setAbaFinanceira("boletos");
+    else setAbaFinanceira("boletos");
   }, []);
-
-  function abrirAbaConferencia() {
-    setAbaFinanceira("conferencia");
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      url.searchParams.set("aba", "conferencia");
-      window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
-    }
-  }
-
-  function levarBoletoLoteAoImportar(itemId: string) {
-    void (async () => {
-      marcarItemEmAndamento(itemId);
-      try {
-        await flushPersistenciaFilaLote();
-      } catch {
-        // memória local segue
-      }
-      const arquivo = await obterArquivoFilaAsync(itemId);
-      if (!arquivo) {
-        setMensagemReceberBoleto(
-          "Não achei o PDF do lote neste navegador. Volte em Recebimento → A conciliar."
-        );
-        return;
-      }
-      setAbaFinanceira("conferencia");
-      setItemLoteBoletoId(itemId);
-      setBoletoImportacaoAlvoId(null);
-      setModalImportarBoletoAberto(true);
-      setEstadoImportacaoBoleto(novoEstadoImportacaoBoleto());
-      setMensagemImportacaoBoleto(null);
-      setJustificativaImportacao("");
-      setParcelaSelecionadaMultipla("");
-      setMostrarLinhaCompletaImportada(false);
-      setMostrarDetalhesTecnicos(false);
-      setMensagemReceberBoleto(`Analisando boleto do lote: ${arquivo.name}`);
-      await analisarImportacaoBoleto(arquivo);
-    })();
-  }
-
-  async function verArquivoLote(itemId: string) {
-    const arquivo = await obterArquivoFilaAsync(itemId);
-    if (!arquivo) {
-      setMensagemReceberBoleto(
-        "Não achei o arquivo do lote neste navegador. Volte em Recebimento → A conciliar."
-      );
-      return;
-    }
-    if (previewArquivoLote?.url) URL.revokeObjectURL(previewArquivoLote.url);
-    const url = URL.createObjectURL(arquivo);
-    setPreviewArquivoLote({
-      url,
-      nome: arquivo.name,
-      mime: arquivo.type || "application/pdf",
-    });
-  }
-
-  function fecharPreviewArquivoLote() {
-    if (previewArquivoLote?.url) URL.revokeObjectURL(previewArquivoLote.url);
-    setPreviewArquivoLote(null);
-  }
-
-  const previewDocumento = previewDocumentoId
-    ? db.documentos_boleto.find((d) => d.id === previewDocumentoId) ?? null
-    : null;
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
@@ -1210,7 +1129,7 @@ export default function FinanceiroPage() {
     const id = params.get("importarLoteBoleto");
     if (!id || handoffLoteProcessado.current === id) return;
     handoffLoteProcessado.current = id;
-    window.history.replaceState({}, "", "/financeiro?aba=conferencia");
+    window.history.replaceState({}, "", "/financeiro?aba=boletos");
 
     void (async () => {
       await hidratarFilaLoteDoIdb();
@@ -1221,7 +1140,7 @@ export default function FinanceiroPage() {
         );
         return;
       }
-      setAbaFinanceira("conferencia");
+      setAbaFinanceira("boletos");
       setItemLoteBoletoId(id);
       setBoletoImportacaoAlvoId(null);
       setModalImportarBoletoAberto(true);
@@ -1656,264 +1575,10 @@ export default function FinanceiroPage() {
         >
           Notas fiscais
         </button>
-        <button
-          type="button"
-          className={`btn-secundario inline-flex items-center gap-2 ${
-            abaFinanceira === "conferencia" ? "border-primaria bg-primaria-clara text-primaria" : ""
-          }`}
-          onClick={abrirAbaConferencia}
-        >
-          Conferência NF-e × boleto
-          {totalPendenciasConferencia > 0 && <Badge cor="laranja">{totalPendenciasConferencia}</Badge>}
-        </button>
+
       </div>
 
-      {abaFinanceira === "conferencia" ? (
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <h2>Conferência NF-e × boleto</h2>
-            <p className="text-sm text-slate-600">
-              Conferência = vincular o PDF/linha à parcela da nota.{" "}
-              <strong>Conciliação</strong> é só bancária (pagamento já informado na agenda).
-            </p>
-          </div>
-
-          <Card className="space-y-2 border-2 border-primaria/30 bg-primaria-clara/40 p-4">
-            <p className="font-bold text-primaria-escura">Como dizer que boleto e NF-e são da mesma compra</p>
-            <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
-              <li>
-                À <strong>direita</strong>, abra o boleto do lote → <strong>Ver boleto</strong> (confira) →{" "}
-                <strong>Reconhecer e vincular à NF-e</strong>.
-              </li>
-              <li>
-                O sistema lê a linha digitável e <strong>procura sozinho</strong> a NF-e/parcela (valor,
-                vencimento, chave…).
-              </li>
-              <li>
-                No modal, revise o resultado e clique em <strong>Confirmar vínculo</strong> — aí os dois
-                ficam da mesma compra.
-              </li>
-            </ol>
-            <p className="text-sm text-slate-600">
-              A lista da esquerda é a “fila de espera” das parcelas sem PDF. Não é para casar à mão
-              lado a lado: use o reconhecimento do boleto. Só use{" "}
-              <strong>Importar boleto desta parcela</strong> se o PDF ainda não estiver na fila da
-              direita.
-            </p>
-          </Card>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <Card className="py-3">
-              <p className="rotulo">Parcelas sem boleto conferido</p>
-              <p className="text-2xl font-bold text-destaque">{filasConferenciaNfe.totalParcelas}</p>
-              <p className="text-sm text-slate-600">{moeda(filasConferenciaNfe.valorParcelasPendentes)}</p>
-            </Card>
-            <Card className="py-3">
-              <p className="rotulo">Documentos sem vínculo</p>
-              <p className="text-2xl font-bold text-blue-700">{filasConferenciaNfe.totalDocumentos}</p>
-            </Card>
-            <Card className="py-3">
-              <p className="rotulo">Boletos na fila do lote</p>
-              <p className="text-2xl font-bold text-primaria">{boletosLotePendentes.length}</p>
-            </Card>
-            <Card className="py-3">
-              <p className="rotulo">Notas com pendência</p>
-              <p className="text-2xl font-bold text-primaria-escura">{filasConferenciaNfe.totalNotas}</p>
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <section className="space-y-3">
-              <h3 className="text-base font-bold">Parcelas aguardando documento</h3>
-              {filasConferenciaNfe.parcelas.length === 0 ? (
-                <Vazio mensagem="Nenhuma parcela aguardando PDF/linha do boleto." />
-              ) : (
-                filasConferenciaNfe.parcelas.map((item) => (
-                  <Card key={item.boleto.id} className="space-y-2 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="font-bold">{item.fornecedorNome}</p>
-                        <p className="text-sm text-slate-600">
-                          NF-e {item.nota?.numero ?? "s/n"} · Parcela {item.boleto.numero_parcela ?? "—"} ·{" "}
-                          {moeda(item.boleto.valor)}
-                        </p>
-                        <p className="text-sm text-slate-600">Vence {dataBR(item.boleto.vencimento)}</p>
-                      </div>
-                      <Badge cor="laranja">{item.rotuloMotivo}</Badge>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {item.nota && (
-                        <button
-                          type="button"
-                          className="btn-secundario"
-                          onClick={() => abrirDetalhesNfe(item.nota!.id)}
-                        >
-                          <Eye size={16} /> Ver NF-e
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn-primario"
-                        onClick={() => abrirImportarBoleto(item.boleto.id)}
-                      >
-                        <Upload size={16} /> Importar boleto desta parcela
-                      </button>
-                    </div>
-                  </Card>
-                ))
-              )}
-            </section>
-
-            <section className="space-y-3">
-              <h3 className="text-base font-bold">Documentos e lote aguardando NF-e</h3>
-
-              {boletosLotePendentes.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-slate-700">Da fila A conciliar (Recebimento)</p>
-                  {boletosLotePendentes.map((item) => (
-                    <Card key={item.id} className="space-y-2 border border-destaque/40 p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate font-bold" title={item.nome}>
-                            {item.nome}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {(item.tamanho / 1024).toFixed(1)} KB
-                            {item.detalhe ? ` · ${item.detalhe}` : ""}
-                          </p>
-                        </div>
-                        <Badge cor="laranja">lote</Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="btn-secundario"
-                          onClick={() => void verArquivoLote(item.id)}
-                        >
-                          <Eye size={16} /> Ver boleto
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-primario"
-                          onClick={() => levarBoletoLoteAoImportar(item.id)}
-                        >
-                          <Link2 size={16} /> Reconhecer e vincular à NF-e
-                        </button>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              )}
-
-              {filasConferenciaNfe.documentos.length === 0 && boletosLotePendentes.length === 0 ? (
-                <Vazio mensagem="Nenhum documento de boleto pendente de vínculo." />
-              ) : (
-                filasConferenciaNfe.documentos.map((item) => (
-                  <Card key={item.documento.id} className="space-y-2 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate font-bold" title={item.documento.nome_arquivo}>
-                          {item.documento.nome_arquivo}
-                        </p>
-                        <p className="text-sm text-slate-600">
-                          {item.fornecedorNome ?? "Fornecedor ainda não identificado"}
-                          {item.nota ? ` · NF-e ${item.nota.numero}` : ""}
-                          {item.boleto ? ` · Parcela ${item.boleto.numero_parcela ?? "—"}` : ""}
-                        </p>
-                        {item.documento.resultado_confronto && (
-                          <p className="text-xs text-slate-500">
-                            Confronto: {item.documento.resultado_confronto.replace(/_/g, " ")}
-                          </p>
-                        )}
-                      </div>
-                      <Badge cor={item.motivo === "confronto_bloqueado" ? "vermelho" : "azul"}>
-                        {item.rotuloMotivo}
-                      </Badge>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="btn-secundario"
-                        onClick={() => setPreviewDocumentoId(item.documento.id)}
-                      >
-                        <Eye size={16} /> Ver dados
-                      </button>
-                      {item.nota && (
-                        <button
-                          type="button"
-                          className="btn-secundario"
-                          onClick={() => abrirDetalhesNfe(item.nota!.id)}
-                        >
-                          <Eye size={16} /> Ver NF-e
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn-secundario"
-                        onClick={() =>
-                          abrirImportarBoleto(item.boleto?.id ?? item.documento.boleto_id ?? undefined)
-                        }
-                      >
-                        <Upload size={16} /> Reimportar / concluir vínculo
-                      </button>
-                    </div>
-                  </Card>
-                ))
-              )}
-            </section>
-          </div>
-
-          <section className="space-y-3">
-            <h3 className="text-base font-bold">Notas com boleto ainda não conferido</h3>
-            {filasConferenciaNfe.notas.length === 0 ? (
-              <Vazio mensagem="Todas as notas com parcela já têm boleto conferido (ou não têm parcela)." />
-            ) : (
-              filasConferenciaNfe.notas.map((item) => (
-                <Card key={item.nota.id} className="space-y-2 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="font-bold">
-                        NF-e {item.nota.numero} · {item.fornecedorNome}
-                      </p>
-                      <p className="text-sm text-slate-600">
-                        {item.quantidadePendentes} parcela
-                        {item.quantidadePendentes === 1 ? "" : "s"} · {moeda(item.valorPendente)}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="btn-secundario text-sm"
-                        onClick={() => abrirDetalhesNfe(item.nota.id)}
-                      >
-                        <Eye size={16} /> Ver NF-e
-                      </button>
-                      <Badge cor="laranja">pendente</Badge>
-                    </div>
-                  </div>
-                  <ul className="space-y-1 text-sm text-slate-700">
-                    {item.parcelasPendentes.map((parcela) => (
-                      <li key={parcela.id} className="flex flex-wrap items-center justify-between gap-2">
-                        <span>
-                          Parcela {parcela.numero_parcela ?? "—"} · {moeda(parcela.valor)} · vence{" "}
-                          {dataBR(parcela.vencimento)}
-                        </span>
-                        <button
-                          type="button"
-                          className="btn-secundario text-sm"
-                          onClick={() => abrirImportarBoleto(parcela.id)}
-                        >
-                          Importar
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              ))
-            )}
-          </section>
-        </div>
-      ) : abaFinanceira === "boletos" ? (
+      {abaFinanceira === "boletos" ? (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2>Boletos a vencer</h2>
@@ -1921,25 +1586,6 @@ export default function FinanceiroPage() {
               <Upload size={18} /> Importar boleto
             </button>
           </div>
-
-          {totalPendenciasConferencia > 0 && (
-            <button
-              type="button"
-              className="card flex w-full items-center justify-between gap-3 border-2 border-destaque bg-destaque-clara p-4 text-left transition-colors hover:opacity-95"
-              onClick={abrirAbaConferencia}
-            >
-              <span>
-                <span className="block text-lg font-bold text-primaria-escura">
-                  {totalPendenciasConferencia} pendência
-                  {totalPendenciasConferencia === 1 ? "" : "s"} de conferência NF-e × boleto
-                </span>
-                <span className="block text-sm text-slate-700">
-                  Parcelas sem PDF, documentos sem vínculo ou boletos na fila do lote.
-                </span>
-              </span>
-              <Badge cor="laranja">{totalPendenciasConferencia}</Badge>
-            </button>
-          )}
 
           {mensagemReceberBoleto && (
             <div className="rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
@@ -2049,7 +1695,7 @@ export default function FinanceiroPage() {
             <div className="space-y-2">
               <p className="rotulo text-blue-700">Aguardando conciliação bancária</p>
               <p className="text-xs text-slate-500">
-                Pagamento já informado no app — não confundir com a aba Conferência NF-e × boleto.
+                Pagamento já informado no app — aguardando baixa bancária.
               </p>
               {boletosAguardandoConciliacao.length === 0 ? (
                 <Vazio mensagem="Nenhum boleto com pagamento informado aguardando baixa bancária." />
@@ -2727,69 +2373,6 @@ export default function FinanceiroPage() {
               </button>
             </div>
           </form>
-        )}
-      </Modal>
-
-      <Modal
-        aberto={previewArquivoLote !== null}
-        titulo={previewArquivoLote?.nome ?? "Boleto"}
-        onFechar={fecharPreviewArquivoLote}
-      >
-        {previewArquivoLote && (
-          <div className="space-y-3">
-            {previewArquivoLote.mime.startsWith("image/") ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={previewArquivoLote.url}
-                alt={previewArquivoLote.nome}
-                className="max-h-[70vh] w-full object-contain bg-slate-100"
-              />
-            ) : (
-              <iframe
-                title={previewArquivoLote.nome}
-                src={previewArquivoLote.url}
-                className="h-[70vh] w-full rounded-card border border-slate-200 bg-slate-100"
-              />
-            )}
-            <p className="text-sm text-slate-600">Arquivo da fila A conciliar — feche para voltar à conferência.</p>
-          </div>
-        )}
-      </Modal>
-
-      <Modal
-        aberto={previewDocumento !== null}
-        titulo={previewDocumento?.nome_arquivo ?? "Documento do boleto"}
-        onFechar={() => setPreviewDocumentoId(null)}
-      >
-        {previewDocumento && (
-          <div className="space-y-3">
-            <Card className="space-y-2 bg-slate-50 py-3">
-              <p className="text-sm text-slate-700">Arquivo: {previewDocumento.nome_arquivo}</p>
-              <p className="text-sm text-slate-700">
-                Linha:{" "}
-                {previewDocumento.linha_informada
-                  ? mascararLinhaDigitavel(previewDocumento.linha_informada, true)
-                  : "—"}
-              </p>
-              <p className="text-sm text-slate-700">
-                Confronto: {previewDocumento.resultado_confronto?.replace(/_/g, " ") ?? "—"}
-              </p>
-              {previewDocumento.divergencias && previewDocumento.divergencias.length > 0 && (
-                <div className="text-sm text-erro">
-                  {previewDocumento.divergencias.map((d, i) => (
-                    <p key={`${d}-${i}`}>{d}</p>
-                  ))}
-                </div>
-              )}
-              <p className="text-xs text-slate-500">
-                O PDF original não fica salvo neste registro — use a fila do lote ou reimporte para ver a
-                imagem.
-              </p>
-            </Card>
-            <button type="button" className="btn-secundario" onClick={() => setPreviewDocumentoId(null)}>
-              Fechar
-            </button>
-          </div>
         )}
       </Modal>
 

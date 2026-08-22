@@ -174,7 +174,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     } catch {
       // segue mesmo se o IDB falhar — a memória do módulo ainda tem a fila
     }
-    router.push(`/financeiro?importarLoteBoleto=${encodeURIComponent(id)}&aba=conferencia`);
+    router.push(`/financeiro?importarLoteBoleto=${encodeURIComponent(id)}&aba=boletos`);
   }
 
   /** OCR/leitura de novo no arquivo já salvo na fila (sem rebaixar). */
@@ -218,8 +218,8 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
             <h2 className="text-lg font-bold">Importar lote (e-mail)</h2>
             <p className="text-sm text-slate-600">
               Classifique vários arquivos. A fila <strong>A conciliar</strong> fica salva neste
-              navegador (IndexedDB): você pode cadastrar fornecedor/produto, dar F5 e voltar aos
-              arquivos restantes.
+              navegador: boleto → Financeiro; XML/DANFE/NFS-e → abrir neste fluxo. Você pode
+              cadastrar fornecedor/produto, dar F5 e voltar aos arquivos restantes.
             </p>
           </div>
         </div>

@@ -1,17 +1,17 @@
-/** Captura de DANFE no navegador: PDF (texto/OCR) e foto (OCR). */
+/** Captura de DANFE no navegador: PDF (texto/OCR), XML da NF-e e foto (OCR). */
 
 import { extrairTextoPdfBrowser } from "./folha-recibo-pdf-browser";
 import { configurarWorkerPdfjs } from "./pdfjs-worker";
 import { extrairDadosDanfeDoTexto, type DadosDanfeExtraidos } from "./danfe-extracao";
 import { identificarNotaPorTexto, type NotaIdentificadaDanfe } from "./danfe-identificacao";
 
-export type OrigemIdentificacaoDanfe = "pdf_texto" | "pdf_ocr" | "foto_ocr" | "qr";
+export type OrigemIdentificacaoDanfe = "xml_nfe" | "pdf_texto" | "pdf_ocr" | "foto_ocr" | "qr";
 
 export interface ResultadoCapturaDanfe {
   nota: NotaIdentificadaDanfe | null;
   origem?: OrigemIdentificacaoDanfe;
   detalhe?: string;
-  /** Extração ampliada (emitente, itens) quando o PDF tem texto. */
+  /** Extração ampliada (emitente, itens e conferência) quando houver texto/XML/OCR legível. */
   dados?: DadosDanfeExtraidos;
 }
 
@@ -88,20 +88,27 @@ export async function renderizarPaginaPdfParaCanvas(buffer: ArrayBuffer, pagina 
 }
 
 /**
- * Identifica a DANFE a partir de PDF (texto → OCR da 1ª página) ou foto (OCR).
+ * Identifica a DANFE a partir de XML, PDF (texto → OCR da 1ª página) ou foto (OCR).
  * Só aceita chave com DV válido no PDF/OCR (evita chave falsa que pedia arquivo de novo).
  */
 export async function identificarDanfeDeArquivo(arquivo: File): Promise<ResultadoCapturaDanfe> {
   const nome = arquivo.name.toLowerCase();
+  const ehXml = arquivo.type.includes("xml") || nome.endsWith(".xml");
   const ehPdf = arquivo.type === "application/pdf" || nome.endsWith(".pdf");
+
+  if (ehXml) {
+    const xml = await arquivo.text();
+    const dados = extrairDadosDanfeDoTexto(xml, "xml_nfe");
+    return { nota: dados.nota, origem: "xml_nfe", dados };
+  }
 
   if (ehPdf) {
     const buffer = await arquivo.arrayBuffer();
     let textoPdf = "";
     try {
       textoPdf = await extrairTextoPdfBrowser(buffer);
-      const dados = extrairDadosDanfeDoTexto(textoPdf);
-      if (dados.nota) {
+      const dados = extrairDadosDanfeDoTexto(textoPdf, "pdf_texto");
+      if (dados.nota || dados.itens.length > 0) {
         return { nota: dados.nota, origem: "pdf_texto", dados };
       }
     } catch {
@@ -113,7 +120,7 @@ export async function identificarDanfeDeArquivo(arquivo: File): Promise<Resultad
       const ocrLivre = await ocrImagemTextoCompleto(canvas).catch(() => "");
       const ocrDigitos = await ocrImagemDataUrl(canvas).catch(() => "");
       const textoCombinado = `${textoPdf}\n${ocrLivre}\n${ocrDigitos}`;
-      const dados = extrairDadosDanfeDoTexto(textoCombinado);
+      const dados = extrairDadosDanfeDoTexto(textoCombinado, "ocr");
       const notaOcr =
         dados.nota ||
         identificarNotaPorTexto(ocrLivre) ||
@@ -141,21 +148,23 @@ export async function identificarDanfeDeArquivo(arquivo: File): Promise<Resultad
   }
 
   if (!arquivo.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif)$/i.test(nome)) {
-    return { nota: null, detalhe: "Envie um PDF da DANFE ou uma foto (JPG/PNG)." };
+    return { nota: null, detalhe: "Envie XML, PDF da DANFE ou uma foto (JPG/PNG)." };
   }
 
   try {
     const dataUrl = await arquivoParaDataUrl(arquivo);
     const ocrLivre = await ocrImagemTextoCompleto(dataUrl).catch(() => "");
     const ocrDigitos = ocrLivre ? "" : await ocrImagemDataUrl(dataUrl);
-    const nota = identificarNotaPorTexto(ocrLivre || ocrDigitos);
-    if (nota) {
-      return { nota, origem: "foto_ocr" };
-    }
+    const texto = ocrLivre || ocrDigitos;
+    const dados = extrairDadosDanfeDoTexto(texto, "ocr");
+    const nota = dados.nota || identificarNotaPorTexto(texto);
     return {
-      nota: null,
+      nota,
       origem: "foto_ocr",
-      detalhe: "OCR concluído, mas não encontrei a chave válida. Enquadre a chave ou o QR com boa luz.",
+      dados: dados.origemTexto ? { ...dados, nota } : undefined,
+      detalhe: nota
+        ? undefined
+        : "OCR concluído, mas não encontrei a chave válida. Enquadre a chave ou o QR com boa luz.",
     };
   } catch (erro) {
     return {

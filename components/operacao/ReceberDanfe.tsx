@@ -22,6 +22,7 @@ import { estoqueAtual, mutate, nomeFornecedor, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
 import { criarLote } from "@/lib/domain/estoque";
 import { identificarDanfeDeArquivo } from "@/lib/domain/danfe-captura-browser";
+import type { ResultadoItensDanfe, StatusVinculoItemDanfe } from "@/lib/domain/danfe-itens";
 import type { NotaIdentificadaDanfe } from "@/lib/domain/danfe-identificacao";
 import { moeda, qtd } from "@/lib/format";
 import type { DB, Fornecedor, StatusRecebimento } from "@/lib/types";
@@ -31,9 +32,14 @@ interface ItemConferencia {
   indice: number;
   codigo: string;
   descricao: string;
+  ncm?: string;
+  cfop?: string;
   unidade: string;
   quantidade: number;
   valorUnitario?: number;
+  valorTotal?: number;
+  confianca?: number;
+  avisos?: string[];
 }
 
 interface DecisaoItem {
@@ -41,6 +47,7 @@ interface DecisaoItem {
   quantidade: number;
   validade: string;
   produtoId: string;
+  statusVinculo: StatusVinculoItemDanfe;
 }
 
 function hojeMais(dias: number): string {
@@ -100,6 +107,7 @@ export default function ReceberDanfe({
   const [notaId, setNotaId] = useState<NotaIdentificadaDanfe | null>(null);
   const [nomeEmitente, setNomeEmitente] = useState("");
   const [itens, setItens] = useState<ItemConferencia[]>([]);
+  const [resultadoItens, setResultadoItens] = useState<ResultadoItensDanfe | null>(null);
   const [decisoes, setDecisoes] = useState<Record<number, DecisaoItem>>({});
   const [fornecedorForm, setFornecedorForm] = useState<Fornecedor | null>(null);
   const [produtoForm, setProdutoForm] = useState<{
@@ -145,13 +153,20 @@ export default function ReceberDanfe({
         }
         setNotaId(resultado.nota);
         setNomeEmitente(resultado.dados?.nomeEmitente ?? "");
-        const extraidos: ItemConferencia[] = (resultado.dados?.itens ?? []).map((it, i) => ({
+        setResultadoItens(resultado.dados?.itensConferencia ?? null);
+        const origemItens = resultado.dados?.itensConferencia?.itens ?? resultado.dados?.itens ?? [];
+        const extraidos: ItemConferencia[] = origemItens.map((it, i) => ({
           indice: i,
-          codigo: it.codigo,
+          codigo: "codigo" in it ? it.codigo : it.codigoFornecedor ?? "",
           descricao: it.descricao,
-          unidade: it.unidade,
-          quantidade: it.quantidade,
+          ncm: it.ncm,
+          cfop: it.cfop,
+          unidade: it.unidade ?? "",
+          quantidade: it.quantidade ?? 0,
           valorUnitario: it.valorUnitario,
+          valorTotal: it.valorTotal,
+          confianca: it.confianca,
+          avisos: it.avisos,
         }));
         setItens(extraidos);
         const fornId = db.fornecedores.find((f) => somenteDigitos(f.cnpj) === resultado.nota!.cnpj)?.id;
@@ -163,6 +178,7 @@ export default function ReceberDanfe({
             quantidade: item.quantidade,
             validade: hojeMais(produto?.validade_padrao_dias ?? 30),
             produtoId: produto?.id ?? "",
+            statusVinculo: produto?.id ? "sugerido" : "pendente",
           };
         }
         setDecisoes(inic);
@@ -200,6 +216,7 @@ export default function ReceberDanfe({
         quantidade: novoItemQtd,
         validade: hojeMais(30),
         produtoId: casarProduto(db, item, fornecedor?.id),
+        statusVinculo: casarProduto(db, item, fornecedor?.id) ? "sugerido" : "pendente",
       },
     }));
     setNovoItemDesc("");
@@ -270,7 +287,7 @@ export default function ReceberDanfe({
         });
       }
     });
-    alterar(produtoForm.indice, { produtoId, decisao: "pendente" });
+    alterar(produtoForm.indice, { produtoId, decisao: "pendente", statusVinculo: "produto_novo" });
     setProdutoForm(null);
   }
 
@@ -450,6 +467,28 @@ export default function ReceberDanfe({
             </Card>
           )}
 
+          {resultadoItens && (
+            <Card className="space-y-2 border border-amber-200 bg-amber-50">
+              <p className="text-sm font-semibold text-amber-900">Conferência humana dos itens da DANFE</p>
+              <div className="grid grid-cols-1 gap-2 text-sm text-amber-950 sm:grid-cols-2">
+                <p>Fonte: {resultadoItens.fonte === "xml_nfe" ? "XML da NF-e" : resultadoItens.fonte === "pdf_texto" ? "texto interno do PDF" : "OCR"}</p>
+                <p>Total dos itens: {moeda(resultadoItens.totalItensCalculado ?? 0)}</p>
+                <p>Total dos produtos da nota: {resultadoItens.totalProdutosNota !== undefined ? moeda(resultadoItens.totalProdutosNota) : "não encontrado"}</p>
+                <p>Divergência: {resultadoItens.divergenciaTotal !== undefined ? moeda(resultadoItens.divergenciaTotal) : "não calculada"}</p>
+              </div>
+              <p className="text-xs text-amber-900">
+                A extração só pré-preenche a conferência. OCR, PDF ou XML não confirmam recebimento nem movimentam estoque sem decisão humana.
+              </p>
+              {resultadoItens.avisosGerais.length > 0 && (
+                <ul className="list-disc space-y-1 pl-5 text-xs text-amber-900">
+                  {resultadoItens.avisosGerais.map((aviso) => (
+                    <li key={aviso}>{aviso}</li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          )}
+
           {itens.map((item) => {
             const dec = decisoes[item.indice];
             if (!dec) return null;
@@ -466,9 +505,25 @@ export default function ReceberDanfe({
                   <div className="min-w-0">
                     <p className="font-bold">{item.descricao}</p>
                     <p className="text-sm text-slate-600">
-                      {item.codigo} · {qtd(item.quantidade)} {item.unidade}
+                      {item.codigo || "sem código"} · {qtd(item.quantidade)} {item.unidade || "un"}
                       {item.valorUnitario !== undefined ? ` × ${moeda(item.valorUnitario)}` : ""}
+                      {item.valorTotal !== undefined ? ` · total ${moeda(item.valorTotal)}` : ""}
                     </p>
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                      {item.ncm && <span>NCM {item.ncm}</span>}
+                      {item.cfop && <span>CFOP {item.cfop}</span>}
+                      {item.confianca !== undefined && <span>Confiança {Math.round(item.confianca * 100)}%</span>}
+                      <span>
+                        Vínculo: {dec.statusVinculo === "sugerido" ? "sugerido" : dec.statusVinculo === "confirmado" ? "confirmado" : dec.statusVinculo === "produto_novo" ? "produto novo" : "pendente"}
+                      </span>
+                    </div>
+                    {item.avisos && item.avisos.length > 0 && (
+                      <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-amber-700">
+                        {item.avisos.map((aviso) => (
+                          <li key={aviso}>{aviso}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                   {confirmado && (
                     <Badge cor="verde">
@@ -491,6 +546,7 @@ export default function ReceberDanfe({
                       alterar(item.indice, {
                         produtoId: e.target.value,
                         validade: hojeMais(produto?.validade_padrao_dias ?? 30),
+                        statusVinculo: e.target.value ? "confirmado" : "pendente",
                       });
                     }}
                     disabled={recusado}

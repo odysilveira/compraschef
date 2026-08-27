@@ -1,28 +1,40 @@
 /**
- * Persistência IndexedDB da fila A conciliar (arquivos + metadados).
- * Só guarda itens abertos (pendente / em_andamento).
+ * Persistência IndexedDB da fila da Caixa de entrada (arquivos + tipo sugerido).
  */
 
-import type { TipoArquivoRecebimento } from "./classificar-arquivo-recebimento";
-import type { ItemFilaLote, StatusItemFilaLote } from "./lote-recebimento-fila";
+import type { TipoDestinoInbox } from "./inbox-entrada";
 
-const DB_NOME = "compraschef-lote-recebimento";
+const DB_NOME = "compraschef-caixa-entrada";
 const DB_VERSAO = 1;
 const STORE = "itens";
 
-export interface RegistroLoteIdb {
+export type StatusItemInbox = "pendente" | "em_andamento" | "concluido" | "descartado";
+
+export interface ItemFilaInbox {
   id: string;
   nome: string;
   tamanho: number;
-  tipo: TipoArquivoRecebimento;
-  status: StatusItemFilaLote;
+  tipo: TipoDestinoInbox;
+  status: StatusItemInbox;
+  detalhe?: string;
+}
+
+export interface RegistroInboxIdb {
+  id: string;
+  nome: string;
+  tamanho: number;
+  tipo: TipoDestinoInbox;
+  status: StatusItemInbox;
   detalhe?: string;
   mimeType: string;
   lastModified: number;
   blob: Blob;
 }
 
-export function arquivoParaRegistroIdb(item: ItemFilaLote, arquivo: File): RegistroLoteIdb {
+export function arquivoParaRegistroInboxIdb(
+  item: ItemFilaInbox,
+  arquivo: File
+): RegistroInboxIdb {
   return {
     id: item.id,
     nome: item.nome,
@@ -36,14 +48,14 @@ export function arquivoParaRegistroIdb(item: ItemFilaLote, arquivo: File): Regis
   };
 }
 
-export function registroIdbParaArquivo(registro: RegistroLoteIdb): File {
+export function registroInboxIdbParaArquivo(registro: RegistroInboxIdb): File {
   return new File([registro.blob], registro.nome, {
     type: registro.mimeType || "application/octet-stream",
     lastModified: registro.lastModified || Date.now(),
   });
 }
 
-export function registroIdbParaItem(registro: RegistroLoteIdb): ItemFilaLote {
+export function registroInboxIdbParaItem(registro: RegistroInboxIdb): ItemFilaInbox {
   return {
     id: registro.id,
     nome: registro.nome,
@@ -68,7 +80,7 @@ function abrirDb(): Promise<IDBDatabase> {
       }
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error("Falha ao abrir IndexedDB."));
+    req.onerror = () => reject(req.error ?? new Error("Falha ao abrir IndexedDB da inbox."));
   });
 }
 
@@ -79,19 +91,19 @@ function reqParaPromise<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
-export async function listarRegistrosLoteIdb(): Promise<RegistroLoteIdb[]> {
+export async function listarRegistrosInboxIdb(): Promise<RegistroInboxIdb[]> {
   const db = await abrirDb();
   try {
     const tx = db.transaction(STORE, "readonly");
     const store = tx.objectStore(STORE);
-    const todos = await reqParaPromise(store.getAll() as IDBRequest<RegistroLoteIdb[]>);
+    const todos = await reqParaPromise(store.getAll() as IDBRequest<RegistroInboxIdb[]>);
     return Array.isArray(todos) ? todos : [];
   } finally {
     db.close();
   }
 }
 
-export async function salvarRegistrosLoteIdb(registros: RegistroLoteIdb[]): Promise<void> {
+export async function salvarRegistrosInboxIdb(registros: RegistroInboxIdb[]): Promise<void> {
   const db = await abrirDb();
   try {
     const tx = db.transaction(STORE, "readwrite");
@@ -107,51 +119,39 @@ export async function salvarRegistrosLoteIdb(registros: RegistroLoteIdb[]): Prom
     }
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error ?? new Error("Falha ao gravar fila no IndexedDB."));
-      tx.onabort = () => reject(tx.error ?? new Error("Gravação da fila abortada."));
+      tx.onerror = () => reject(tx.error ?? new Error("Falha ao gravar inbox no IndexedDB."));
+      tx.onabort = () => reject(tx.error ?? new Error("Gravação da inbox abortada."));
     });
   } finally {
     db.close();
   }
 }
 
-export async function removerRegistroLoteIdb(id: string): Promise<void> {
+export async function removerRegistroInboxIdb(id: string): Promise<void> {
   const db = await abrirDb();
   try {
     const tx = db.transaction(STORE, "readwrite");
     tx.objectStore(STORE).delete(id);
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error ?? new Error("Falha ao remover item do IndexedDB."));
+      tx.onerror = () => reject(tx.error ?? new Error("Falha ao remover item da inbox."));
+      tx.onabort = () => reject(tx.error ?? new Error("Remoção abortada."));
     });
   } finally {
     db.close();
   }
 }
 
-export async function limparLoteIdb(): Promise<void> {
+export async function limparInboxIdb(): Promise<void> {
   const db = await abrirDb();
   try {
     const tx = db.transaction(STORE, "readwrite");
     tx.objectStore(STORE).clear();
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error ?? new Error("Falha ao limpar IndexedDB."));
+      tx.onerror = () => reject(tx.error ?? new Error("Falha ao limpar inbox."));
+      tx.onabort = () => reject(tx.error ?? new Error("Limpeza abortada."));
     });
-  } finally {
-    db.close();
-  }
-}
-
-export async function lerArquivoLoteIdb(id: string): Promise<File | undefined> {
-  const db = await abrirDb();
-  try {
-    const tx = db.transaction(STORE, "readonly");
-    const registro = await reqParaPromise(
-      tx.objectStore(STORE).get(id) as IDBRequest<RegistroLoteIdb | undefined>
-    );
-    if (!registro?.blob) return undefined;
-    return registroIdbParaArquivo(registro);
   } finally {
     db.close();
   }

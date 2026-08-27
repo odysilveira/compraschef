@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Search,
   BookOpenText,
+  Inbox,
 } from "lucide-react";
 import { PapelProvider, usePapel, podeVerValores, ROTULO_PAPEL } from "@/lib/roles";
 import { useDB } from "@/lib/data";
@@ -45,6 +46,7 @@ const MENU: SecaoMenu[] = [
     titulo: "Operação",
     itens: [
       { href: "/", rotulo: "Painel", icone: LayoutDashboard },
+      { href: "/caixa-entrada", rotulo: "Caixa de entrada", icone: Inbox },
       { href: "/recebimento", rotulo: "Recebimento", icone: PackageCheck },
       { href: "/estoque", rotulo: "Estoque", icone: Boxes },
       { href: "/estoque/reposicao", rotulo: "Reposição do Box Operacional", icone: Boxes },

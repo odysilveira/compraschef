@@ -12,16 +12,16 @@ import {
   CircleCheckBig,
   Clock3,
   Copy,
+  Eye,
+  EyeOff,
   Lock,
   Phone,
   Plus,
   ReceiptText,
-  Search,
-  ScanLine,
-  ShieldAlert,
-  Eye,
-  EyeOff,
   RefreshCcw,
+  ScanLine,
+  Search,
+  ShieldAlert,
   TriangleAlert,
   Upload,
 } from "lucide-react";
@@ -139,7 +139,7 @@ const STATUS_CONTA_OPCOES: Array<{ valor: StatusContaPagar | "todos"; rotulo: st
   { valor: "compativel", rotulo: "Compatível" },
   { valor: "divergente", rotulo: "Divergente" },
   { valor: "bloqueado", rotulo: "Bloqueado" },
-  { valor: "aguardando_conciliacao", rotulo: "Aguardando conciliação" },
+  { valor: "aguardando_conciliacao", rotulo: "Aguardando conciliação bancária" },
   { valor: "conciliado", rotulo: "Conciliado" },
   { valor: "cancelado", rotulo: "Cancelado" },
 ];
@@ -253,7 +253,7 @@ function rotuloStatusConta(status: StatusContaPagar): string {
     compativel: "Compatível",
     divergente: "Divergente",
     bloqueado: "Bloqueado",
-    aguardando_conciliacao: "Aguardando conciliação",
+    aguardando_conciliacao: "Aguardando conciliação bancária",
     conciliado: "Conciliado",
     cancelado: "Cancelado",
   }[status];
@@ -300,7 +300,7 @@ function BadgeStatusConta({ status }: { status: StatusContaPagar }) {
     case "aguardando_conciliacao":
       return (
         <Badge cor="azul">
-          <Clock3 size={14} /> aguardando conciliação
+          <Clock3 size={14} /> aguardando conciliação bancária
         </Badge>
       );
     case "conciliado":
@@ -401,7 +401,7 @@ function BadgeStatus({ boleto }: { boleto: Boleto }) {
     case "aguardando_conciliacao":
       return (
         <Badge cor="azul">
-          <Clock3 size={14} /> aguardando conciliação
+          <Clock3 size={14} /> aguardando conciliação bancária
         </Badge>
       );
     case "suspeito":
@@ -418,6 +418,8 @@ export default function FinanceiroPage() {
   const { papel } = usePapel();
   const handoffLoteProcessado = useRef<string | null>(null);
   const [itemLoteBoletoId, setItemLoteBoletoId] = useState<string | null>(null);
+
+
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
   const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas">("boletos");
   const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
@@ -694,6 +696,14 @@ export default function FinanceiroPage() {
   const boletosPendentesAgenda = boletosAtivos.filter(
     (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const aba = new URLSearchParams(window.location.search).get("aba");
+    if (aba === "contas") setAbaFinanceira("contas");
+    else if (aba === "notas") setAbaFinanceira("notas");
+    else setAbaFinanceira("boletos");
+  }, []);
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
@@ -1119,7 +1129,7 @@ export default function FinanceiroPage() {
     const id = params.get("importarLoteBoleto");
     if (!id || handoffLoteProcessado.current === id) return;
     handoffLoteProcessado.current = id;
-    window.history.replaceState({}, "", "/financeiro");
+    window.history.replaceState({}, "", "/financeiro?aba=boletos");
 
     void (async () => {
       await hidratarFilaLoteDoIdb();
@@ -1130,6 +1140,7 @@ export default function FinanceiroPage() {
         );
         return;
       }
+      setAbaFinanceira("boletos");
       setItemLoteBoletoId(id);
       setBoletoImportacaoAlvoId(null);
       setModalImportarBoletoAberto(true);
@@ -1362,7 +1373,7 @@ export default function FinanceiroPage() {
                 )}
                 {boleto.status === "aguardando_conciliacao" && (
                   <button className="btn-secundario" type="button" disabled>
-                    <Clock3 size={16} /> Aguardando conciliação
+                    <Clock3 size={16} /> Aguardando conciliação bancária
                   </button>
                 )}
                 {boleto.status === "travado" && (
@@ -1564,6 +1575,7 @@ export default function FinanceiroPage() {
         >
           Notas fiscais
         </button>
+
       </div>
 
       {abaFinanceira === "boletos" ? (
@@ -1620,7 +1632,7 @@ export default function FinanceiroPage() {
             </Card>
             <Card className="py-3">
               <p className="rotulo flex items-center gap-1">
-                <Clock3 size={13} /> Aguardando conciliação
+                <Clock3 size={13} /> Aguardando conciliação bancária
               </p>
               <p className="text-xl font-bold text-blue-700">{moeda(totais.aguardando_conciliacao)}</p>
             </Card>
@@ -1681,9 +1693,12 @@ export default function FinanceiroPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="rotulo text-blue-700">Aguardando conciliação</p>
+              <p className="rotulo text-blue-700">Aguardando conciliação bancária</p>
+              <p className="text-xs text-slate-500">
+                Pagamento já informado no app — aguardando baixa bancária.
+              </p>
               {boletosAguardandoConciliacao.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto aguardando conciliação." />
+                <Vazio mensagem="Nenhum boleto com pagamento informado aguardando baixa bancária." />
               ) : (
                 [...boletosAguardandoConciliacao]
                   .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
@@ -1745,7 +1760,7 @@ export default function FinanceiroPage() {
             </Card>
             <Card className="space-y-2 py-3">
               <p className="rotulo flex items-center gap-1 text-blue-700">
-                <CircleCheckBig size={14} /> Aguardando conciliação
+                <CircleCheckBig size={14} /> Aguardando conciliação bancária
               </p>
               <p className="text-2xl font-bold text-blue-700">{resumoContas.aguardandoConciliacao.quantidade}</p>
               <p className="text-sm text-slate-600">{moeda(resumoContas.aguardandoConciliacao.total)}</p>
@@ -2215,10 +2230,17 @@ export default function FinanceiroPage() {
               }
             >
               <Upload size={16} />
-              {estadoImportacaoBoleto.confronto?.classificacao === "parcial" ||
-              estadoImportacaoBoleto.confronto?.classificacao === "multiplas_possibilidades"
-                ? "Confirmar vínculo e adicionar aos boletos a vencer"
-                : "Confirmar e adicionar aos boletos a vencer"}
+              {estadoImportacaoBoleto.confronto?.classificacao === "exata"
+                ? `Confirmar vínculo: NF-e ${
+                    db.notas_fiscais.find((n) => n.id === estadoImportacaoBoleto.confronto?.nota_id)?.numero ?? "—"
+                  } · parcela ${
+                    db.boletos.find((b) => b.id === estadoImportacaoBoleto.confronto?.parcela_id)?.numero_parcela ??
+                    "—"
+                  }`
+                : estadoImportacaoBoleto.confronto?.classificacao === "parcial" ||
+                    estadoImportacaoBoleto.confronto?.classificacao === "multiplas_possibilidades"
+                  ? "Confirmar vínculo e adicionar aos boletos a vencer"
+                  : "Confirmar e adicionar aos boletos a vencer"}
             </button>
           </div>
         </form>
@@ -2262,7 +2284,7 @@ export default function FinanceiroPage() {
             </Card>
 
             <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
-              Informar pagamento não significa baixa financeira final. Este boleto ficará em aguardando conciliação até confirmação bancária.
+              Informar pagamento não significa baixa financeira final. Este boleto ficará em aguardando conciliação bancária até confirmação no banco.
             </div>
 
             <label className="block rounded-card border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">

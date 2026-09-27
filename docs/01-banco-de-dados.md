@@ -210,10 +210,67 @@ tabela: integracao_eventos           (fila de comunicação com o ERP parceiro)
   - status: text, default 'pendente' ('pendente' | 'ok' | 'erro')
   - tentativas: integer, default 0
   - criado_em: timestamptz, default now()
+
+-- ---------- RH (pagamento e escala da equipe — motoboys, freelancers e CLT) ----------
+
+tabela: colaboradores
+  - id: uuid, PK, default gen_random_uuid()
+  - nome: text, obrigatório
+  - nome_social: text, opcional
+  - cpf: text, opcional
+  - telefone: text, opcional
+  - categoria: text, obrigatório ('motoboy' | 'freelancer')
+  - clt: boolean, default false (só relevante quando categoria = 'freelancer': funcionário registrado x freela avulso)
+  - tipo_chave: text, obrigatório ('celular' | 'cpf' | 'cnpj' | 'email' | 'aleatoria')
+  - chave: text, obrigatório (chave Pix)
+  - turnos: text[], opcional (motoboy: subconjunto de 'almoco'/'jantar')
+  - funcao: text, opcional ('cozinha' | 'balcao' | 'outros' — freelancer)
+  - dias_disponiveis: text[], opcional (subconjunto de 'seg'..'dom')
+  - observacao: text, opcional
+  - ativo: boolean, default true
+  - criado_em: timestamptz, default now()
+
+tabela: bancos
+  - id: uuid, PK, default gen_random_uuid()
+  - nome: text, obrigatório, único (ex.: Sicoob, Itaú)
+
+tabela: pessoas_acesso                (registro de referência — não controla o acesso de verdade)
+  - id: uuid, PK, default gen_random_uuid()
+  - nome: text, obrigatório
+  - email: text, opcional
+  - nivel: text, obrigatório ('administrador' | 'colaborador' | 'consulta')
+  - observacao: text, opcional
+  - criado_em: timestamptz, default now()
+
+tabela: pagamentos_rh
+  - id: uuid, PK, default gen_random_uuid()
+  - colaborador_id: uuid, FK → colaboradores.id (nunca agrupar/filtrar relatório pelo nome — sempre por este id)
+  - valor: numeric, obrigatório
+  - data_pagamento: date, obrigatório
+  - banco_id: uuid, FK → bancos.id
+  - origem: text, opcional ('diaria' | 'uber' | 'adiantamento_salario' | 'pagamento_salario' | 'outro')
+  - dias_trabalhados: date[], opcional (freelancer: datas cobertas por este pagamento, quando dividido entre dias)
+  - fechamento_semana_id: uuid, opcional (motoboy: agrupa os pagamentos fechados juntos numa mesma semana)
+  - observacao: text, opcional
+  - criado_em: timestamptz, default now()
+
+tabela: escala_atribuicoes            (uma vaga na escala — dia + turno — atribuída ou em aberto)
+  - id: uuid, PK, default gen_random_uuid()
+  - data: date, obrigatório
+  - turno: text, obrigatório ('almoco' | 'jantar')
+  - colaborador_id: uuid, FK → colaboradores.id, opcional (ausente enquanto for vaga em aberto)
+  - nome: text, opcional (snapshot do nome no momento da atribuição)
+  - vaga_aberta: boolean, default false
+  - token_vaga: text, opcional, único (link público de autoatribuição — ver app/vaga-rh/[token])
+  - nome_reivindicado: text, opcional
+  - reivindicada_em: timestamptz, opcional
+  - criado_em: timestamptz, default now()
 ```
 
 **Observações de RLS (segurança do Supabase):**
 - Todas as tabelas exigem usuário autenticado; papéis vêm de `perfis.papel`.
 - Papéis `lider` e `caixa`: **sem acesso** a `cotacoes`, `cotacao_itens`, `boletos`, `notas_fiscais`, `precos_historico` e às colunas de valor de `pedidos` — usar *views* operacionais sem preços para essas telas.
+- Mesma regra vale para o módulo de RH: `pagamentos_rh` e `pessoas_acesso` ficam fora do alcance de `lider`/`caixa` (mesmo gate hoje aplicado em `precisaVerValores`); `colaboradores` (cadastro, sem valores) e `escala_atribuicoes` continuam visíveis a todos os papéis.
 - Aprovação de pedido: policy de UPDATE do status `aguardando_aprovacao → aprovado` restrita ao papel `dono`.
 - Link do fornecedor: **nenhum acesso direto ao banco** — uma Edge Function valida o `token` da cotação e lê/grava apenas os itens daquela cotação, com prazo de validade.
+- Link de vaga em aberto (RH): mesmo padrão do link do fornecedor — Edge Function valida `token_vaga` e só grava `nome_reivindicado`/`reivindicada_em` daquela vaga específica, com prazo de validade.

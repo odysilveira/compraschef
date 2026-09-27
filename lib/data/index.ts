@@ -55,6 +55,27 @@ function atualizarComNovidades(db: DB): boolean {
       mudou = true;
     }
   }
+  // Módulo RH: bancos salvos antes dele existir não têm essas listas ainda.
+  if (!db.colaboradores) {
+    db.colaboradores = seedDB.colaboradores.map((c) => ({ ...c }));
+    mudou = true;
+  }
+  if (!db.bancos) {
+    db.bancos = seedDB.bancos.map((b) => ({ ...b }));
+    mudou = true;
+  }
+  if (!db.pessoas_acesso) {
+    db.pessoas_acesso = seedDB.pessoas_acesso.map((p) => ({ ...p }));
+    mudou = true;
+  }
+  if (!db.pagamentos_rh) {
+    db.pagamentos_rh = [];
+    mudou = true;
+  }
+  if (!db.escala_atribuicoes) {
+    db.escala_atribuicoes = [];
+    mudou = true;
+  }
   return mudou;
 }
 

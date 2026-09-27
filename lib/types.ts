@@ -269,6 +269,81 @@ export interface IntegracaoEvento {
   criado_em: string;
 }
 
+// ---------- RH (pagamento e escala da equipe) ----------
+
+export type CategoriaColaborador = "motoboy" | "freelancer";
+export type TipoChavePix = "celular" | "cpf" | "cnpj" | "email" | "aleatoria";
+export type DiaSemana = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";
+export type Turno = "almoco" | "jantar";
+export type Funcao = "cozinha" | "balcao" | "outros";
+export type OrigemPagamento =
+  | "diaria"
+  | "uber"
+  | "adiantamento_salario"
+  | "pagamento_salario"
+  | "outro";
+
+export interface Colaborador {
+  id: string;
+  nome: string;
+  nome_social?: string;
+  cpf?: string;
+  telefone?: string;
+  categoria: CategoriaColaborador;
+  clt: boolean; // só relevante quando categoria = "freelancer" (funcionário registrado x freela avulso)
+  tipo_chave: TipoChavePix;
+  chave: string;
+  turnos?: Turno[]; // motoboy: almoço e/ou jantar
+  funcao?: Funcao; // freelancer: cozinha, balcão ou outros
+  dias_disponiveis?: DiaSemana[];
+  observacao?: string;
+  ativo: boolean;
+}
+
+export interface Banco {
+  id: string;
+  nome: string;
+}
+
+export type NivelAcesso = "administrador" | "colaborador" | "consulta";
+
+// Registro de referência de quem usa o sistema — não controla o acesso de
+// verdade (isso é feito pelo compartilhamento do projeto / futuro Supabase Auth).
+export interface PessoaAcesso {
+  id: string;
+  nome: string;
+  email?: string;
+  nivel: NivelAcesso;
+  observacao?: string;
+}
+
+export interface PagamentoRH {
+  id: string;
+  colaborador_id: string; // nunca agrupar/filtrar relatório pelo nome — sempre por este id
+  valor: number;
+  data_pagamento: string; // ISO date
+  banco_id: string;
+  origem?: OrigemPagamento; // freelancer/CLT
+  dias_trabalhados?: string[]; // freelancer: datas ISO cobertas por este pagamento (divisão entre dias)
+  fechamento_semana_id?: string; // motoboy: agrupa os pagamentos fechados juntos numa mesma semana
+  observacao?: string;
+  criado_em: string;
+}
+
+// Uma vaga na escala (dia + turno) atribuída a alguém, ou em aberto pra autoatribuição.
+export interface EscalaAtribuicao {
+  id: string;
+  data: string; // ISO date
+  turno: Turno;
+  colaborador_id?: string; // ausente enquanto for vaga em aberto
+  nome?: string; // snapshot do nome no momento da atribuição
+  vaga_aberta: boolean;
+  token_vaga?: string; // link público de autoatribuição (ver app/vaga-rh/[token])
+  nome_reivindicado?: string;
+  reivindicada_em?: string;
+  criado_em: string;
+}
+
 // Banco completo em memória (camada mock)
 export interface DB {
   perfis: Perfil[];
@@ -293,4 +368,9 @@ export interface DB {
   balanco_itens: BalancoItem[];
   precos_historico: PrecoHistorico[];
   integracao_eventos: IntegracaoEvento[];
+  colaboradores: Colaborador[];
+  bancos: Banco[];
+  pessoas_acesso: PessoaAcesso[];
+  pagamentos_rh: PagamentoRH[];
+  escala_atribuicoes: EscalaAtribuicao[];
 }

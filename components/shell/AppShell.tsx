@@ -22,6 +22,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  Users,
+  Banknote,
+  CalendarClock,
+  ClipboardList,
+  SlidersHorizontal,
 } from "lucide-react";
 import { PapelProvider, usePapel, podeVerValores, ROTULO_PAPEL } from "@/lib/roles";
 import { useDB } from "@/lib/data";
@@ -61,6 +66,17 @@ const MENU: SecaoMenu[] = [
     itens: [
       { href: "/financeiro", rotulo: "Boletos e contas", icone: Wallet, precisaVerValores: true },
       { href: "/relatorios", rotulo: "Relatórios", icone: BarChart3, precisaVerValores: true },
+    ],
+  },
+  {
+    titulo: "RH",
+    itens: [
+      { href: "/rh", rotulo: "Painel", icone: LayoutDashboard },
+      { href: "/rh/cadastro", rotulo: "Cadastro", icone: Users },
+      { href: "/rh/pagamentos", rotulo: "Pagamentos", icone: Banknote, precisaVerValores: true },
+      { href: "/rh/escala", rotulo: "Escala", icone: CalendarClock },
+      { href: "/rh/relatorios", rotulo: "Relatórios", icone: ClipboardList, precisaVerValores: true },
+      { href: "/rh/configuracoes", rotulo: "Configurações", icone: SlidersHorizontal, precisaVerValores: true },
     ],
   },
   {
@@ -146,7 +162,7 @@ function Navegacao({ aoNavegar }: { aoNavegar?: () => void }) {
           <div key={secao.titulo} className="mb-3">
             <p className="rotulo px-2 pb-1 pt-2">{secao.titulo}</p>
             {secao.itens.map((item) => {
-              const ativo = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const ativo = item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
               const Icone = item.icone;
               return (
                 <Link

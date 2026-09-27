@@ -313,4 +313,40 @@ export const seedDB: DB = {
     { id: "ev-2", direcao: "recebido", tipo: "ficha_tecnica", payload: { produto: "P901", insumos: [{ codigo: "P101", qtd: 0.6 }, { codigo: "P102", qtd: 0.2 }] }, status: "ok", tentativas: 1, criado_em: diasAtras(2) },
     { id: "ev-3", direcao: "enviado", tipo: "estoque_total", payload: { produto: "P902", total: 6 }, status: "pendente", tentativas: 0, criado_em: diasAtras(0) },
   ],
+
+  colaboradores: [
+    { id: "colab-marcos", nome: "Marcos Silva", telefone: "(11) 98111-2222", categoria: "motoboy", clt: false, tipo_chave: "celular", chave: "(11) 98111-2222", turnos: ["almoco", "jantar"], ativo: true },
+    { id: "colab-daniel-p", nome: "Daniel Pereira", telefone: "(11) 98222-3333", categoria: "motoboy", clt: false, tipo_chave: "celular", chave: "(11) 98222-3333", turnos: ["jantar"], ativo: true },
+    { id: "colab-daniel-s", nome: "Daniel Souza", telefone: "(11) 98333-4444", categoria: "motoboy", clt: false, tipo_chave: "celular", chave: "(11) 98333-4444", turnos: ["almoco"], ativo: true },
+    { id: "colab-julia", nome: "Julia Santos", cpf: "111.222.333-44", categoria: "freelancer", clt: false, tipo_chave: "cpf", chave: "111.222.333-44", funcao: "cozinha", dias_disponiveis: ["sex", "sab", "dom"], ativo: true },
+    { id: "colab-rafael", nome: "Rafael Lima", cpf: "222.333.444-55", categoria: "freelancer", clt: true, tipo_chave: "cpf", chave: "222.333.444-55", funcao: "balcao", ativo: true },
+  ],
+
+  bancos: [
+    { id: "banco-sicoob", nome: "Sicoob" },
+    { id: "banco-itau", nome: "Itaú" },
+  ],
+
+  pessoas_acesso: [
+    { id: "acesso-ody", nome: "Ody", email: "ody1900@gmail.com", nivel: "administrador" },
+  ],
+
+  pagamentos_rh: [
+    { id: "pag-1", colaborador_id: "colab-marcos", valor: 320, data_pagamento: soData(diasAtras(7)), banco_id: "banco-sicoob", fechamento_semana_id: "fech-1", criado_em: diasAtras(7) },
+    { id: "pag-2", colaborador_id: "colab-daniel-p", valor: 280, data_pagamento: soData(diasAtras(7)), banco_id: "banco-sicoob", fechamento_semana_id: "fech-1", criado_em: diasAtras(7) },
+    { id: "pag-3", colaborador_id: "colab-daniel-s", valor: 300, data_pagamento: soData(diasAtras(7)), banco_id: "banco-itau", fechamento_semana_id: "fech-1", criado_em: diasAtras(7) },
+    {
+      id: "pag-4",
+      colaborador_id: "colab-julia",
+      valor: 450,
+      data_pagamento: soData(diasAtras(3)),
+      banco_id: "banco-itau",
+      origem: "diaria",
+      dias_trabalhados: [soData(diasAtras(5)), soData(diasAtras(4)), soData(diasAtras(3))],
+      criado_em: diasAtras(3),
+    },
+    { id: "pag-5", colaborador_id: "colab-rafael", valor: 1800, data_pagamento: soData(diasAtras(2)), banco_id: "banco-sicoob", origem: "pagamento_salario", criado_em: diasAtras(2) },
+  ],
+
+  escala_atribuicoes: [],
 };

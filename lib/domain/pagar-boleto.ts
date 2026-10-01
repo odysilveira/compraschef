@@ -74,7 +74,7 @@ function rotuloStatus(status: StatusBoleto): string {
     case "liberado":
       return "liberado";
     case "aguardando_conciliacao":
-      return "aguardando conciliação";
+      return "aguardando conciliação bancária";
     case "pago":
       return "pago";
     case "suspeito":

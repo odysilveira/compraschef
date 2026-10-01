@@ -4,7 +4,7 @@
 // Passo 1 — escolher o pedido; Passo 2 — conferência item a item com scanner,
 // foto e divergência; Finalizar — entrada no estoque, nota e boletos.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   FileStack,
@@ -120,6 +120,18 @@ export default function RecebimentoPage() {
   const [modoLote, setModoLote] = useState(false);
   const [arquivoLote, setArquivoLote] = useState<File | null>(null);
   const [itemLoteId, setItemLoteId] = useState<string | null>(null);
+  const handoffInboxProcessado = useRef(false);
+
+  /** Handoff da Caixa de entrada: abre a fila A conciliar. */
+  useEffect(() => {
+    if (typeof window === "undefined" || handoffInboxProcessado.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("abrirLote") !== "1") return;
+    handoffInboxProcessado.current = true;
+    setModoLote(true);
+    window.history.replaceState({}, "", "/recebimento");
+  }, []);
+
   const [notaConferirId, setNotaConferirId] = useState<string | null>(null);
   const [notaCorrecaoId, setNotaCorrecaoId] = useState<string | null>(null);
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | "pendentes" | "completas">("todas");

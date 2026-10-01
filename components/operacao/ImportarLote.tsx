@@ -24,6 +24,8 @@ import {
   atualizarClassificacaoItemFila,
   descartarItemFila,
   definirFilaDeClassificados,
+  hidratarFilaLoteDoIdb,
+  flushPersistenciaFilaLote,
   limparFilaLote,
   marcarItemEmAndamento,
   obterArquivoFilaAsync,
@@ -77,7 +79,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     null
   );
   const [erro, setErro] = useState<string | null>(null);
-  const [substituir, setSubstituir] = useState(true);
+  const [substituir, setSubstituir] = useState(false);
   const [reconhecendoId, setReconhecendoId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     url: string;
@@ -108,9 +110,15 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     setLendo(true);
     setProgresso({ feito: 0, total: lista.length, nome: "" });
     try {
+      // Evita a hidratação do IndexedDB apagar a seleção no meio da classificação.
+      await hidratarFilaLoteDoIdb();
       const classificados = await classificarArquivosRecebimentoBrowser(Array.from(lista), {
         onProgresso: (feito, total, nome) => setProgresso({ feito, total, nome }),
       });
+      if (classificados.length === 0) {
+        setErro("Nenhum arquivo foi classificado. Tente de novo.");
+        return;
+      }
       if (substituir || abertos.length === 0) {
         definirFilaDeClassificados(classificados);
       } else {
@@ -159,9 +167,14 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
     setPreview({ url, nome: arquivo.name, mime: arquivo.type || "application/octet-stream" });
   }
 
-  function levarBoletoAoFinanceiro(id: string) {
+  async function levarBoletoAoFinanceiro(id: string) {
     marcarItemEmAndamento(id);
-    router.push(`/financeiro?importarLoteBoleto=${encodeURIComponent(id)}`);
+    try {
+      await flushPersistenciaFilaLote();
+    } catch {
+      // segue mesmo se o IDB falhar — a memória do módulo ainda tem a fila
+    }
+    router.push(`/financeiro?importarLoteBoleto=${encodeURIComponent(id)}&aba=boletos`);
   }
 
   /** OCR/leitura de novo no arquivo já salvo na fila (sem rebaixar). */
@@ -205,8 +218,8 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
             <h2 className="text-lg font-bold">Importar lote (e-mail)</h2>
             <p className="text-sm text-slate-600">
               Classifique vários arquivos. A fila <strong>A conciliar</strong> fica salva neste
-              navegador (IndexedDB): você pode cadastrar fornecedor/produto, dar F5 e voltar aos
-              arquivos restantes.
+              navegador: boleto → Financeiro; XML/DANFE/NFS-e → abrir neste fluxo. Você pode
+              cadastrar fornecedor/produto, dar F5 e voltar aos arquivos restantes.
             </p>
           </div>
         </div>
@@ -251,7 +264,7 @@ export default function ImportarLote({ onVoltar, onAbrirFluxo }: Props) {
               checked={substituir}
               onChange={(e) => setSubstituir(e.target.checked)}
             />
-            Próxima seleção substitui a fila (desmarque para acrescentar)
+            Próxima seleção substitui a fila (deixe desmarcado para acumular)
           </label>
         )}
 

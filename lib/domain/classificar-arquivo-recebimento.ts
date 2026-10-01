@@ -165,7 +165,8 @@ export function classificarArquivoRecebimento(
       tipo: "imagem",
       confianca: "media",
       rotulo: ROTULOS.imagem,
-      detalhe: "Foto — use OCR no fluxo DANFE ou revise à mão.",
+      // Inbox mapeia imagem → foto_restaurante (OneDrive); lote ainda abre OCR/DANFE.
+      detalhe: "Foto — inbox sugere OneDrive (fotos); no lote use OCR/DANFE se for nota.",
       sinais,
       resumo,
     };
@@ -176,9 +177,10 @@ export function classificarArquivoRecebimento(
       tipo: "desconhecido",
       confianca: "baixa",
       rotulo: ROTULOS.desconhecido,
+      // Inbox mapeia PDF genérico → documento_restaurante; sem sinais claros fica “revisar” no lote.
       detalhe: texto.trim()
-        ? "PDF sem sinais claros de NFS-e, boleto ou DANFE."
-        : "PDF sem texto selecionável — pode ser só imagem (scan).",
+        ? "PDF sem sinais claros de NFS-e, boleto ou DANFE — inbox sugere documentos."
+        : "PDF sem texto selecionável — pode ser scan; inbox sugere documentos ou a identificar.",
       sinais,
       resumo,
     };

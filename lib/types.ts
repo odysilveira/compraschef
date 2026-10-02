@@ -286,7 +286,16 @@ export interface Produto {
   cest?: string;
   origem_mercadoria?: string;
   cfop_padrao?: string;
+  /**
+   * Custo por unidade de uso (CMV / fichas).
+   * Ex.: R$ 0,049 por canudo — não o preço do pacote.
+   */
   custo_unitario?: number;
+  /**
+   * Preço da embalagem de compra (NF / cotação / pesquisa).
+   * Ex.: R$ 4,90 o pacote com 100 canudos.
+   */
+  preco_embalagem_compra?: number;
   /** Conta do DRE gerencial (padrão na conferência de NF). */
   conta_dre_id?: string;
   /**

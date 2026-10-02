@@ -17,6 +17,10 @@ import {
 } from "@/lib/domain/produtos-limpeza-nome";
 import { inferirEntraNoCmv } from "@/lib/domain/produto-cmv";
 import {
+  custoUsoDeEmbalagem,
+  precoEmbalagemDeCustoUso,
+} from "@/lib/domain/produto-precos";
+import {
   aplicarSugestaoContaDreProdutos,
   listarProdutosSemContaDre,
   nomeContaSugerida,
@@ -155,7 +159,25 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
     const principalCodigo = codigoPadrao.find((c) => c.principal)?.codigo_barras;
     setFornecedorParaVincular("");
     setMensagemVinculo(null);
-    setForm({ ...p, codigo_barras: principalCodigo ?? p.codigo_barras });
+    // Legado: se só há custo e fator=1, espelha na embalagem; se fator>1 e embalagem vazia,
+    // assume custo antigo era preço da embalagem (caso canudo com uso=pacote).
+    let precoEmbalagem = p.preco_embalagem_compra;
+    let custoUso = p.custo_unitario;
+    const fator = p.fator_conversao > 0 ? p.fator_conversao : 1;
+    if ((precoEmbalagem == null || precoEmbalagem <= 0) && custoUso != null && custoUso > 0) {
+      if (fator === 1) {
+        precoEmbalagem = custoUso;
+      } else {
+        precoEmbalagem = custoUso;
+        custoUso = custoUsoDeEmbalagem(precoEmbalagem, fator);
+      }
+    }
+    setForm({
+      ...p,
+      codigo_barras: principalCodigo ?? p.codigo_barras,
+      preco_embalagem_compra: precoEmbalagem,
+      custo_unitario: custoUso,
+    });
     setCodigoBarrasForm(codigoPadrao);
     setNovoCodigoBarras("");
   }
@@ -507,6 +529,9 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-slate-500">
+                Como você consome no dia a dia: canudo = unidade; detergente = frasco (não ml).
+              </p>
             </Campo>
             <Campo rotulo="Fator de conversão (compra → uso) *">
               <input
@@ -516,8 +541,27 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                 required
                 className="campo"
                 value={form.fator_conversao}
-                onChange={(e) => alterar({ fator_conversao: numOpcional(e.target.value) ?? 1 })}
+                onChange={(e) => {
+                  const fator = numOpcional(e.target.value) ?? 1;
+                  const embalagem = form.preco_embalagem_compra;
+                  if (embalagem != null && embalagem > 0 && fator > 0) {
+                    alterar({
+                      fator_conversao: fator,
+                      custo_unitario: custoUsoDeEmbalagem(embalagem, fator),
+                    });
+                  } else if (form.custo_unitario != null && form.custo_unitario > 0 && fator > 0) {
+                    alterar({
+                      fator_conversao: fator,
+                      preco_embalagem_compra: precoEmbalagemDeCustoUso(form.custo_unitario, fator),
+                    });
+                  } else {
+                    alterar({ fator_conversao: fator });
+                  }
+                }}
               />
+              <p className="mt-1 text-xs text-slate-500">
+                1 embalagem de compra = quantas unidades de uso (ex.: 1 pct = 100 canudos).
+              </p>
             </Campo>
             <Campo rotulo="Subunidade (conteúdo)">
               <select
@@ -579,7 +623,8 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                 Sim — compras deste produto contam no CMV food
               </label>
               <p className="mt-1 text-xs text-slate-500">
-                Desmarque limpeza, bobina, canudo etc. Eles vão para custo de operação, não para food.
+                Desmarque material de limpeza. Descartáveis de venda (canudo, embalagem) podem ficar
+                marcados.
               </p>
             </Campo>
             <Campo rotulo="Fator de correção">
@@ -602,16 +647,72 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                 onChange={(e) => alterar({ rendimento: numOpcional(e.target.value) })}
               />
             </Campo>
-            <Campo rotulo="Preço / custo unitário">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                className="campo"
-                value={form.custo_unitario ?? ""}
-                onChange={(e) => alterar({ custo_unitario: numOpcional(e.target.value) })}
-              />
-            </Campo>
+            {mostrarPrecos ? (
+              <>
+                <Campo rotulo="Preço da embalagem (compra / cotação)">
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    className="campo"
+                    placeholder="ex.: 4,90 o pacote"
+                    value={form.preco_embalagem_compra ?? ""}
+                    onChange={(e) => {
+                      const preco = numOpcional(e.target.value);
+                      const fator = form.fator_conversao > 0 ? form.fator_conversao : 1;
+                      if (preco != null && preco > 0) {
+                        alterar({
+                          preco_embalagem_compra: preco,
+                          custo_unitario: custoUsoDeEmbalagem(preco, fator),
+                        });
+                      } else {
+                        alterar({ preco_embalagem_compra: preco });
+                      }
+                    }}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Referência da NF e pesquisa de preço na unidade de compra
+                    {form.unidade_compra_id
+                      ? ` (${db.unidades.find((u) => u.id === form.unidade_compra_id)?.sigla ?? "compra"})`
+                      : ""}
+                    .
+                  </p>
+                </Campo>
+                <Campo rotulo="Custo por unidade de uso (CMV / fichas)">
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    className="campo"
+                    placeholder="ex.: 0,049 por canudo"
+                    value={form.custo_unitario ?? ""}
+                    onChange={(e) => {
+                      const custo = numOpcional(e.target.value);
+                      const fator = form.fator_conversao > 0 ? form.fator_conversao : 1;
+                      if (custo != null && custo > 0) {
+                        alterar({
+                          custo_unitario: custo,
+                          preco_embalagem_compra: precoEmbalagemDeCustoUso(custo, fator),
+                        });
+                      } else {
+                        alterar({ custo_unitario: custo });
+                      }
+                    }}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Valor usado no CMV e nas fichas, na unidade de uso
+                    {form.unidade_uso_id
+                      ? ` (${db.unidades.find((u) => u.id === form.unidade_uso_id)?.sigla ?? "uso"})`
+                      : ""}
+                    . Calculado automaticamente: embalagem ÷ fator.
+                  </p>
+                </Campo>
+              </>
+            ) : (
+              <Campo rotulo="Preços">
+                <div className="campo h-11 leading-11 text-slate-500">Visível para dono/gerente</div>
+              </Campo>
+            )}
             <Campo rotulo="Saldo atual">
               <div className="campo h-11 leading-11 text-slate-700">
                 {form.id ? qtd(estoqueAtual(db, form.id), siglaUnidadeUso(db, form.id)) : "—"}
@@ -633,10 +734,12 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                   onChange={(e) => setAssumirPrecoComoCusto(e.target.checked)}
                 />
                 <span className="text-sm text-slate-700">
-                  <span className="font-medium">Assumir este preço como custo atual das fichas</span>
+                  <span className="font-medium">
+                    Assumir o custo por unidade de uso como custo atual das fichas
+                  </span>
                   <span className="block text-slate-500 mt-0.5">
                     {assumirPrecoComoCusto
-                      ? "O valor digitado será o custo nas fichas técnicas (útil em pico de preço ou promoção)."
+                      ? "O custo por unidade de uso será gravado nas fichas técnicas (útil em pico ou promoção)."
                       : form.id && precoMedioHistorico(db, form.id) !== undefined
                         ? `Desmarcado: o custo das fichas fica na média histórica (${moeda(precoMedioHistorico(db, form.id) ?? 0)}).`
                         : "Desmarcado: mantém o custo atual / média histórica, sem trocar pelo valor digitado."}
@@ -761,10 +864,20 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                   {form.fator_conversao || "?"}{" "}
                   {db.unidades.find((u) => u.id === form.unidade_uso_id)?.sigla ?? "uso"}
                   {" "}(compra → uso / estoque).
+                  {mostrarPrecos &&
+                  form.preco_embalagem_compra != null &&
+                  form.preco_embalagem_compra > 0 &&
+                  form.custo_unitario != null
+                    ? ` · ${moeda(form.preco_embalagem_compra)} a embalagem → ${moeda(form.custo_unitario)} por unidade de uso.`
+                    : ""}
                 </p>
               ) : (
                 <p>Sem unidade de compra: o estoque e o consumo usam só a unidade de uso.</p>
               )}
+              <p>
+                Ex.: canudo — compra pacote, uso unidade, fator 100, embalagem R$ 4,90 → custo uso R$
+                0,049. Detergente — use frasco (não ml por lavagem); se compra caixa com 12, fator 12.
+              </p>
               {form.subunidade_id && form.quantidade_subunidade && form.quantidade_subunidade > 0 ? (
                 <p>
                   1 {db.unidades.find((u) => u.id === form.unidade_uso_id)?.sigla ?? "uso"} ={" "}
@@ -775,10 +888,13 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                         db.unidades.find((u) => u.id === form.subunidade_id)?.sigla ?? "sub"
                       }`
                     : ""}
-                  {" "}(conteúdo para orçamento; o consumo continua na unidade de uso).
+                  {" "}(conteúdo informativo; CMV/fichas usam a unidade de uso).
                 </p>
               ) : form.subunidade_id ? (
-                <p>Informe a quantidade de subunidades em 1 unidade de uso (ex.: 1 pct = 10.000 pc).</p>
+                <p>
+                  Informe a quantidade de subunidades em 1 unidade de uso (ex.: 1 frasco = 500 ml —
+                  só rótulo).
+                </p>
               ) : null}
             </div>
 

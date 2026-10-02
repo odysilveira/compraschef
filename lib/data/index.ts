@@ -992,6 +992,8 @@ export function consumoMedioDiario(db: DB, produtoId: string): number {
   return total / 30;
 }
 
+export { precoReferenciaCotacao } from "../domain/produto-precos";
+
 /** Preço médio histórico de um produto (para detectar preço fora do padrão). */
 export function precoMedioHistorico(db: DB, produtoId: string): number | undefined {
   const precos = db.precos_historico.filter((p) => p.produto_id === produtoId);

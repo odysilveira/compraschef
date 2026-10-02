@@ -31,7 +31,7 @@ export function AbaFornecedores() {
   const [produtosNovos, setProdutosNovos] = useState<string[]>([]);
 
   const lista = db.fornecedores
-    .filter((f) => f.ativo)
+    .filter((f) => f.ativo !== false)
     .filter((f) => contem(busca, f.nome, f.cnpj, f.whatsapp, f.contato_nome, f.codigo_externo))
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
@@ -120,9 +120,9 @@ export function AbaFornecedores() {
     : [];
 
   const total = db.fornecedores.length;
-  const ativos = db.fornecedores.filter((f) => f.ativo).length;
-  const semWhatsapp = db.fornecedores.filter((f) => f.ativo && !f.whatsapp).length;
-  const porBoleto = db.fornecedores.filter((f) => f.ativo && f.forma_pagamento === "boleto").length;
+  const ativos = db.fornecedores.filter((f) => f.ativo !== false).length;
+  const semWhatsapp = db.fornecedores.filter((f) => f.ativo !== false && !f.whatsapp).length;
+  const porBoleto = db.fornecedores.filter((f) => f.ativo !== false && f.forma_pagamento === "boleto").length;
 
   return (
     <div>

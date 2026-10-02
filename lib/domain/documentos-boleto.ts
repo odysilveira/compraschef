@@ -25,6 +25,8 @@ export interface RegistroDocumentoBoletoEntrada {
   contaPagarId?: string;
   arquivo: ArquivoBoletoEntrada;
   linhaInformada?: string;
+  /** Página do PDF multi-boleto (1-based). */
+  paginaPdf?: number;
 }
 
 export interface RegistroDocumentoBoletoResultado {
@@ -168,7 +170,16 @@ export async function registrarDocumentoBoleto(
   }
 
   const hashSha256 = await calcularHashSHA256(entrada.arquivo.conteudo);
-  const existentePorHash = db.documentos_boleto.find((documento) => documento.hash_sha256 === hashSha256);
+  const paginaPdf = entrada.paginaPdf != null && entrada.paginaPdf > 0 ? entrada.paginaPdf : undefined;
+
+  const existentePorHash = db.documentos_boleto.find((documento) => {
+    if (documento.hash_sha256 !== hashSha256) return false;
+    // Mesmo arquivo pode ter várias páginas/boletos
+    if (paginaPdf != null || documento.pagina_pdf != null) {
+      return (documento.pagina_pdf ?? null) === (paginaPdf ?? null);
+    }
+    return true;
+  });
   if (existentePorHash) {
     return {
       sucesso: false,
@@ -197,6 +208,7 @@ export async function registrarDocumentoBoleto(
     tipo_arquivo: validacaoArquivo.tipoDetectado,
     tamanho_bytes: entrada.arquivo.tamanhoBytes,
     hash_sha256: hashSha256,
+    pagina_pdf: paginaPdf,
     linha_informada: entrada.linhaInformada,
     codigo_canonico: codigoCanonico,
     formato_boleto: formatoBoleto,

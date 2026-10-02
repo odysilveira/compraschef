@@ -3,6 +3,7 @@ import type { Boleto, DB, DocumentoBoleto, NotaFiscal } from "../types";
 import { seedDB } from "../data/seed";
 import {
   listarBoletosLoteAguardandoVinculo,
+  listarBoletosSemNfConferida,
   listarDocumentosAguardandoVinculo,
   listarNotasComBoletoPendente,
   listarParcelasAguardandoDocumento,
@@ -81,11 +82,30 @@ describe("filas conferência NF-e × boleto", () => {
 
   it("lista documento importado sem confirmação", () => {
     const db = dbTeste({
-      documentos_boleto: [documentoBase({ resultado_confronto: "parcial" })],
+      documentos_boleto: [
+        documentoBase({
+          resultado_confronto: "parcial",
+          codigo_canonico: "34191750000001000001234567890123456789012345",
+        }),
+      ],
     });
     const lista = listarDocumentosAguardandoVinculo(db);
     expect(lista).toHaveLength(1);
     expect(lista[0].motivo).toBe("sem_parcela");
+  });
+
+  it("marca PDF reconhecido sem linha como leitura incompleta, não como divergente", () => {
+    const db = dbTeste({
+      documentos_boleto: [
+        documentoBase({
+          nome_arquivo: "Boleto_eGestor_9806.pdf",
+          resultado_confronto: "sem_correspondencia",
+        }),
+      ],
+    });
+    const lista = listarBoletosSemNfConferida(db);
+    expect(lista).toHaveLength(1);
+    expect(lista[0].motivo).toBe("leitura_incompleta");
   });
 
   it("lista documento confirmado cujo boleto ainda não está conferido", () => {
@@ -116,6 +136,26 @@ describe("filas conferência NF-e × boleto", () => {
     expect(notas).toHaveLength(1);
     expect(notas[0].quantidadePendentes).toBe(2);
     expect(notas[0].valorPendente).toBe(100);
+    expect(notas[0].proximoVencimento).toBe("2026-09-01");
+  });
+
+  it("lista boletos sem NF conferida com valor e vencimento do código", () => {
+    const db = dbTeste({
+      boletos: [],
+      documentos_boleto: [
+        documentoBase({
+          id: "doc-sem-nf",
+          boleto_id: undefined,
+          confirmado_em: undefined,
+          codigo_canonico: "34199753000003184011091234567890123456789012",
+          linha_informada: undefined,
+        }),
+      ],
+    });
+    const lista = listarBoletosSemNfConferida(db);
+    expect(lista.length).toBeGreaterThanOrEqual(1);
+    expect(lista[0].documento.id).toBe("doc-sem-nf");
+    expect(lista[0].motivo).toBe("sem_parcela");
   });
 
   it("resumo agrega as três filas", () => {
@@ -128,6 +168,28 @@ describe("filas conferência NF-e × boleto", () => {
     expect(resumo.totalDocumentos).toBe(1);
     expect(resumo.totalNotas).toBe(1);
     expect(resumo.valorParcelasPendentes).toBe(100);
+  });
+
+  it("inclui nota sem parcela na fila de conferência", () => {
+    const db = dbTeste({
+      boletos: [],
+      notas_fiscais: [
+        {
+          id: "nf-1",
+          fornecedor_id: "forn-1",
+          numero: "6039",
+          chave_acesso: "1".repeat(44),
+          valor_total: 500,
+          emitida_em: "2026-08-01",
+          importada_em: "2026-08-01",
+          status: "conferida",
+        },
+      ],
+    });
+    const notas = listarNotasComBoletoPendente(db);
+    expect(notas).toHaveLength(1);
+    expect(notas[0].nota.numero).toBe("6039");
+    expect(notas[0].quantidadePendentes).toBe(0);
   });
 
   it("lista boletos abertos na fila do lote", () => {

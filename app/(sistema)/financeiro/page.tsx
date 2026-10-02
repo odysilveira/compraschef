@@ -26,7 +26,9 @@ import {
   Upload,
 } from "lucide-react";
 import { Badge, Card, Modal, Tabela, TituloPagina, Vazio } from "@/components/ui";
-import { calcularValorFinal, criarContaManual, mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
+import ConferenciaFinanceira from "@/components/financeiro/ConferenciaFinanceira";
+import { VistaNotaEstiloDanfe } from "@/components/financeiro/VistaNotaEstiloDanfe";
+import { calcularValorFinal, criarContaManual, getDB, limparNotasEBoletos, mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
 import { identificarFormatoBoleto, normalizarLinhaBoleto } from "@/lib/domain/boletos";
 import { calcularHashSHA256, receberBoletoContaPagar, validarArquivoDocumentoBoleto } from "@/lib/domain/documentos-boleto";
 import { filtrarContasPagar, resumirContasPagar, type FiltroVencimentoConta } from "@/lib/domain/financeiro";
@@ -45,13 +47,20 @@ import {
   type ResultadoConfrontoBoletoNfe,
 } from "@/lib/domain/boleto-nfe-confronto";
 import { confirmarConfrontoBoleto } from "@/lib/domain/confirmacao-confronto-boleto";
+import { lerArquivoDocumentoBoletoIdb, salvarArquivoDocumentoBoletoIdb } from "@/lib/domain/documentos-boleto-arquivo-idb";
+import { listarRegistrosLoteIdb, registroIdbParaArquivo } from "@/lib/domain/lote-recebimento-idb";
+import { receberBoletoPendenteNaConferencia, detectarBoletoJaPago } from "@/lib/domain/pareamento-nfe-boleto";
+import { criarParcelaAguardandoDocumento } from "@/lib/domain/parcela-nota";
 import { corrigirFornecedorNotaFiscal } from "@/lib/domain/nfe-completude";
 import {
   abrirModalCorrecaoNfe,
   detalharNotaFiscalFinanceiro,
   listarNotasFiscaisFinanceiro,
+  rotuloStatusPagamentoNota,
+  statusPagamentoNota,
   type EstadoModalCorrecaoNfe,
   type IndicadorCompletudeFinanceiro,
+  type StatusPagamentoNota,
 } from "@/lib/domain/nfe-financeiro";
 import {
   apresentarResultadoConfronto,
@@ -63,9 +72,12 @@ import {
   alternarCodigoAberto,
   acoesPagamentoDisponiveisNoLayout,
   avaliarElegibilidadePagamentoBoleto,
+  conciliarBoleto,
   criarSnapshotPagamentoBoleto,
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
+  boletoProntoParaAgendaPagamentos,
+  listarBancosContasUsados,
   montarEstadoAgendaPagamentoBoleto,
   type SegmentoCodigoBarrasItf,
   type SnapshotPagamentoBoleto,
@@ -83,6 +95,15 @@ import {
   marcarItemConcluido,
   obterArquivoFilaAsync,
 } from "@/lib/domain/lote-recebimento-store";
+import {
+  fornecedorDoPagamento,
+  notaDoPagamento,
+  rotuloMeioPagamento,
+  rotuloStatusDocumentoFiscal,
+  statusDocumentoFiscalEfetivo,
+  sugerirVinculosNfseParaPagamentos,
+  vincularNotaAoPagamento,
+} from "@/lib/domain/pagamento-documento-fiscal";
 import { podeVerValores, usePapel } from "@/lib/roles";
 import { cnpjBR, dataBR, diasAte, moeda } from "@/lib/format";
 import type { Boleto, ContaPagar, DB, OrigemContaPagar, StatusBoleto, StatusContaPagar } from "@/lib/types";
@@ -158,6 +179,14 @@ const FILTRO_COMPLETUDE_NFE_OPCOES: Array<{ valor: "todas" | IndicadorCompletude
   { valor: "Faltam dados fiscais", rotulo: "Faltam dados fiscais" },
   { valor: "Faltam dados de parcela", rotulo: "Faltam dados de parcela" },
   { valor: "Sem boleto informado", rotulo: "Sem boleto informado" },
+];
+
+const FILTRO_STATUS_PAGAMENTO_NFE_OPCOES: Array<{ valor: "todas" | StatusPagamentoNota; rotulo: string }> = [
+  { valor: "todas", rotulo: "Todos os pagamentos" },
+  { valor: "sem_boleto", rotulo: "Sem boleto / a conferir" },
+  { valor: "aguardando_pagamento", rotulo: "Aguardando pagamento" },
+  { valor: "parcialmente_paga", rotulo: "Parcialmente paga" },
+  { valor: "quitada", rotulo: "Quitada (arquivo)" },
 ];
 
 function hojeISO(): string {
@@ -318,6 +347,50 @@ function BadgeStatusConta({ status }: { status: StatusContaPagar }) {
   }
 }
 
+function BannerMensagemFinanceiro({ texto }: { texto: string }) {
+  const alerta = /^atenção/i.test(texto.trim());
+  return (
+    <div
+      className={`rounded-card border px-4 py-3 text-sm font-medium ${
+        alerta
+          ? "border-destaque bg-destaque-clara text-destaque"
+          : "border-sucesso bg-sucesso-clara text-primaria-escura"
+      }`}
+    >
+      {texto}
+    </div>
+  );
+}
+
+function BadgeStatusPagamentoNota({ status }: { status: StatusPagamentoNota }) {
+  if (status === "quitada") {
+    return (
+      <Badge cor="verde">
+        <CircleCheckBig size={14} /> {rotuloStatusPagamentoNota(status)}
+      </Badge>
+    );
+  }
+  if (status === "parcialmente_paga") {
+    return (
+      <Badge cor="azul">
+        <Clock3 size={14} /> {rotuloStatusPagamentoNota(status)}
+      </Badge>
+    );
+  }
+  if (status === "aguardando_pagamento") {
+    return (
+      <Badge cor="laranja">
+        <Clock3 size={14} /> {rotuloStatusPagamentoNota(status)}
+      </Badge>
+    );
+  }
+  return (
+    <Badge cor="cinza">
+      <ReceiptText size={14} /> {rotuloStatusPagamentoNota(status)}
+    </Badge>
+  );
+}
+
 function BadgeCompletudeNfeFinanceiro({ indicador }: { indicador: IndicadorCompletudeFinanceiro }) {
   if (indicador === "Completa") {
     return (
@@ -359,12 +432,11 @@ function BadgeCompletudeNfeFinanceiro({ indicador }: { indicador: IndicadorCompl
 }
 
 function fornecedorDoBoleto(db: DB, boleto: Boleto): string {
-  const nota = db.notas_fiscais.find((n) => n.id === boleto.nota_id);
-  return nomeFornecedor(db, nota?.fornecedor_id);
+  return fornecedorDoPagamento(db, boleto);
 }
 
 function notaDoBoleto(db: DB, boleto: Boleto) {
-  return db.notas_fiscais.find((n) => n.id === boleto.nota_id);
+  return notaDoPagamento(db, boleto);
 }
 
 function golpeConfirmado(b: Boleto): boolean {
@@ -421,13 +493,18 @@ export default function FinanceiroPage() {
 
 
   const [confirmandoLiberacao, setConfirmandoLiberacao] = useState<string | null>(null);
-  const [abaFinanceira, setAbaFinanceira] = useState<"boletos" | "contas" | "notas">("boletos");
+  const [abaFinanceira, setAbaFinanceira] = useState<
+    "pagamentos" | "conferencia" | "conciliacao" | "contas" | "notas" | "boletos_pagos"
+  >("pagamentos");
+  const [buscaBoletosPagos, setBuscaBoletosPagos] = useState("");
+  const [abrindoPdfArquivoId, setAbrindoPdfArquivoId] = useState<string | null>(null);
   const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false);
   const [buscaConta, setBuscaConta] = useState("");
   const [filtroStatusConta, setFiltroStatusConta] = useState<StatusContaPagar | "todos">("todos");
   const [filtroVencimentoConta, setFiltroVencimentoConta] = useState<FiltroVencimentoConta>("todas");
   const [buscaNfe, setBuscaNfe] = useState("");
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | IndicadorCompletudeFinanceiro>("todas");
+  const [filtroStatusPagamentoNfe, setFiltroStatusPagamentoNfe] = useState<"todas" | StatusPagamentoNota>("todas");
   const [notaDetalhesId, setNotaDetalhesId] = useState<string | null>(null);
   const [estadoCorrecaoNfe, setEstadoCorrecaoNfe] = useState<EstadoModalCorrecaoNfe | null>(null);
   const [mensagemCorrecaoNfe, setMensagemCorrecaoNfe] = useState<string | null>(null);
@@ -452,6 +529,7 @@ export default function FinanceiroPage() {
   const [mostrarDetalhesTecnicos, setMostrarDetalhesTecnicos] = useState(false);
   const [justificativaImportacao, setJustificativaImportacao] = useState("");
   const [parcelaSelecionadaMultipla, setParcelaSelecionadaMultipla] = useState("");
+  const [notaVinculoManualId, setNotaVinculoManualId] = useState("");
   const [mensagemImportacaoBoleto, setMensagemImportacaoBoleto] = useState<string | null>(null);
   const [boletoResumoId, setBoletoResumoId] = useState<string | null>(null);
   const [boletoCodigoAbertoId, setBoletoCodigoAbertoId] = useState<string | null>(null);
@@ -463,11 +541,30 @@ export default function FinanceiroPage() {
   const [erroPagamentoBoleto, setErroPagamentoBoleto] = useState<string | null>(null);
   const [mensagemPagamentoBoleto, setMensagemPagamentoBoleto] = useState<string | null>(null);
   const [processandoPagamentoBoleto, setProcessandoPagamentoBoleto] = useState(false);
+  const [boletoDestaqueId, setBoletoDestaqueId] = useState<string | null>(null);
+  const [boletoConciliandoId, setBoletoConciliandoId] = useState<string | null>(null);
+  const [confirmouDataBancoConciliacao, setConfirmouDataBancoConciliacao] = useState(false);
+  const [erroConciliacaoBoleto, setErroConciliacaoBoleto] = useState<string | null>(null);
+  const [processandoConciliacaoBoleto, setProcessandoConciliacaoBoleto] = useState(false);
   const inputLinhaRef = useRef<HTMLInputElement | null>(null);
   const execucaoIdentificacaoRef = useRef(0);
   const contaSelecionadaBoletoIdRef = useRef<string | null>(null);
   const salvandoCorrecaoNfeRef = useRef(false);
   const processandoPagamentoBoletoRef = useRef(false);
+
+  useEffect(() => {
+    if (!boletoDestaqueId) return;
+    const timer = window.setTimeout(() => setBoletoDestaqueId(null), 8000);
+    const scrollTimer = window.setTimeout(() => {
+      document
+        .getElementById(`boleto-card-${boletoDestaqueId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(scrollTimer);
+    };
+  }, [boletoDestaqueId]);
 
   useEffect(() => {
     if (!codigoAmpliado) return;
@@ -569,43 +666,104 @@ export default function FinanceiroPage() {
     setMensagemPagamentoBoleto(null);
 
     try {
-      const proximo = structuredClone(db) as DB;
-      const resultado = informarPagamentoBoleto(
-        proximo,
-        boletoId,
-        snapshot,
-        {
-          dataPagamento: formPagamentoBoleto.dataPagamento,
-          valorPago,
-          bancoConta: formPagamentoBoleto.bancoConta,
-          responsavel: formPagamentoBoleto.responsavel,
-          observacao: formPagamentoBoleto.observacao,
-          confirmouAviso: formPagamentoBoleto.confirmouAviso,
-        },
-        {
-          responsavelPadrao: "usuário local",
-          gerarIdHistorico: () => uid("bph"),
+      let falhou: string | null = null;
+      mutate((atual) => {
+        const resultado = informarPagamentoBoleto(
+          atual,
+          boletoId,
+          snapshot,
+          {
+            dataPagamento: formPagamentoBoleto.dataPagamento,
+            valorPago,
+            bancoConta: formPagamentoBoleto.bancoConta,
+            responsavel: formPagamentoBoleto.responsavel,
+            observacao: formPagamentoBoleto.observacao,
+            confirmouAviso: formPagamentoBoleto.confirmouAviso,
+          },
+          {
+            responsavelPadrao: "usuário local",
+            gerarIdHistorico: () => uid("bph"),
+          }
+        );
+        if (!resultado.sucesso) {
+          falhou = resultado.erros.join(" ") || "Não foi possível informar o pagamento.";
         }
-      );
+      });
 
-      if (!resultado.sucesso) {
-        setErroPagamentoBoleto(resultado.erros.join(" "));
+      if (falhou) {
+        setErroPagamentoBoleto(falhou);
         return;
       }
 
-      mutate((atual) => {
-        Object.assign(atual, proximo);
-      });
-
-      setMensagemReceberBoleto("Pagamento informado. O boleto agora aguarda conciliação bancária.");
+      setMensagemReceberBoleto(
+        "Pagamento informado. Confira data e banco na aba Conciliação bancária — a baixa final só acontece depois de você confirmar no extrato."
+      );
       setBoletoPagamentoId(null);
       setSnapshotPagamento(null);
       setFormPagamentoBoleto(novoPagamentoBoletoInicial());
       setErroPagamentoBoleto(null);
       setMensagemPagamentoBoleto(null);
+      setBoletoDestaqueId(boletoId);
+      setBoletoConciliandoId(boletoId);
+      setConfirmouDataBancoConciliacao(false);
+      setErroConciliacaoBoleto(null);
+      setAbaFinanceira("conciliacao");
+    } catch (erro) {
+      setErroPagamentoBoleto(
+        erro instanceof Error ? erro.message : "Falha inesperada ao informar o pagamento."
+      );
     } finally {
       processandoPagamentoBoletoRef.current = false;
       setProcessandoPagamentoBoleto(false);
+    }
+  }
+
+  function abrirConciliacaoBoleto(boletoId: string) {
+    setAbaFinanceira("conciliacao");
+    setBoletoConciliandoId(boletoId);
+    setBoletoDestaqueId(boletoId);
+    setConfirmouDataBancoConciliacao(false);
+    setErroConciliacaoBoleto(null);
+  }
+
+  function confirmarConciliacaoBoleto(boletoId: string) {
+    if (processandoConciliacaoBoleto) return;
+    setProcessandoConciliacaoBoleto(true);
+    setErroConciliacaoBoleto(null);
+
+    try {
+      let falhou: string | null = null;
+      mutate((atual) => {
+        const resultado = conciliarBoleto(
+          atual,
+          boletoId,
+          {
+            confirmouDataEBanco: confirmouDataBancoConciliacao,
+            responsavel: "usuário local",
+          },
+          { gerarIdHistorico: () => uid("bph") }
+        );
+        if (!resultado.sucesso) {
+          falhou = resultado.erros.join(" ") || "Não foi possível conciliar o boleto.";
+        }
+      });
+
+      if (falhou) {
+        setErroConciliacaoBoleto(falhou);
+        return;
+      }
+
+      setMensagemReceberBoleto("Conciliação confirmada. O boleto foi marcado como pago.");
+      setBoletoConciliandoId(null);
+      setConfirmouDataBancoConciliacao(false);
+      setBoletoDestaqueId(boletoId);
+      setAbaFinanceira("pagamentos");
+    } catch (erro) {
+      setErroConciliacaoBoleto(
+        erro instanceof Error ? erro.message : "Falha inesperada ao conciliar."
+      );
+    } finally {
+      setProcessandoConciliacaoBoleto(false);
     }
   }
 
@@ -659,8 +817,9 @@ export default function FinanceiroPage() {
       listarNotasFiscaisFinanceiro(db, {
         pesquisa: buscaNfe,
         completude: filtroCompletudeNfe,
+        statusPagamento: filtroStatusPagamentoNfe,
       }),
-    [db, buscaNfe, filtroCompletudeNfe]
+    [db, buscaNfe, filtroCompletudeNfe, filtroStatusPagamentoNfe]
   );
   const notaDetalhes = notaDetalhesId ? detalharNotaFiscalFinanceiro(db, notaDetalhesId) ?? null : null;
   const notaCorrecao = estadoCorrecaoNfe ? db.notas_fiscais.find((nota) => nota.id === estadoCorrecaoNfe.notaId) ?? null : null;
@@ -694,16 +853,95 @@ export default function FinanceiroPage() {
   const boletosAguardandoConciliacao = boletosAtivos.filter((boleto) => boleto.status === "aguardando_conciliacao");
   const boletosPagos = boletosAtivos.filter((boleto) => boleto.status === "pago");
   const boletosPendentesAgenda = boletosAtivos.filter(
-    (boleto) => boleto.status !== "aguardando_conciliacao" && boleto.status !== "pago"
+    (boleto) =>
+      boleto.status !== "aguardando_conciliacao" &&
+      boleto.status !== "pago" &&
+      boletoProntoParaAgendaPagamentos(boleto)
   );
+
+  const boletosPagosArquivo = useMemo(() => {
+    const termo = buscaBoletosPagos.trim().toLowerCase();
+    const lista = [...boletosPagos].sort((a, b) => {
+      const da = a.pagamento_data || a.pagamento_informado_em || a.vencimento;
+      const db_ = b.pagamento_data || b.pagamento_informado_em || b.vencimento;
+      return (db_ || "").localeCompare(da || "");
+    });
+    if (!termo) return lista;
+    return lista.filter((boleto) => {
+      const fornecedor = fornecedorDoBoleto(db, boleto).toLowerCase();
+      const nota = notaDoBoleto(db, boleto);
+      const campos = [
+        fornecedor,
+        boleto.pagamento_banco_conta,
+        boleto.linha_digitavel,
+        nota?.numero,
+        boleto.numero_parcela,
+        String(boleto.pagamento_valor ?? boleto.valor),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return campos.includes(termo);
+    });
+  }, [boletosPagos, buscaBoletosPagos, db]);
+
+  async function verPdfArquivoBoleto(boleto: Boleto) {
+    const documentoId = boleto.documento_boleto_id;
+    if (!documentoId) {
+      setMensagemReceberBoleto("Este boleto pago não tem PDF guardado.");
+      return;
+    }
+    const doc = db.documentos_boleto.find((d) => d.id === documentoId);
+    setAbrindoPdfArquivoId(documentoId);
+    try {
+      let arquivo = await lerArquivoDocumentoBoletoIdb(documentoId);
+      if (!arquivo && doc?.nome_arquivo) {
+        const lote = await listarRegistrosLoteIdb();
+        const registro = lote.find(
+          (item) => item.tipo === "pdf_boleto" && item.nome.toLowerCase() === doc.nome_arquivo.toLowerCase()
+        );
+        if (registro) arquivo = registroIdbParaArquivo(registro);
+      }
+      if (!arquivo) {
+        setMensagemReceberBoleto(
+          `Não achei o PDF “${doc?.nome_arquivo ?? documentoId}” neste navegador.`
+        );
+        return;
+      }
+      const url = URL.createObjectURL(arquivo);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setMensagemReceberBoleto(e instanceof Error ? e.message : "Não foi possível abrir o PDF.");
+    } finally {
+      setAbrindoPdfArquivoId(null);
+    }
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const aba = new URLSearchParams(window.location.search).get("aba");
     if (aba === "contas") setAbaFinanceira("contas");
     else if (aba === "notas") setAbaFinanceira("notas");
-    else setAbaFinanceira("boletos");
+    else if (aba === "boletos_pagos" || aba === "boletos-pagos") setAbaFinanceira("boletos_pagos");
+    else if (aba === "conferencia") setAbaFinanceira("conferencia");
+    else if (aba === "conciliacao") setAbaFinanceira("conciliacao");
+    else setAbaFinanceira("pagamentos"); // boletos / pagamentos
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("limparNotasBoletos") !== "1") return;
+    const resultado = limparNotasEBoletos();
+    window.history.replaceState({}, "", "/financeiro?aba=conferencia");
+    setAbaFinanceira("conferencia");
+    setMensagemReceberBoleto(
+      `Limpeza concluída: ${resultado.notas} nota(s), ${resultado.boletos} boleto(s) e ${resultado.documentos} PDF(s) removidos. Pode começar do zero.`
+    );
+  }, []);
+
+  const bancosContasUsados = useMemo(() => listarBancosContasUsados(db), [db]);
 
   const boletosAtrasados = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) < 0);
   const boletosVencendoHoje = boletosPendentesAgenda.filter((boleto) => (diasAte(boleto.vencimento) ?? 0) === 0);
@@ -718,7 +956,13 @@ export default function FinanceiroPage() {
     suspeito: 0,
   };
   boletosAtivos.forEach((b) => {
-    totais[b.status] += b.valor;
+    if (
+      b.status === "aguardando_conciliacao" ||
+      b.status === "pago" ||
+      boletoProntoParaAgendaPagamentos(b)
+    ) {
+      totais[b.status] += b.valor;
+    }
   });
 
   function rotuloDia(iso: string): string {
@@ -773,6 +1017,46 @@ export default function FinanceiroPage() {
 
   function abrirDetalhesNfe(notaId: string) {
     setNotaDetalhesId(notaId);
+  }
+
+  function irParaPagamentoDaNota(notaId: string) {
+    const parcelas = db.boletos.filter(
+      (boleto) => boleto.nota_id === notaId && !golpeConfirmado(boleto)
+    );
+    const aguardandoConciliacao = parcelas.find((b) => b.status === "aguardando_conciliacao");
+    const naAgenda = parcelas.find(
+      (b) =>
+        b.status !== "pago" &&
+        b.status !== "aguardando_conciliacao" &&
+        boletoProntoParaAgendaPagamentos(b)
+    );
+    const alvo = aguardandoConciliacao ?? naAgenda;
+
+    fecharDetalhesNfe();
+    setErroReceberBoleto(null);
+
+    if (!alvo) {
+      setAbaFinanceira("conferencia");
+      setMensagemReceberBoleto(
+        "Essa nota ainda não tem boleto conferido. Pareie na Conferência; depois o título aparece em Pagamentos."
+      );
+      return;
+    }
+
+    if (alvo.status === "aguardando_conciliacao") {
+      setAbaFinanceira("conciliacao");
+      setMensagemReceberBoleto(
+        "Pagamento já informado — confirme data e banco na conciliação."
+      );
+    } else {
+      setAbaFinanceira("pagamentos");
+      setMensagemReceberBoleto(
+        alvo.status === "travado"
+          ? "Título encontrado, mas ainda travado até a conferência da mercadoria no Recebimento."
+          : "Título destacado na agenda. Use Informar pagamento realizado para registrar banco e data."
+      );
+    }
+    setBoletoDestaqueId(alvo.id);
   }
 
   function fecharDetalhesNfe() {
@@ -1045,6 +1329,7 @@ export default function FinanceiroPage() {
     setMensagemImportacaoBoleto(null);
     setJustificativaImportacao("");
     setParcelaSelecionadaMultipla("");
+    setNotaVinculoManualId("");
     setMostrarLinhaCompletaImportada(false);
     setMostrarDetalhesTecnicos(false);
   }
@@ -1061,6 +1346,7 @@ export default function FinanceiroPage() {
     setEstadoImportacaoBoleto({ arquivo, etapa: "lendo_documento", diagnostico: null });
     setJustificativaImportacao("");
     setParcelaSelecionadaMultipla("");
+    setNotaVinculoManualId("");
 
     try {
       const conteudo = await arquivo.arrayBuffer();
@@ -1092,6 +1378,19 @@ export default function FinanceiroPage() {
       }
 
       const escolhido = identificado.validos[0];
+      const jaPago = detectarBoletoJaPago(db, { linhaDigitavel: escolhido.valorNormalizado, hashSha256: hash });
+      if (jaPago) {
+        setEstadoImportacaoBoleto({
+          arquivo,
+          conteudo,
+          hash,
+          linhaSelecionada: escolhido.valorNormalizado,
+          diagnostico: identificado.diagnostico,
+          falha: jaPago.mensagem,
+        });
+        return;
+      }
+
       const textoEstruturado = await extrairTextoEstruturadoEmMemoria(arquivo);
       const dados = extrairDadosEstruturadosDoBoleto(escolhido.valorNormalizado, textoEstruturado);
 
@@ -1122,25 +1421,102 @@ export default function FinanceiroPage() {
     void analisarImportacaoBoleto(arquivo);
   }
 
-  /** PDF do lote (Recebimento → A conciliar): abre o modal e analisa sem pedir upload de novo. */
+  /** Caixa / lote: boleto → fila Conferência (sem casar ainda). */
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const id = params.get("importarLoteBoleto");
+    const idConferencia = params.get("receberBoletoConferencia");
+    const idImportar = params.get("importarLoteBoleto");
+    const id = idConferencia || idImportar;
     if (!id || handoffLoteProcessado.current === id) return;
     handoffLoteProcessado.current = id;
-    window.history.replaceState({}, "", "/financeiro?aba=boletos");
+    window.history.replaceState({}, "", "/financeiro?aba=conferencia");
 
     void (async () => {
       await hidratarFilaLoteDoIdb();
       const arquivo = await obterArquivoFilaAsync(id);
       if (!arquivo) {
         setMensagemReceberBoleto(
-          "Não achei o PDF do lote neste navegador. Volte em Recebimento → A conciliar e use Levar ao Financeiro de novo."
+          "Não achei o PDF do boleto neste navegador. Volte na Caixa de entrada e confirme de novo."
         );
+        setAbaFinanceira("conferencia");
         return;
       }
-      setAbaFinanceira("boletos");
+
+      setAbaFinanceira("conferencia");
+      setItemLoteBoletoId(id);
+
+      try {
+        setMensagemReceberBoleto(`Recebendo boleto na conferência: ${arquivo.name}`);
+        const conteudo = await arquivo.arrayBuffer();
+        let linha: string | undefined;
+        try {
+          const identificado = await identificarCodigoBoletoNoArquivoLocal(arquivo, () => false);
+          linha = identificado.validos[0]?.valorNormalizado;
+        } catch {
+          // Sem linha ainda — documento entra mesmo assim para parear depois
+        }
+
+        const proximo = structuredClone(getDB()) as typeof db;
+        const resultado = await receberBoletoPendenteNaConferencia(
+          proximo,
+          {
+            arquivo: {
+              nomeArquivo: arquivo.name,
+              tipoArquivo: arquivo.type,
+              tamanhoBytes: arquivo.size,
+              conteudo,
+            },
+            linhaInformada: linha,
+          },
+          { gerarId: () => uid("docbol") }
+        );
+
+        if (!resultado.sucesso && !resultado.jaPago) {
+          setMensagemReceberBoleto(
+            resultado.erros.join(" ") ||
+              "Não foi possível registrar o boleto. Use Importar boleto na Conferência."
+          );
+          setModalImportarBoletoAberto(true);
+          setEstadoImportacaoBoleto(novoEstadoImportacaoBoleto());
+          await analisarImportacaoBoleto(arquivo);
+          return;
+        }
+
+        if (resultado.jaPago) {
+          marcarItemConcluido(id);
+          setItemLoteBoletoId(null);
+          setMensagemReceberBoleto(resultado.jaPago.mensagem);
+          setAbaFinanceira("conciliacao");
+          return;
+        }
+
+        if (!resultado.documento) {
+          setMensagemReceberBoleto("Não foi possível registrar o boleto.");
+          return;
+        }
+
+        mutate((atual) => {
+          Object.assign(atual, proximo);
+        });
+        try {
+          await salvarArquivoDocumentoBoletoIdb(resultado.documento.id, arquivo);
+        } catch {
+          // Ver PDF pode falhar até reimportar
+        }
+
+        marcarItemConcluido(id);
+        setItemLoteBoletoId(null);
+        setMensagemReceberBoleto(
+          `Boleto “${arquivo.name}” na Conferência (sem NF). Marque a nota e o boleto e confirme o pareamento.`
+        );
+        return;
+      } catch (erro) {
+        setMensagemReceberBoleto(
+          erro instanceof Error ? erro.message : "Falha ao receber boleto na conferência."
+        );
+      }
+
       setItemLoteBoletoId(id);
       setBoletoImportacaoAlvoId(null);
       setModalImportarBoletoAberto(true);
@@ -1148,13 +1524,69 @@ export default function FinanceiroPage() {
       setMensagemImportacaoBoleto(null);
       setJustificativaImportacao("");
       setParcelaSelecionadaMultipla("");
+      setNotaVinculoManualId("");
       setMostrarLinhaCompletaImportada(false);
       setMostrarDetalhesTecnicos(false);
-      setMensagemReceberBoleto(`Analisando boleto do lote: ${arquivo.name}`);
+      setMensagemReceberBoleto(`Analisando boleto: ${arquivo.name}`);
       await analisarImportacaoBoleto(arquivo);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handoff único na entrada da página
   }, []);
+
+  function criarParcelaManualEReanalisar() {
+    const dados = estadoImportacaoBoleto.dadosExtraidos;
+    const hash = estadoImportacaoBoleto.hash;
+    if (!dados) {
+      setMensagemImportacaoBoleto("Analise o boleto antes de vincular manualmente.");
+      return;
+    }
+    if (!notaVinculoManualId) {
+      setMensagemImportacaoBoleto("Selecione a NF-e correspondente a este boleto.");
+      return;
+    }
+    if (dados.valor_codificado === undefined || !dados.vencimento_extraido) {
+      setMensagemImportacaoBoleto(
+        "O boleto precisa ter valor e vencimento lidos para criar a parcela. Confira o PDF ou digite a linha digitável de novo."
+      );
+      return;
+    }
+    const nota = db.notas_fiscais.find((n) => n.id === notaVinculoManualId);
+    if (!nota) {
+      setMensagemImportacaoBoleto("Nota selecionada não encontrada.");
+      return;
+    }
+
+    try {
+      const parcelaId = uid("bol");
+      const dbNovo = mutate((d) => {
+        criarParcelaAguardandoDocumento(d, {
+          id: parcelaId,
+          nota_id: notaVinculoManualId,
+          valor: dados.valor_codificado!,
+          vencimento: dados.vencimento_extraido!,
+          cnpj_beneficiario: dados.cnpj_beneficiario || nota.cnpj_emitente,
+          numero_parcela: dados.numero_parcela ?? "001",
+          meio_pagamento_esperado: "boleto",
+          status: "liberado",
+        });
+      });
+      const confronto = confrontarBoletoComNfe(dbNovo, dados, hash);
+      setEstadoImportacaoBoleto((atual) => ({ ...atual, confronto, etapa: "resultado" }));
+      setMensagemImportacaoBoleto(null);
+      if (confronto.classificacao === "parcial" || confronto.classificacao === "multiplas_possibilidades") {
+        setJustificativaImportacao(
+          `Parcela criada manualmente a partir do boleto e vinculada à NF-e ${nota.numero ?? "s/n"}.`
+        );
+      }
+      if (confronto.classificacao === "sem_correspondencia") {
+        setMensagemImportacaoBoleto(
+          "Parcela criada, mas o confronto ainda não bateu. Confira se valor e vencimento do boleto batem com a parcela."
+        );
+      }
+    } catch (erro) {
+      setMensagemImportacaoBoleto(erro instanceof Error ? erro.message : "Falha ao criar parcela.");
+    }
+  }
 
   async function confirmarImportacaoPrincipal() {
     if (processandoImportacaoBoleto) return;
@@ -1175,6 +1607,20 @@ export default function FinanceiroPage() {
       }
     }
 
+    if (confronto.classificacao === "divergente") {
+      if (
+        confronto.candidatos.length > 1 &&
+        !candidatoSelecionadoEhValido(confronto.candidatos, parcelaSelecionadaMultipla)
+      ) {
+        setMensagemImportacaoBoleto("Selecione a parcela candidata para confirmar a divergência.");
+        return;
+      }
+      if (!justificativaImportacao.trim()) {
+        setMensagemImportacaoBoleto("Justificativa obrigatória para confirmar resultado divergente.");
+        return;
+      }
+    }
+
     if (confronto.classificacao === "parcial" && !justificativaImportacao.trim()) {
       setMensagemImportacaoBoleto("Justificativa obrigatória para confirmação parcial.");
       return;
@@ -1185,6 +1631,13 @@ export default function FinanceiroPage() {
 
     try {
       const proximo = structuredClone(db) as DB;
+      const parcelaIdConfirmacao =
+        confronto.classificacao === "multiplas_possibilidades" ||
+        (confronto.classificacao === "divergente" && confronto.candidatos.length > 1)
+          ? parcelaSelecionadaMultipla
+          : confronto.classificacao === "divergente"
+            ? parcelaSelecionadaMultipla || confronto.parcela_id
+            : undefined;
       const resultado = await confirmarConfrontoBoleto(
         proximo,
         {
@@ -1197,7 +1650,7 @@ export default function FinanceiroPage() {
           linhaInformada: estadoImportacaoBoleto.linhaSelecionada,
           dadosExtraidos: dados,
           resultadoConfrontoInformado: confronto,
-          parcelaSelecionadaId: confronto.classificacao === "multiplas_possibilidades" ? parcelaSelecionadaMultipla : undefined,
+          parcelaSelecionadaId: parcelaIdConfirmacao,
           boletoEsperadoId: boletoImportacaoAlvoId ?? undefined,
           confirmacaoHumana: true,
           responsavel: "usuário local",
@@ -1215,12 +1668,20 @@ export default function FinanceiroPage() {
         Object.assign(atual, proximo);
       });
 
+      if (resultado.documento?.id) {
+        try {
+          await salvarArquivoDocumentoBoletoIdb(resultado.documento.id, arquivo);
+        } catch {
+          // Metadados já gravados; Ver PDF pode falhar até reimportar.
+        }
+      }
+
       if (itemLoteBoletoId) {
         marcarItemConcluido(itemLoteBoletoId);
         setItemLoteBoletoId(null);
       }
 
-      setMensagemReceberBoleto("Boleto conferido e adicionado aos boletos a vencer");
+      setMensagemReceberBoleto("Boleto conferido e adicionado aos pagamentos futuros");
       setModalImportarBoletoAberto(false);
       setBoletoImportacaoAlvoId(null);
     } catch (erro) {
@@ -1301,12 +1762,13 @@ export default function FinanceiroPage() {
     const fornecedor = fornecedorDoBoleto(db, boleto);
     const segmentosCodigoPagamento: SegmentoCodigoBarrasItf[] = useMemo(() => {
       if (!codigoAberto || !estadoAgendaPagamento.codigoCanonico) return [];
+      if (boleto.meio_pagamento_esperado === "pix") return [];
       try {
         return gerarPadraoInterleaved2of5(estadoAgendaPagamento.codigoCanonico);
       } catch {
         return [];
       }
-    }, [codigoAberto, estadoAgendaPagamento.codigoCanonico]);
+    }, [codigoAberto, estadoAgendaPagamento.codigoCanonico, boleto.meio_pagamento_esperado]);
     const acoesDesktop = acoesPagamentoDisponiveisNoLayout("desktop", estadoAgendaPagamento);
     const acoesMobile = acoesPagamentoDisponiveisNoLayout("mobile", estadoAgendaPagamento);
     const configuracaoCodigoSvg = useMemo(() => {
@@ -1315,10 +1777,15 @@ export default function FinanceiroPage() {
     }, [codigoAberto, segmentosCodigoPagamento]);
     const mostrarAcoesInlineCodigo = codigoAberto && acoesUnicasQuandoCodigoAberto().length > 0;
 
+    const destacado = boletoDestaqueId === boleto.id;
+
     return (
       <Card
+        id={`boleto-card-${boleto.id}`}
         className={`space-y-2 ${cancelado ? "opacity-60" : ""} ${
           boleto.status === "suspeito" && !cancelado ? "border-2 border-erro" : ""
+        } ${destacado ? "border-2 border-blue-500 ring-2 ring-blue-200" : ""} ${
+          boleto.status === "aguardando_conciliacao" ? "border-blue-200 bg-blue-50/40" : ""
         }`}
       >
         <div className={CLASSE_GRID_CODIGO_PAGAMENTO}>
@@ -1326,12 +1793,46 @@ export default function FinanceiroPage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className={cancelado ? "line-through" : ""}>
                 <p className="font-bold">{fornecedor}</p>
-                <p className="text-sm text-slate-600">NF-e {notaDoBoleto(db, boleto)?.numero ?? "—"} · {rotuloParcela(boleto.numero_parcela)}</p>
+                <p className="text-sm text-slate-600">
+                  {boleto.meio_pagamento_esperado === "plataforma"
+                    ? "Plataforma"
+                    : boleto.meio_pagamento_esperado === "pix"
+                      ? "PIX"
+                      : "Boleto"}
+                  {notaDoBoleto(db, boleto)
+                    ? ` · ${notaDoBoleto(db, boleto)?.tipo === "nfse" ? "NFS-e" : "NF-e"} ${notaDoBoleto(db, boleto)?.numero}`
+                    : statusDocumentoFiscalEfetivo(boleto) === "aguardando_nfse"
+                      ? " · Aguardando NFS-e"
+                      : " · Sem nota"}
+                  {boleto.numero_parcela ? ` · ${rotuloParcela(boleto.numero_parcela)}` : ""}
+                </p>
                 <p className="text-xl font-bold">{moeda(boleto.valor)}</p>
                 <p className="text-sm text-slate-600">Vencimento: {dataBR(boleto.vencimento)}</p>
+                {boleto.status === "aguardando_conciliacao" && (
+                  <p className="mt-1 text-sm font-medium text-blue-800">
+                    Pagamento informado
+                    {boleto.pagamento_data ? ` em ${dataBR(boleto.pagamento_data)}` : ""}
+                    {boleto.pagamento_valor != null ? ` · ${moeda(boleto.pagamento_valor)}` : ""}
+                    {boleto.pagamento_banco_conta ? ` · ${boleto.pagamento_banco_conta}` : ""}
+                  </p>
+                )}
               </div>
               <div className="flex flex-col items-end gap-1">
                 <BadgeStatus boleto={boleto} />
+                <Badge
+                  cor={
+                    boleto.meio_pagamento_esperado === "plataforma"
+                      ? "verde"
+                      : boleto.meio_pagamento_esperado === "pix"
+                        ? "azul"
+                        : "cinza"
+                  }
+                >
+                  {rotuloMeioPagamento(boleto)}
+                </Badge>
+                {statusDocumentoFiscalEfetivo(boleto) === "aguardando_nfse" && (
+                  <Badge cor="laranja">{rotuloStatusDocumentoFiscal("aguardando_nfse")}</Badge>
+                )}
                 {boleto.status_conferencia === "conferido" && <Badge cor="verde">Conferido</Badge>}
                 {atrasado && !cancelado && <Badge cor="vermelho">atrasado</Badge>}
               </div>
@@ -1372,8 +1873,8 @@ export default function FinanceiroPage() {
                   </button>
                 )}
                 {boleto.status === "aguardando_conciliacao" && (
-                  <button className="btn-secundario" type="button" disabled>
-                    <Clock3 size={16} /> Aguardando conciliação bancária
+                  <button className="btn-primario" type="button" onClick={() => abrirConciliacaoBoleto(boleto.id)}>
+                    <Clock3 size={16} /> Conciliar no banco
                   </button>
                 )}
                 {boleto.status === "travado" && (
@@ -1551,15 +2052,33 @@ export default function FinanceiroPage() {
 
   return (
     <div className="space-y-4">
-      <TituloPagina titulo="Financeiro" subtitulo="Boletos e contas" />
+      <TituloPagina titulo="Financeiro" subtitulo="Pagamentos, conferência, conciliação e contas" />
 
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className={`btn-secundario ${abaFinanceira === "boletos" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
-          onClick={() => setAbaFinanceira("boletos")}
+          className={`btn-secundario ${abaFinanceira === "pagamentos" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
+          onClick={() => setAbaFinanceira("pagamentos")}
         >
-          Boletos
+          Pagamentos
+        </button>
+        <button
+          type="button"
+          className={`btn-secundario ${abaFinanceira === "conferencia" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
+          onClick={() => setAbaFinanceira("conferencia")}
+        >
+          Conferência
+        </button>
+        <button
+          type="button"
+          className={`btn-secundario ${abaFinanceira === "conciliacao" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
+          onClick={() => {
+            setAbaFinanceira("conciliacao");
+            setErroConciliacaoBoleto(null);
+          }}
+        >
+          Conciliação bancária
+          {boletosAguardandoConciliacao.length > 0 ? ` (${boletosAguardandoConciliacao.length})` : ""}
         </button>
         <button
           type="button"
@@ -1575,22 +2094,28 @@ export default function FinanceiroPage() {
         >
           Notas fiscais
         </button>
+        <button
+          type="button"
+          className={`btn-secundario ${abaFinanceira === "boletos_pagos" ? "border-primaria bg-primaria-clara text-primaria" : ""}`}
+          onClick={() => setAbaFinanceira("boletos_pagos")}
+        >
+          Boletos pagos
+          {boletosPagos.length > 0 ? ` (${boletosPagos.length})` : ""}
+        </button>
 
       </div>
 
-      {abaFinanceira === "boletos" ? (
+      {abaFinanceira === "pagamentos" ? (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2>Boletos a vencer</h2>
+            <h2>Pagamentos futuros</h2>
             <button type="button" className="btn-primario" onClick={() => abrirImportarBoleto()}>
               <Upload size={18} /> Importar boleto
             </button>
           </div>
 
           {mensagemReceberBoleto && (
-            <div className="rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
-              {mensagemReceberBoleto}
-            </div>
+            <BannerMensagemFinanceiro texto={mensagemReceberBoleto} />
           )}
 
           {/* Alerta de boleto suspeito */}
@@ -1654,10 +2179,29 @@ export default function FinanceiroPage() {
           <section className="space-y-4">
             <h2>Agenda financeira</h2>
 
+            <div id="secao-aguardando-conciliacao" className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="rotulo text-blue-700">Aguardando conciliação bancária</p>
+                <button type="button" className="btn-secundario" onClick={() => setAbaFinanceira("conciliacao")}>
+                  Abrir conciliação
+                </button>
+              </div>
+              <p className="text-xs text-slate-500">
+                Pagamento já informado — confirme data e banco na aba Conciliação bancária para marcar como pago.
+              </p>
+              {boletosAguardandoConciliacao.length === 0 ? (
+                <Vazio mensagem="Nenhum boleto com pagamento informado aguardando baixa bancária." />
+              ) : (
+                [...boletosAguardandoConciliacao]
+                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
+              )}
+            </div>
+
             <div className="space-y-2">
               <p className="rotulo text-erro">Atrasados</p>
               {boletosAtrasados.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto atrasado." />
+                <Vazio mensagem="Nenhum pagamento atrasado." />
               ) : (
                 [...boletosAtrasados]
                   .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
@@ -1668,7 +2212,7 @@ export default function FinanceiroPage() {
             <div className="space-y-2">
               <p className="rotulo">Vencendo hoje</p>
               {boletosVencendoHoje.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto vencendo hoje." />
+                <Vazio mensagem="Nenhum pagamento vencendo hoje." />
               ) : (
                 [...boletosVencendoHoje]
                   .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
@@ -1679,7 +2223,7 @@ export default function FinanceiroPage() {
             <div className="space-y-2">
               <p className="rotulo">A vencer</p>
               {boletosAVencer.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto a vencer." />
+                <Vazio mensagem="Nenhum pagamento a vencer." />
               ) : (
                 [...boletosAVencer]
                   .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
@@ -1689,20 +2233,6 @@ export default function FinanceiroPage() {
                       <CartaoBoleto boleto={boleto} />
                     </div>
                   ))
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <p className="rotulo text-blue-700">Aguardando conciliação bancária</p>
-              <p className="text-xs text-slate-500">
-                Pagamento já informado no app — aguardando baixa bancária.
-              </p>
-              {boletosAguardandoConciliacao.length === 0 ? (
-                <Vazio mensagem="Nenhum boleto com pagamento informado aguardando baixa bancária." />
-              ) : (
-                [...boletosAguardandoConciliacao]
-                  .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
-                  .map((boleto) => <CartaoBoleto key={boleto.id} boleto={boleto} />)
               )}
             </div>
 
@@ -1718,6 +2248,145 @@ export default function FinanceiroPage() {
             </div>
           </section>
         </>
+      ) : abaFinanceira === "conferencia" ? (
+        <div className="space-y-4">
+          {mensagemReceberBoleto && (
+            <BannerMensagemFinanceiro texto={mensagemReceberBoleto} />
+          )}
+          <ConferenciaFinanceira
+            onIrParaPagamentos={(boletoId) => {
+              setAbaFinanceira("pagamentos");
+              if (boletoId) setBoletoDestaqueId(boletoId);
+            }}
+            onImportarBoleto={(boletoId) => {
+              setAbaFinanceira("pagamentos");
+              abrirImportarBoleto(boletoId);
+            }}
+          />
+        </div>
+      ) : abaFinanceira === "conciliacao" ? (
+        <section className="space-y-4">
+          <div>
+            <h2>Conciliação bancária</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Aqui ficam os boletos com pagamento já informado. Confirme a <strong>data</strong> e o{" "}
+              <strong>banco/conta</strong> no extrato e só então marque como pago.
+            </p>
+          </div>
+
+          {mensagemReceberBoleto && (
+            <BannerMensagemFinanceiro texto={mensagemReceberBoleto} />
+          )}
+
+          {boletosAguardandoConciliacao.length === 0 ? (
+            <Vazio mensagem="Nenhum boleto aguardando conciliação. Informe o pagamento em Pagamentos para aparecer aqui." />
+          ) : (
+            <div className="space-y-3">
+              {[...boletosAguardandoConciliacao]
+                .sort((a, b) => (a.pagamento_data ?? a.vencimento).localeCompare(b.pagamento_data ?? b.vencimento))
+                .map((boleto) => {
+                  const selecionado = boletoConciliandoId === boleto.id;
+                  const destacado = boletoDestaqueId === boleto.id;
+                  return (
+                    <Card
+                      key={boleto.id}
+                      id={`boleto-card-${boleto.id}`}
+                      className={`space-y-3 ${destacado ? "border-2 border-blue-500 ring-2 ring-blue-200" : ""} ${
+                        selecionado ? "border-blue-300 bg-blue-50/50" : ""
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-bold">{fornecedorDoBoleto(db, boleto)}</p>
+                          <p className="text-sm text-slate-600">
+                            {notaDoBoleto(db, boleto)
+                              ? `${notaDoBoleto(db, boleto)?.tipo === "nfse" ? "NFS-e" : "NF-e"} ${notaDoBoleto(db, boleto)?.numero}`
+                              : "Sem nota"}
+                            {boleto.numero_parcela ? ` · ${rotuloParcela(boleto.numero_parcela)}` : ""}
+                          </p>
+                          <p className="text-xl font-bold">{moeda(boleto.pagamento_valor ?? boleto.valor)}</p>
+                        </div>
+                        <Badge cor="azul">Aguardando conciliação</Badge>
+                      </div>
+
+                      <div className="grid gap-2 rounded-card border border-blue-200 bg-white px-3 py-3 text-sm sm:grid-cols-2">
+                        <p>
+                          <span className="rotulo block">Data do pagamento</span>
+                          <span className="font-semibold text-slate-900">
+                            {boleto.pagamento_data ? dataBR(boleto.pagamento_data) : "—"}
+                          </span>
+                        </p>
+                        <p>
+                          <span className="rotulo block">Banco/conta usada</span>
+                          <span className="font-semibold text-slate-900">{boleto.pagamento_banco_conta || "—"}</span>
+                        </p>
+                        <p>
+                          <span className="rotulo block">Valor informado</span>
+                          <span className="font-semibold text-slate-900">
+                            {moeda(boleto.pagamento_valor ?? boleto.valor)}
+                          </span>
+                        </p>
+                        <p>
+                          <span className="rotulo block">Vencimento do boleto</span>
+                          <span className="font-semibold text-slate-900">{dataBR(boleto.vencimento)}</span>
+                        </p>
+                      </div>
+
+                      {!selecionado ? (
+                        <button type="button" className="btn-primario" onClick={() => abrirConciliacaoBoleto(boleto.id)}>
+                          <CircleCheckBig size={16} /> Confirmar data e banco no extrato
+                        </button>
+                      ) : (
+                        <div className="space-y-3 rounded-card border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-sm font-medium text-slate-800">
+                            Confirme no extrato do banco: pagamento em{" "}
+                            <strong>{boleto.pagamento_data ? dataBR(boleto.pagamento_data) : "—"}</strong> pela conta{" "}
+                            <strong>{boleto.pagamento_banco_conta || "—"}</strong>.
+                          </p>
+                          <label className="flex items-start gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={confirmouDataBancoConciliacao}
+                              onChange={(event) => setConfirmouDataBancoConciliacao(event.target.checked)}
+                            />
+                            Confirmei a data de pagamento e o banco/conta no extrato.
+                          </label>
+                          {erroConciliacaoBoleto && (
+                            <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">
+                              {erroConciliacaoBoleto}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="btn-secundario"
+                              disabled={processandoConciliacaoBoleto}
+                              onClick={() => {
+                                setBoletoConciliandoId(null);
+                                setConfirmouDataBancoConciliacao(false);
+                                setErroConciliacaoBoleto(null);
+                              }}
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-primario"
+                              disabled={processandoConciliacaoBoleto || !confirmouDataBancoConciliacao}
+                              onClick={() => confirmarConciliacaoBoleto(boleto.id)}
+                            >
+                              <CircleCheckBig size={16} />
+                              {processandoConciliacaoBoleto ? "Conciliando..." : "Marcar como pago"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })}
+            </div>
+          )}
+        </section>
       ) : abaFinanceira === "contas" ? (
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1731,9 +2400,7 @@ export default function FinanceiroPage() {
           </div>
 
           {mensagemReceberBoleto && (
-            <div className="rounded-card border border-sucesso bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">
-              {mensagemReceberBoleto}
-            </div>
+            <BannerMensagemFinanceiro texto={mensagemReceberBoleto} />
           )}
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1884,17 +2551,172 @@ export default function FinanceiroPage() {
             </>
           )}
         </section>
+      ) : abaFinanceira === "boletos_pagos" ? (
+        <section className="space-y-4">
+          <div>
+            <h2>Arquivo de boletos pagos</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Memória dos boletos já liquidados. Se o mesmo PDF voltar pela Caixa de entrada, o sistema avisa
+              que já foi pago.
+            </p>
+          </div>
+
+          {mensagemReceberBoleto && <BannerMensagemFinanceiro texto={mensagemReceberBoleto} />}
+
+          <Card className="space-y-3">
+            <label className="block max-w-xl">
+              <span className="rotulo mb-1 flex items-center gap-1">
+                <Search size={14} /> Pesquisa
+              </span>
+              <input
+                type="search"
+                value={buscaBoletosPagos}
+                onChange={(event) => setBuscaBoletosPagos(event.target.value)}
+                className="input w-full"
+                placeholder="Fornecedor, NF, banco, valor…"
+              />
+            </label>
+          </Card>
+
+          {boletosPagosArquivo.length === 0 ? (
+            <Vazio
+              mensagem={
+                boletosPagos.length === 0
+                  ? "Nenhum boleto pago ainda. Após conciliar, eles aparecem aqui."
+                  : "Nenhum boleto encontrado com a pesquisa atual."
+              }
+            />
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <Card className="p-0">
+                  <Tabela
+                    cabecalho={[
+                      "Fornecedor",
+                      "NF / parcela",
+                      "Vencimento",
+                      "Pago em",
+                      "Banco/conta",
+                      "Valor pago",
+                      "Ações",
+                    ]}
+                  >
+                    {boletosPagosArquivo.map((boleto) => {
+                      const nota = notaDoBoleto(db, boleto);
+                      return (
+                        <tr key={boleto.id} className="bg-emerald-50/30">
+                          <td className="px-3 py-3 text-sm font-semibold text-slate-900">
+                            {fornecedorDoBoleto(db, boleto)}
+                          </td>
+                          <td className="px-3 py-3 text-sm text-slate-700">
+                            {nota
+                              ? `${nota.tipo === "nfse" ? "NFS-e" : "NF-e"} ${nota.numero}`
+                              : "Sem nota"}
+                            {boleto.numero_parcela ? ` · parc. ${boleto.numero_parcela}` : ""}
+                          </td>
+                          <td className="px-3 py-3 text-sm text-slate-700">{dataBR(boleto.vencimento)}</td>
+                          <td className="px-3 py-3 text-sm text-slate-700">
+                            {boleto.pagamento_data ? dataBR(boleto.pagamento_data) : "—"}
+                          </td>
+                          <td className="px-3 py-3 text-sm text-slate-700">
+                            {boleto.pagamento_banco_conta || "—"}
+                          </td>
+                          <td className="px-3 py-3 text-sm font-bold text-slate-900">
+                            {moeda(boleto.pagamento_valor ?? boleto.valor)}
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              {boleto.documento_boleto_id && (
+                                <button
+                                  type="button"
+                                  className="btn-secundario text-xs"
+                                  disabled={abrindoPdfArquivoId === boleto.documento_boleto_id}
+                                  onClick={() => void verPdfArquivoBoleto(boleto)}
+                                >
+                                  <Eye size={14} />
+                                  {abrindoPdfArquivoId === boleto.documento_boleto_id
+                                    ? "Abrindo..."
+                                    : "Ver PDF"}
+                                </button>
+                              )}
+                              <Badge cor="verde">Pago</Badge>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </Tabela>
+                </Card>
+              </div>
+
+              <div className="space-y-3 md:hidden">
+                {boletosPagosArquivo.map((boleto) => {
+                  const nota = notaDoBoleto(db, boleto);
+                  return (
+                    <Card key={boleto.id} className="space-y-3 border-emerald-200 bg-emerald-50/40">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-bold text-slate-900">{fornecedorDoBoleto(db, boleto)}</p>
+                          <p className="text-sm text-slate-600">
+                            {nota
+                              ? `${nota.tipo === "nfse" ? "NFS-e" : "NF-e"} ${nota.numero}`
+                              : "Sem nota"}
+                            {boleto.numero_parcela ? ` · parc. ${boleto.numero_parcela}` : ""}
+                          </p>
+                        </div>
+                        <Badge cor="verde">Pago</Badge>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-sm text-slate-600">
+                        <div>
+                          <p className="rotulo">Vencimento</p>
+                          <p>{dataBR(boleto.vencimento)}</p>
+                        </div>
+                        <div>
+                          <p className="rotulo">Pago em</p>
+                          <p>{boleto.pagamento_data ? dataBR(boleto.pagamento_data) : "—"}</p>
+                        </div>
+                        <div>
+                          <p className="rotulo">Banco/conta</p>
+                          <p>{boleto.pagamento_banco_conta || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="rotulo">Valor</p>
+                          <p className="font-semibold text-slate-900">
+                            {moeda(boleto.pagamento_valor ?? boleto.valor)}
+                          </p>
+                        </div>
+                      </div>
+                      {boleto.documento_boleto_id && (
+                        <button
+                          type="button"
+                          className="btn-secundario w-full"
+                          disabled={abrindoPdfArquivoId === boleto.documento_boleto_id}
+                          onClick={() => void verPdfArquivoBoleto(boleto)}
+                        >
+                          <Eye size={16} />
+                          {abrindoPdfArquivoId === boleto.documento_boleto_id ? "Abrindo..." : "Ver PDF"}
+                        </button>
+                      )}
+                    </Card>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
       ) : (
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2>Notas fiscais</h2>
-              <p className="text-sm text-slate-600">Visualização completa das NF-e importadas para conferência e correção.</p>
+              <p className="text-sm text-slate-600">
+                Arquivo das NF-e. Notas quitadas (todas as parcelas pagas) ficam destacadas como arquivo.
+              </p>
             </div>
           </div>
 
           <Card className="space-y-3">
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_240px]">
               <label className="block">
                 <span className="rotulo mb-1 flex items-center gap-1">
                   <Search size={14} /> Pesquisa
@@ -1921,6 +2743,22 @@ export default function FinanceiroPage() {
                   ))}
                 </select>
               </label>
+              <label className="block">
+                <span className="rotulo mb-1 block">Pagamento</span>
+                <select
+                  className="input w-full"
+                  value={filtroStatusPagamentoNfe}
+                  onChange={(event) =>
+                    setFiltroStatusPagamentoNfe(event.target.value as "todas" | StatusPagamentoNota)
+                  }
+                >
+                  {FILTRO_STATUS_PAGAMENTO_NFE_OPCOES.map((opcao) => (
+                    <option key={opcao.valor} value={opcao.valor}>
+                      {opcao.rotulo}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </Card>
 
@@ -1939,13 +2777,16 @@ export default function FinanceiroPage() {
                       "Total",
                       "Parcelas",
                       "Soma parcelas",
-                      "Status",
+                      "Pagamento",
                       "Completude",
                       "Ações",
                     ]}
                   >
                     {notasFiscaisFinanceiro.map((resumo) => (
-                      <tr key={resumo.nota.id}>
+                      <tr
+                        key={resumo.nota.id}
+                        className={resumo.statusPagamento === "quitada" ? "bg-emerald-50/40" : undefined}
+                      >
                         <td className="px-3 py-3 text-sm font-semibold text-slate-900">{resumo.nota.numero || "—"}</td>
                         <td className="px-3 py-3 text-sm text-slate-700">{resumo.fornecedorNome}</td>
                         <td className="px-3 py-3 text-sm text-slate-700">
@@ -1956,7 +2797,9 @@ export default function FinanceiroPage() {
                         <td className="px-3 py-3 text-sm font-semibold text-slate-900">{moeda(resumo.nota.valor_total)}</td>
                         <td className="px-3 py-3 text-sm text-slate-700">{resumo.quantidadeParcelas}</td>
                         <td className="px-3 py-3 text-sm text-slate-700">{moeda(resumo.somaParcelas)}</td>
-                        <td className="px-3 py-3 text-sm text-slate-700">{resumo.nota.status}</td>
+                        <td className="px-3 py-3">
+                          <BadgeStatusPagamentoNota status={resumo.statusPagamento} />
+                        </td>
                         <td className="px-3 py-3">
                           <BadgeCompletudeNfeFinanceiro indicador={resumo.indicadorCompletude} />
                         </td>
@@ -1965,6 +2808,30 @@ export default function FinanceiroPage() {
                             <button type="button" className="btn-secundario" onClick={() => abrirDetalhesNfe(resumo.nota.id)}>
                               Ver detalhes
                             </button>
+                            {(resumo.statusPagamento === "aguardando_pagamento" ||
+                              resumo.statusPagamento === "parcialmente_paga") && (
+                              <button
+                                type="button"
+                                className="btn-primario"
+                                onClick={() => irParaPagamentoDaNota(resumo.nota.id)}
+                              >
+                                Ir para pagamento
+                              </button>
+                            )}
+                            {resumo.statusPagamento === "sem_boleto" && (
+                              <button
+                                type="button"
+                                className="btn-secundario"
+                                onClick={() => {
+                                  setAbaFinanceira("conferencia");
+                                  setMensagemReceberBoleto(
+                                    `NF-e ${resumo.nota.numero}: pareie o boleto na Conferência para liberar o pagamento.`
+                                  );
+                                }}
+                              >
+                                Ir para conferência
+                              </button>
+                            )}
                             <button type="button" className="btn-secundario" onClick={() => iniciarCorrecaoNfe(resumo.nota.id)}>
                               Completar ou corrigir dados
                             </button>
@@ -1978,14 +2845,20 @@ export default function FinanceiroPage() {
 
               <div className="space-y-3 md:hidden">
                 {notasFiscaisFinanceiro.map((resumo) => (
-                  <Card key={resumo.nota.id} className="space-y-3">
+                  <Card
+                    key={resumo.nota.id}
+                    className={`space-y-3 ${resumo.statusPagamento === "quitada" ? "border-emerald-200 bg-emerald-50/40" : ""}`}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="font-bold text-slate-900">NF-e {resumo.nota.numero || "—"}</p>
                         <p className="text-sm text-slate-600">{resumo.fornecedorNome}</p>
                         <p className="text-xs text-slate-500">{resumo.emitenteNome} · {resumo.emitenteCnpj}</p>
                       </div>
-                      <BadgeCompletudeNfeFinanceiro indicador={resumo.indicadorCompletude} />
+                      <div className="flex flex-col items-end gap-1">
+                        <BadgeStatusPagamentoNota status={resumo.statusPagamento} />
+                        <BadgeCompletudeNfeFinanceiro indicador={resumo.indicadorCompletude} />
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-sm text-slate-600">
                       <div>
@@ -2009,6 +2882,30 @@ export default function FinanceiroPage() {
                       <button type="button" className="btn-secundario w-full" onClick={() => abrirDetalhesNfe(resumo.nota.id)}>
                         Ver detalhes
                       </button>
+                      {(resumo.statusPagamento === "aguardando_pagamento" ||
+                        resumo.statusPagamento === "parcialmente_paga") && (
+                        <button
+                          type="button"
+                          className="btn-primario w-full"
+                          onClick={() => irParaPagamentoDaNota(resumo.nota.id)}
+                        >
+                          Ir para pagamento
+                        </button>
+                      )}
+                      {resumo.statusPagamento === "sem_boleto" && (
+                        <button
+                          type="button"
+                          className="btn-secundario w-full"
+                          onClick={() => {
+                            setAbaFinanceira("conferencia");
+                            setMensagemReceberBoleto(
+                              `NF-e ${resumo.nota.numero}: pareie o boleto na Conferência para liberar o pagamento.`
+                            );
+                          }}
+                        >
+                          Ir para conferência
+                        </button>
+                      )}
                       <button type="button" className="btn-secundario w-full" onClick={() => iniciarCorrecaoNfe(resumo.nota.id)}>
                         Completar ou corrigir dados
                       </button>
@@ -2125,6 +3022,16 @@ export default function FinanceiroPage() {
               }`}
             >
               <p className="font-bold">{apresentacaoConfronto.titulo}</p>
+              {apresentacaoConfronto.proximoPasso && (
+                <p className="text-sm text-slate-700">{apresentacaoConfronto.proximoPasso}</p>
+              )}
+              {estadoImportacaoBoleto.confronto.avisos.length > 0 && (
+                <div className="space-y-1 text-sm text-slate-700">
+                  {estadoImportacaoBoleto.confronto.avisos.map((aviso, index) => (
+                    <p key={`aviso-${index}`}>{aviso}</p>
+                  ))}
+                </div>
+              )}
               <p className="text-sm">Fornecedor: {nomeFornecedorDoConfronto(estadoImportacaoBoleto.confronto)}</p>
               <p className="text-sm">
                 CNPJ emitente/beneficiário: {mascararCnpj(estadoImportacaoBoleto.dadosExtraidos?.cnpj_beneficiario)}
@@ -2147,12 +3054,23 @@ export default function FinanceiroPage() {
                 </div>
               )}
 
-              {estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades" && (
+              {(estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades" ||
+                (estadoImportacaoBoleto.confronto.classificacao === "divergente" &&
+                  estadoImportacaoBoleto.confronto.candidatos.length > 0)) && (
                 <div className="space-y-2 rounded-card border border-slate-200 bg-white px-3 py-2">
-                  <p className="text-sm font-semibold">Selecione uma parcela candidata</p>
+                  <p className="text-sm font-semibold">
+                    {estadoImportacaoBoleto.confronto.classificacao === "divergente"
+                      ? "Possíveis notas / parcelas"
+                      : "Selecione uma parcela candidata"}
+                  </p>
                   <select
                     className="input w-full"
-                    value={parcelaSelecionadaMultipla}
+                    value={
+                      parcelaSelecionadaMultipla ||
+                      (estadoImportacaoBoleto.confronto.candidatos.length === 1
+                        ? estadoImportacaoBoleto.confronto.candidatos[0].boleto_id
+                        : "")
+                    }
                     onChange={(event) => setParcelaSelecionadaMultipla(event.target.value)}
                     disabled={processandoImportacaoBoleto}
                   >
@@ -2160,9 +3078,20 @@ export default function FinanceiroPage() {
                     {estadoImportacaoBoleto.confronto.candidatos.map((candidato) => {
                       const parcela = db.boletos.find((boleto) => boleto.id === candidato.boleto_id);
                       const nota = db.notas_fiscais.find((n) => n.id === candidato.nota_id);
+                      const deltaValor =
+                        parcela && estadoImportacaoBoleto.dadosExtraidos?.valor_codificado !== undefined
+                          ? Math.abs(
+                              Number(
+                                (parcela.valor - estadoImportacaoBoleto.dadosExtraidos.valor_codificado).toFixed(2)
+                              )
+                            )
+                          : undefined;
                       return (
                         <option key={candidato.boleto_id} value={candidato.boleto_id}>
-                          {nota?.numero ?? "s/n"} · {rotuloParcela(parcela?.numero_parcela)} · {parcela ? moeda(parcela.valor) : "—"}
+                          NF {nota?.numero ?? "s/n"} · {nomeFornecedor(db, nota?.fornecedor_id)} ·{" "}
+                          {rotuloParcela(parcela?.numero_parcela)} · {parcela ? moeda(parcela.valor) : "—"}
+                          {parcela?.vencimento ? ` · ${dataBR(parcela.vencimento)}` : ""}
+                          {deltaValor !== undefined && deltaValor > 0.01 ? ` · Δ ${moeda(deltaValor)}` : ""}
                         </option>
                       );
                     })}
@@ -2171,7 +3100,8 @@ export default function FinanceiroPage() {
               )}
 
               {(estadoImportacaoBoleto.confronto.classificacao === "parcial" ||
-                estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades") && (
+                estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades" ||
+                estadoImportacaoBoleto.confronto.classificacao === "divergente") && (
                 <label className="block">
                   <span className="rotulo mb-1 block">Justificativa da confirmação *</span>
                   <textarea
@@ -2179,8 +3109,46 @@ export default function FinanceiroPage() {
                     value={justificativaImportacao}
                     onChange={(event) => setJustificativaImportacao(event.target.value)}
                     disabled={processandoImportacaoBoleto}
+                    placeholder="Ex.: conferi DANFE e boleto; diferença de centavos / vencimento do fornecedor"
                   />
                 </label>
+              )}
+
+              {(estadoImportacaoBoleto.confronto.classificacao === "sem_correspondencia" ||
+                estadoImportacaoBoleto.confronto.classificacao === "divergente") && (
+                <div className="space-y-2 rounded-card border border-slate-200 bg-white px-3 py-3">
+                  <p className="text-sm font-semibold text-slate-800">Vincular manualmente a uma NF-e</p>
+                  <p className="text-xs text-slate-600">
+                    Use se a nota ainda não tem parcela, ou se nenhuma sugestão estiver correta. O sistema cria a
+                    parcela com o valor e o vencimento do boleto e reanalisa.
+                  </p>
+                  <select
+                    className="input w-full"
+                    value={notaVinculoManualId}
+                    onChange={(event) => setNotaVinculoManualId(event.target.value)}
+                    disabled={processandoImportacaoBoleto}
+                  >
+                    <option value="">Selecione a NF-e</option>
+                    {[...db.notas_fiscais]
+                      .slice()
+                      .sort((a, b) => (b.importada_em || "").localeCompare(a.importada_em || ""))
+                      .slice(0, 40)
+                      .map((nota) => (
+                        <option key={nota.id} value={nota.id}>
+                          NF {nota.numero ?? "s/n"} · {nomeFornecedor(db, nota.fornecedor_id)} ·{" "}
+                          {moeda(nota.valor_total)} · {dataBR(nota.emitida_em)}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn-secundario w-full"
+                    onClick={criarParcelaManualEReanalisar}
+                    disabled={processandoImportacaoBoleto || !notaVinculoManualId}
+                  >
+                    Criar parcela nesta NF-e e reanalisar
+                  </button>
+                </div>
               )}
             </Card>
           )}
@@ -2225,7 +3193,8 @@ export default function FinanceiroPage() {
                 !(
                   estadoImportacaoBoleto.confronto.classificacao === "exata" ||
                   estadoImportacaoBoleto.confronto.classificacao === "parcial" ||
-                  estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades"
+                  estadoImportacaoBoleto.confronto.classificacao === "multiplas_possibilidades" ||
+                  estadoImportacaoBoleto.confronto.classificacao === "divergente"
                 )
               }
             >
@@ -2238,9 +3207,10 @@ export default function FinanceiroPage() {
                     "—"
                   }`
                 : estadoImportacaoBoleto.confronto?.classificacao === "parcial" ||
-                    estadoImportacaoBoleto.confronto?.classificacao === "multiplas_possibilidades"
-                  ? "Confirmar vínculo e adicionar aos boletos a vencer"
-                  : "Confirmar e adicionar aos boletos a vencer"}
+                    estadoImportacaoBoleto.confronto?.classificacao === "multiplas_possibilidades" ||
+                    estadoImportacaoBoleto.confronto?.classificacao === "divergente"
+                  ? "Confirmar vínculo e adicionar aos pagamentos futuros"
+                  : "Confirmar e adicionar aos pagamentos futuros"}
             </button>
           </div>
         </form>
@@ -2267,7 +3237,7 @@ export default function FinanceiroPage() {
 
       <Modal
         aberto={Boolean(boletoPagamento && snapshotPagamento)}
-        titulo="Pagar boleto"
+        titulo="Informar pagamento realizado"
         onFechar={fecharPagamentoBoleto}
         fecharAoClicarFundo={false}
       >
@@ -2280,26 +3250,15 @@ export default function FinanceiroPage() {
               <p className="text-sm text-slate-700">CNPJ beneficiário: {cnpjBR(boletoPagamento.cnpj_beneficiario)}</p>
               <p className="text-sm text-slate-700">Valor do boleto: {moeda(boletoPagamento.valor)}</p>
               <p className="text-sm text-slate-700">Vencimento: {dataBR(boletoPagamento.vencimento)}</p>
-              <p className="text-sm text-slate-700">Status conferência: {boletoPagamento.status_conferencia ?? "—"}</p>
             </Card>
 
             <div className="rounded-card border border-destaque bg-destaque-clara px-3 py-3 text-sm text-destaque">
-              Informar pagamento não significa baixa financeira final. Este boleto ficará em aguardando conciliação bancária até confirmação no banco.
+              Informe a <strong>data</strong> e o <strong>banco/conta</strong> usados no pagamento. Depois você
+              confirma esses dados na aba Conciliação bancária (baixa final).
             </div>
 
-            <label className="block rounded-card border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-              <span className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  checked={formPagamentoBoleto.confirmouAviso}
-                  onChange={(event) => atualizarCampoPagamento("confirmouAviso", event.target.checked)}
-                />
-                Confirmo que revisei beneficiário, valor e vencimento antes de informar o pagamento.
-              </span>
-            </label>
-
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block">
+              <label className="block sm:col-span-1">
                 <span className="rotulo mb-1 block">Data do pagamento *</span>
                 <input
                   type="date"
@@ -2309,7 +3268,7 @@ export default function FinanceiroPage() {
                   required
                 />
               </label>
-              <label className="block">
+              <label className="block sm:col-span-1">
                 <span className="rotulo mb-1 block">Valor pago *</span>
                 <input
                   type="number"
@@ -2322,14 +3281,23 @@ export default function FinanceiroPage() {
                 />
               </label>
               <label className="block sm:col-span-2">
-                <span className="rotulo mb-1 block">Banco/conta utilizada *</span>
+                <span className="rotulo mb-1 block">Banco/conta de onde pagou *</span>
                 <input
                   className="input w-full"
+                  list="lista-bancos-contas-pagamento"
                   value={formPagamentoBoleto.bancoConta}
                   onChange={(event) => atualizarCampoPagamento("bancoConta", event.target.value)}
-                  placeholder="Ex.: Banco X - Conta Operacional"
+                  placeholder="Ex.: Itaú - Conta Operacional"
                   required
                 />
+                <datalist id="lista-bancos-contas-pagamento">
+                  {bancosContasUsados.map((banco) => (
+                    <option key={banco} value={banco} />
+                  ))}
+                </datalist>
+                <span className="mt-1 block text-xs text-slate-500">
+                  Esse banco/conta será o que você confirma depois na conciliação.
+                </span>
               </label>
               <label className="block sm:col-span-2">
                 <span className="rotulo mb-1 block">Responsável</span>
@@ -2349,11 +3317,37 @@ export default function FinanceiroPage() {
               </label>
             </div>
 
-            <Card className="space-y-1 py-3 text-sm text-slate-700">
-              <p>Valor do boleto: {moeda(boletoPagamento.valor)}</p>
-              <p>Vencimento: {dataBR(boletoPagamento.vencimento)}</p>
-              <p className="text-slate-600">O código para pagamento fica disponível na própria linha do boleto na agenda.</p>
+            <Card className="space-y-2 border border-blue-200 bg-blue-50/40 py-3 text-sm text-slate-800">
+              <p className="font-semibold text-blue-900">Confirme antes de gravar</p>
+              <p>
+                Data:{" "}
+                <strong>
+                  {formPagamentoBoleto.dataPagamento ? dataBR(formPagamentoBoleto.dataPagamento) : "—"}
+                </strong>
+              </p>
+              <p>
+                Banco/conta: <strong>{formPagamentoBoleto.bancoConta.trim() || "—"}</strong>
+              </p>
+              <p>
+                Valor:{" "}
+                <strong>
+                  {lerNumero(formPagamentoBoleto.valorPago) != null
+                    ? moeda(lerNumero(formPagamentoBoleto.valorPago)!)
+                    : "—"}
+                </strong>
+              </p>
             </Card>
+
+            <label className="block rounded-card border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              <span className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={formPagamentoBoleto.confirmouAviso}
+                  onChange={(event) => atualizarCampoPagamento("confirmouAviso", event.target.checked)}
+                />
+                Confirmei a data do pagamento e o banco/conta usados, além de beneficiário, valor e vencimento.
+              </span>
+            </label>
 
             {erroPagamentoBoleto && (
               <p className="rounded-card border border-erro bg-erro-clara px-3 py-2 text-sm font-medium text-erro">{erroPagamentoBoleto}</p>
@@ -2368,7 +3362,16 @@ export default function FinanceiroPage() {
               <button type="button" className="btn-secundario" onClick={fecharPagamentoBoleto} disabled={processandoPagamentoBoleto}>
                 Cancelar
               </button>
-              <button type="submit" className="btn-primario" disabled={processandoPagamentoBoleto}>
+              <button
+                type="submit"
+                className="btn-primario"
+                disabled={
+                  processandoPagamentoBoleto ||
+                  !formPagamentoBoleto.confirmouAviso ||
+                  !formPagamentoBoleto.dataPagamento ||
+                  !formPagamentoBoleto.bancoConta.trim()
+                }
+              >
                 <CircleCheckBig size={16} /> {processandoPagamentoBoleto ? "Informando..." : "Informar pagamento"}
               </button>
             </div>
@@ -2376,19 +3379,18 @@ export default function FinanceiroPage() {
         )}
       </Modal>
 
-      <Modal aberto={Boolean(notaDetalhes)} titulo="Detalhes da nota fiscal" onFechar={fecharDetalhesNfe}>
+      <Modal
+        aberto={Boolean(notaDetalhes)}
+        titulo="Detalhes da nota fiscal"
+        onFechar={fecharDetalhesNfe}
+        tamanho="lg"
+      >
         {notaDetalhes && (
           <div className="space-y-3">
-            <Card className="space-y-2 bg-slate-50 py-3">
-              <p className="text-sm font-semibold text-slate-800">Dados fiscais importados</p>
-              <p className="text-sm text-slate-700">Nota: {notaDetalhes.nota.numero || "—"}</p>
-              <p className="text-sm text-slate-700">Chave de acesso: {notaDetalhes.nota.chave_acesso || "—"}</p>
-              <p className="text-sm text-slate-700">Fornecedor vinculado: {notaDetalhes.fornecedorNome}</p>
-              <p className="text-sm text-slate-700">Emitente no XML: {notaDetalhes.emitenteNome}</p>
-              <p className="text-sm text-slate-700">CNPJ emitente: {cnpjBR(notaDetalhes.emitenteCnpj)}</p>
-              <p className="text-sm text-slate-700">Valor total: {moeda(notaDetalhes.nota.valor_total)}</p>
-              <p className="text-sm text-slate-700">Emissão: {notaDetalhes.nota.emitida_em ? dataBR(notaDetalhes.nota.emitida_em) : "—"}</p>
-            </Card>
+            <VistaNotaEstiloDanfe
+              nota={notaDetalhes.nota}
+              fornecedorNome={notaDetalhes.fornecedorNome}
+            />
 
             <Card className="space-y-2 border border-slate-200 py-3">
               <p className="text-sm font-semibold text-slate-800">Parcelas e boletos associados</p>
@@ -2405,6 +3407,50 @@ export default function FinanceiroPage() {
               )}
               <p className="text-sm font-semibold text-slate-800">Soma das parcelas: {moeda(notaDetalhes.somaParcelas)}</p>
             </Card>
+
+            {(() => {
+              const sugestoes =
+                notaDetalhes.nota.tipo === "nfse"
+                  ? sugerirVinculosNfseParaPagamentos(db, notaDetalhes.nota)
+                  : [];
+              if (sugestoes.length === 0) return null;
+              return (
+                <Card className="space-y-2 border border-primaria/40 bg-primaria-clara/30 py-3">
+                  <p className="text-sm font-semibold text-primaria-escura">
+                    Pagamentos PIX sem nota que podem ser desta NFS-e
+                  </p>
+                  {sugestoes.map((s) => (
+                    <div
+                      key={s.boleto.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white px-2 py-2 text-sm"
+                    >
+                      <div>
+                        <p className="font-medium">{fornecedorDoBoleto(db, s.boleto)}</p>
+                        <p className="text-slate-600">
+                          {moeda(s.boleto.valor)} · {s.motivos.join(", ")}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-primario text-xs"
+                        onClick={() => {
+                          mutate((atual) => {
+                            const r = vincularNotaAoPagamento(atual, s.boleto.id, notaDetalhes.nota.id);
+                            if (r.sucesso) {
+                              setMensagemReceberBoleto("NFS-e vinculada ao pagamento PIX.");
+                            } else {
+                              setErroReceberBoleto(r.erros[0] ?? "Falha ao vincular.");
+                            }
+                          });
+                        }}
+                      >
+                        Vincular
+                      </button>
+                    </div>
+                  ))}
+                </Card>
+              );
+            })()}
 
             {notaDetalhes.pendencias.length > 0 && (
               <Card className="space-y-1 border border-destaque bg-destaque-clara py-3">
@@ -2432,6 +3478,28 @@ export default function FinanceiroPage() {
               <button type="button" className="btn-secundario" onClick={fecharDetalhesNfe}>
                 Fechar
               </button>
+              {(statusPagamentoNota(db, notaDetalhes.nota) === "aguardando_pagamento" ||
+                statusPagamentoNota(db, notaDetalhes.nota) === "parcialmente_paga") && (
+                <button
+                  type="button"
+                  className="btn-primario"
+                  onClick={() => irParaPagamentoDaNota(notaDetalhes.nota.id)}
+                >
+                  Ir para pagamento
+                </button>
+              )}
+              {statusPagamentoNota(db, notaDetalhes.nota) === "sem_boleto" && (
+                <button
+                  type="button"
+                  className="btn-primario"
+                  onClick={() => {
+                    fecharDetalhesNfe();
+                    setAbaFinanceira("conferencia");
+                  }}
+                >
+                  Ir para conferência
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-primario"

@@ -8,6 +8,13 @@ export type IndicadorCompletudeFinanceiro =
   | "Faltam dados de parcela"
   | "Sem boleto informado";
 
+/** Situação de pagamento da nota (derivada das parcelas/boletos). */
+export type StatusPagamentoNota =
+  | "sem_boleto"
+  | "aguardando_pagamento"
+  | "parcialmente_paga"
+  | "quitada";
+
 export interface NotaFiscalResumoFinanceiro {
   nota: NotaFiscal;
   fornecedorNome: string;
@@ -17,11 +24,13 @@ export interface NotaFiscalResumoFinanceiro {
   quantidadeParcelas: number;
   somaParcelas: number;
   indicadorCompletude: IndicadorCompletudeFinanceiro;
+  statusPagamento: StatusPagamentoNota;
 }
 
 export interface FiltroNotasFiscaisFinanceiro {
   pesquisa?: string;
   completude?: "todas" | IndicadorCompletudeFinanceiro;
+  statusPagamento?: "todas" | StatusPagamentoNota;
 }
 
 export interface DetalhesNotaFiscalFinanceiro {
@@ -65,6 +74,42 @@ function parcelasDaNota(db: DB, notaId: string): Boleto[] {
   return db.boletos.filter((boleto) => boleto.nota_id === notaId);
 }
 
+const MARCA_GOLPE = "GOLPE CONFIRMADO";
+
+function parcelaAtivaParaPagamento(boleto: Boleto): boolean {
+  if (boleto.status === "suspeito" && Boolean(boleto.observacao?.startsWith(MARCA_GOLPE))) {
+    return false;
+  }
+  return true;
+}
+
+export function statusPagamentoNota(db: DB, nota: NotaFiscal): StatusPagamentoNota {
+  const parcelas = parcelasDaNota(db, nota.id).filter(parcelaAtivaParaPagamento);
+  if (parcelas.length === 0) return "sem_boleto";
+
+  const pagos = parcelas.filter((b) => b.status === "pago");
+  if (pagos.length === parcelas.length) return "quitada";
+  if (pagos.length > 0) return "parcialmente_paga";
+
+  const conferidos = parcelas.filter((b) => b.status_conferencia === "conferido");
+  if (conferidos.length === parcelas.length) return "aguardando_pagamento";
+
+  return "sem_boleto";
+}
+
+export function rotuloStatusPagamentoNota(status: StatusPagamentoNota): string {
+  switch (status) {
+    case "sem_boleto":
+      return "Sem boleto / a conferir";
+    case "aguardando_pagamento":
+      return "Aguardando pagamento";
+    case "parcialmente_paga":
+      return "Parcialmente paga";
+    case "quitada":
+      return "Quitada (arquivo)";
+  }
+}
+
 export function indicadorCompletudeFinanceiro(db: DB, nota: NotaFiscal): IndicadorCompletudeFinanceiro {
   const completude = avaliarCompletudeNotaFiscal(db, nota);
   const codigos = new Set(completude.pendencias.map((item) => item.codigo));
@@ -91,6 +136,7 @@ export function montarResumoNotaFiscalFinanceiro(db: DB, nota: NotaFiscal): Nota
     quantidadeParcelas: parcelas.length,
     somaParcelas,
     indicadorCompletude: indicadorCompletudeFinanceiro(db, nota),
+    statusPagamento: statusPagamentoNota(db, nota),
   };
 }
 
@@ -101,6 +147,14 @@ export function listarNotasFiscaisFinanceiro(db: DB, filtros: FiltroNotasFiscais
     .map((nota) => montarResumoNotaFiscalFinanceiro(db, nota))
     .filter((resumo) => {
       if (filtros.completude && filtros.completude !== "todas" && resumo.indicadorCompletude !== filtros.completude) {
+        return false;
+      }
+
+      if (
+        filtros.statusPagamento &&
+        filtros.statusPagamento !== "todas" &&
+        resumo.statusPagamento !== filtros.statusPagamento
+      ) {
         return false;
       }
 

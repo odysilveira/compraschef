@@ -165,7 +165,7 @@ describe("confronto boleto x NF-e", () => {
     const resultado = confrontarBoletoComNfe(db, dados, "hash-div-valor");
 
     expect(resultado.classificacao).toBe("divergente");
-    expect(resultado.divergencias).toContain("Valor divergente.");
+    expect(resultado.divergencias.some((d) => d.includes("Valor difere"))).toBe(true);
   });
 
   it("divergência de vencimento", () => {
@@ -184,7 +184,7 @@ describe("confronto boleto x NF-e", () => {
     const resultado = confrontarBoletoComNfe(db, dados, "hash-div-venc");
 
     expect(resultado.classificacao).toBe("divergente");
-    expect(resultado.divergencias).toContain("Vencimento divergente.");
+    expect(resultado.divergencias.some((d) => d.includes("Vencimento"))).toBe(true);
   });
 
   it("divergência de CNPJ", () => {
@@ -381,5 +381,83 @@ describe("confronto boleto x NF-e", () => {
     confrontarBoletoComNfe(db, dados, "hash-imutavel");
 
     expect(db).toEqual(snapshot);
+  });
+
+  it("sugere candidato com diferença de centavos (sem chave)", () => {
+    const db = dbConfrontoBase();
+    db.boletos[0].valor = 318.4;
+    db.boletos[0].vencimento = "2026-08-07";
+    db.notas_fiscais[0].valor_total = 318.4;
+
+    const dados = {
+      codigo_canonico: CODIGO_BARRAS_44,
+      valor_codificado: 318.64,
+      vencimento_extraido: "2026-08-07",
+      datas_encontradas: ["2026-08-07"],
+      cnpjs_encontrados: ["12345678000190"],
+      cnpj_beneficiario: "12345678000190",
+    };
+
+    const resultado = confrontarBoletoComNfe(db, dados, "hash-centavos");
+
+    expect(["parcial", "divergente"]).toContain(resultado.classificacao);
+    expect(resultado.candidatos.some((c) => c.boleto_id === "bol-a-1")).toBe(true);
+    expect(resultado.parcela_id).toBe("bol-a-1");
+  });
+
+  it("sugere candidato com vencimento ±2 dias", () => {
+    const db = dbConfrontoBase();
+    const dados = {
+      codigo_canonico: CODIGO_BARRAS_44,
+      valor_codificado: 10,
+      vencimento_extraido: "2026-08-12",
+      datas_encontradas: ["2026-08-12"],
+      cnpjs_encontrados: ["12345678000190"],
+      cnpj_beneficiario: "12345678000190",
+    };
+
+    const resultado = confrontarBoletoComNfe(db, dados, "hash-venc-janela");
+
+    expect(["parcial", "divergente"]).toContain(resultado.classificacao);
+    expect(resultado.parcela_id).toBe("bol-a-1");
+    expect(resultado.divergencias.some((d) => /Vencimento 2 dias/.test(d))).toBe(true);
+  });
+
+  it("casa parcela 1 com 001 pela chave", () => {
+    const db = dbConfrontoBase();
+    const dados = {
+      codigo_canonico: CODIGO_BARRAS_44,
+      valor_codificado: 10,
+      vencimento_extraido: "2026-08-10",
+      datas_encontradas: ["2026-08-10"],
+      cnpjs_encontrados: ["12345678000190"],
+      cnpj_beneficiario: "12345678000190",
+      chave_nfe: CHAVE_NFE_VALIDA,
+      numero_parcela: "1",
+    };
+
+    const resultado = confrontarBoletoComNfe(db, dados, "hash-parcela-norm");
+
+    expect(resultado.classificacao).toBe("exata");
+    expect(resultado.parcela_id).toBe("bol-a-1");
+  });
+
+  it("CNPJ divergente não vira exata e exige confirmação", () => {
+    const db = dbConfrontoBase();
+    const dados = {
+      codigo_canonico: CODIGO_BARRAS_44,
+      valor_codificado: 10,
+      vencimento_extraido: "2026-08-10",
+      datas_encontradas: ["2026-08-10"],
+      cnpjs_encontrados: ["11111111000111"],
+      cnpj_beneficiario: "11111111000111",
+    };
+
+    const resultado = confrontarBoletoComNfe(db, dados, "hash-cnpj-golpe");
+
+    expect(resultado.classificacao).toBe("divergente");
+    expect(resultado.exige_confirmacao_humana).toBe(true);
+    expect(resultado.divergencias.some((d) => /cnpj/i.test(d))).toBe(true);
+    expect(resultado.candidatos.length).toBeGreaterThan(0);
   });
 });

@@ -24,6 +24,7 @@ import {
   removerRegistroLoteIdb,
   salvarRegistrosLoteIdb,
 } from "./lote-recebimento-idb";
+import { marcarItemInboxConcluido } from "./inbox-entrada-store";
 
 const arquivosPorId = new Map<string, File>();
 let itens: ItemFilaLote[] = [];
@@ -206,13 +207,18 @@ export function marcarItemPendente(id: string) {
   atualizarItem(id, { status: "pendente" });
 }
 
-export function marcarItemConcluido(id: string) {
+export function marcarItemConcluido(id: string, opcoes?: { limparInbox?: boolean }) {
   marcarMutacaoLocal();
   itens = itens.filter((i) => i.id !== id);
   arquivosPorId.delete(id);
   notificar();
   void removerRegistroLoteIdb(id).catch(() => undefined);
   agendarPersistencia();
+  // Por padrão espelha na Caixa; na transferência em lote da Conferência
+  // pode manter a caixa se ainda não for a hora de concluir o item.
+  if (opcoes?.limparInbox !== false) {
+    marcarItemInboxConcluido(id);
+  }
 }
 
 export function descartarItemFila(id: string) {
@@ -222,6 +228,7 @@ export function descartarItemFila(id: string) {
   notificar();
   void removerRegistroLoteIdb(id).catch(() => undefined);
   agendarPersistencia();
+  marcarItemInboxConcluido(id);
 }
 
 export function limparFilaLote() {

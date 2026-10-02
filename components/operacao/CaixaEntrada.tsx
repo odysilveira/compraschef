@@ -17,13 +17,20 @@ import {
   HardDrive,
   Inbox,
   Loader2,
+  Pencil,
+  Play,
+  Star,
   Trash2,
+  TriangleAlert,
 } from "lucide-react";
 import { Badge, Card, Modal } from "@/components/ui";
+import { useDB } from "@/lib/data";
 import { classificarArquivosRecebimentoBrowser } from "@/lib/domain/classificar-arquivo-recebimento-browser";
 import type { ResultadoClassificacaoArquivo } from "@/lib/domain/classificar-arquivo-recebimento";
+import { calcularHashSHA256 } from "@/lib/domain/documentos-boleto";
 import {
   montarSugestaoInbox,
+  ordenarFilaInboxPorData,
   pastaPadraoEnvioOneDrive,
   rotuloPastaInbox,
   rotuloTipoDestinoInbox,
@@ -31,23 +38,49 @@ import {
   TIPOS_DESTINO_INBOX,
   type TipoDestinoInbox,
 } from "@/lib/domain/inbox-entrada";
-import type { ItemFilaInbox } from "@/lib/domain/inbox-entrada-idb";
+import {
+  faseFilaInbox,
+  rotuloStatusItemInbox,
+  type ItemFilaInbox,
+} from "@/lib/domain/inbox-entrada-idb";
 import {
   acrescentarClassificadosNaInbox,
   alterarTipoItemInbox,
+  atualizarFingerprintsItemInbox,
   definirFilaInboxDeClassificados,
   flushPersistenciaInbox,
   hidratarInboxDoIdb,
   limparFilaInbox,
+  marcarItemInboxAConferir,
   obterArquivoInboxAsync,
   removerItemInbox,
   useFilaInboxEntrada,
 } from "@/lib/domain/inbox-entrada-store";
 import {
+  avaliarRetrabalhoInbox,
+  type AvisoRetrabalhoInbox,
+} from "@/lib/domain/inbox-retrabalho";
+import {
+  chaveSelectFavorita,
+  LIMITE_FAVORITAS_INBOX,
+  parseChaveSelectFavorita,
+  podeAdicionarFavorita,
+  rotuloFavoritaNoSelect,
+  type FavoritaInbox,
+} from "@/lib/domain/inbox-favoritas";
+import {
+  adicionarFavoritaIdb,
+  listarFavoritasIdb,
+  obterRegistroFavoritaIdb,
+  removerFavoritaIdb,
+  renomearFavoritaIdb,
+} from "@/lib/domain/inbox-favoritas-idb";
+import {
   acrescentarClassificados,
   flushPersistenciaFilaLote,
   hidratarFilaLoteDoIdb,
   marcarItemEmAndamento,
+  obterItemFila,
 } from "@/lib/domain/lote-recebimento-store";
 import {
   escolherPastaRaizOneDrive,
@@ -62,6 +95,22 @@ import {
   type PastaRelativaInbox,
 } from "@/lib/domain/onedrive-pasta-local";
 
+/** Pasta padrão, favorita `fav:id` ou pasta avulsa `avulso:itemId` (só nesta sessão). */
+type AlvoPastaEnvio = PastaRelativaInbox | `fav:${string}` | `avulso:${string}`;
+
+function ehPastaPadrao(alvo: string): alvo is PastaRelativaInbox {
+  return (PASTAS_INBOX as readonly string[]).includes(alvo);
+}
+
+function chaveSelectAvulso(itemId: string): `avulso:${string}` {
+  return `avulso:${itemId}`;
+}
+
+function parseChaveSelectAvulso(valor: string): string | null {
+  if (!valor.startsWith("avulso:")) return null;
+  const id = valor.slice(7);
+  return id || null;
+}
 type PreviewArquivo = {
   url: string;
   mime: string;
@@ -205,6 +254,7 @@ function MiniaturaPreview({ preview }: { preview: PreviewArquivo | undefined }) 
 export default function CaixaEntrada() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const db = useDB();
   const fila = useFilaInboxEntrada();
   const previews = usePreviewsFila(fila);
   const [lendo, setLendo] = useState(false);
@@ -219,10 +269,109 @@ export default function CaixaEntrada() {
   const [pastaPronta, setPastaPronta] = useState(false);
   const [nomePasta, setNomePasta] = useState<string | null>(null);
   const [verificandoPasta, setVerificandoPasta] = useState(true);
-  const [pastasEnvio, setPastasEnvio] = useState<Record<string, PastaRelativaInbox>>({});
+  const [pastasEnvio, setPastasEnvio] = useState<Record<string, AlvoPastaEnvio>>({});
   const [previewModal, setPreviewModal] = useState<PreviewArquivo | null>(null);
-  const apiOk = onedrivePastaLocalDisponivel();
+  const [favoritas, setFavoritas] = useState<FavoritaInbox[]>([]);
+  const [handlesAvulsos, setHandlesAvulsos] = useState<
+    Record<string, FileSystemDirectoryHandle>
+  >({});
+  const [pendenteFavorita, setPendenteFavorita] = useState<{
+    handle: FileSystemDirectoryHandle;
+    pastaNome: string;
+    itemId?: string;
+  } | null>(null);
+  const [salvandoFavorita, setSalvandoFavorita] = useState(false);
+  const [gerenciarFavoritasAberto, setGerenciarFavoritasAberto] = useState(false);
+  const [escolhendoPastaId, setEscolhendoPastaId] = useState<string | null>(null);
+  const [recentesPrimeiro, setRecentesPrimeiro] = useState(true);
+  /** Só após montar no cliente — no SSR `window` não existe e divergia do Chrome (hidratação). */
+  const [apiOk, setApiOk] = useState(false);
+  const [clientePronto, setClientePronto] = useState(false);
 
+  const filaOrdenada = useMemo(
+    () => ordenarFilaInboxPorData(fila, recentesPrimeiro),
+    [fila, recentesPrimeiro]
+  );
+  const aClassificar = useMemo(
+    () => filaOrdenada.filter((i) => faseFilaInbox(i.status) === "a_classificar"),
+    [filaOrdenada]
+  );
+  const aConferir = useMemo(
+    () => filaOrdenada.filter((i) => faseFilaInbox(i.status) === "a_conferir"),
+    [filaOrdenada]
+  );
+
+  const avisosRetrabalho = useMemo(() => {
+    const mapa: Record<string, AvisoRetrabalhoInbox> = {};
+    for (const item of fila) {
+      const aviso = avaliarRetrabalhoInbox(db, {
+        tipo: item.tipo,
+        chaveNfe: item.chaveNfe,
+        chaveNfse: item.chaveNfse,
+        codigoBoleto: item.codigoBoleto,
+        hashSha256: item.hashSha256,
+      });
+      if (aviso) mapa[item.id] = aviso;
+    }
+    return mapa;
+  }, [db, fila]);
+
+  /** Hash SHA-256 dos boletos (e compra) para cruzar com documentos já registrados. */
+  useEffect(() => {
+    let cancelado = false;
+    void (async () => {
+      for (const item of fila) {
+        if (item.hashSha256) continue;
+        if (item.tipo !== "pdf_boleto" && item.tipo !== "xml_nfe" && item.tipo !== "pdf_danfe") {
+          continue;
+        }
+        const arquivo = await obterArquivoInboxAsync(item.id);
+        if (!arquivo || cancelado) continue;
+        try {
+          const hash = await calcularHashSHA256(await arquivo.arrayBuffer());
+          if (cancelado) return;
+          atualizarFingerprintsItemInbox(item.id, { hashSha256: hash });
+        } catch {
+          // sem hash — aviso por chave/código ainda funciona
+        }
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [fila]);
+
+  useEffect(() => {
+    setClientePronto(true);
+    setApiOk(onedrivePastaLocalDisponivel());
+  }, []);
+
+  useEffect(() => {
+    try {
+      const salvo = localStorage.getItem("compraschef-inbox-ordem");
+      if (salvo === "antigos") setRecentesPrimeiro(false);
+      if (salvo === "recentes") setRecentesPrimeiro(true);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function alternarOrdem(recentes: boolean) {
+    setRecentesPrimeiro(recentes);
+    try {
+      localStorage.setItem("compraschef-inbox-ordem", recentes ? "recentes" : "antigos");
+    } catch {
+      // ignore
+    }
+  }
+
+  async function recarregarFavoritas() {
+    try {
+      setFavoritas(await listarFavoritasIdb());
+    } catch {
+      setFavoritas([]);
+    }
+  }
   const contagem = useMemo(() => {
     const map = Object.fromEntries(TIPOS_DESTINO_INBOX.map((t) => [t, 0])) as Record<
       TipoDestinoInbox,
@@ -234,20 +383,28 @@ export default function CaixaEntrada() {
 
   useEffect(() => {
     setPastasEnvio((atual) => {
+      let mudou = false;
       const next = { ...atual };
       for (const item of fila) {
-        if (!next[item.id]) next[item.id] = pastaPadraoEnvioOneDrive(item.tipo);
+        if (!next[item.id]) {
+          next[item.id] = pastaPadraoEnvioOneDrive(item.tipo);
+          mudou = true;
+        }
       }
       for (const id of Object.keys(next)) {
-        if (!fila.some((i) => i.id === id)) delete next[id];
+        if (!fila.some((i) => i.id === id)) {
+          delete next[id];
+          mudou = true;
+        }
       }
-      return next;
+      return mudou ? next : atual;
     });
   }, [fila]);
 
   useEffect(() => {
     void (async () => {
       await hidratarInboxDoIdb();
+      await recarregarFavoritas();
       setVerificandoPasta(true);
       try {
         const raiz = await obterPastaRaizOneDrive();
@@ -365,48 +522,178 @@ export default function CaixaEntrada() {
     return copiarArquivoParaInboxOneDrive(raiz, pasta, arquivo);
   }
 
-  /** Abre o diálogo do Windows/Chrome para o usuário navegar e escolher a pasta. */
-  async function enviarEscolhendoPasta(id: string, pastaSugestao: PastaRelativaInbox) {
+  async function gravarEmFavorita(
+    id: string,
+    favoritaId: string
+  ): Promise<{ pastaNome: string; nomeGravado: string }> {
+    if (!apiOk) {
+      throw new Error("OneDrive local só funciona no Chrome ou Edge neste computador.");
+    }
+    const arquivo = await obterArquivoInboxAsync(id);
+    if (!arquivo) {
+      throw new Error("Não encontrei o arquivo salvo. Selecione de novo.");
+    }
+    const registro = await obterRegistroFavoritaIdb(favoritaId);
+    if (!registro) {
+      throw new Error("Favorita não encontrada. Remova e salve de novo.");
+    }
+    return copiarArquivoParaPastaHandle(registro.handle, arquivo);
+  }
+
+  async function resolverStartInPicker(
+    alvo: AlvoPastaEnvio
+  ): Promise<FileSystemHandle | null> {
+    const favId = parseChaveSelectFavorita(alvo);
+    if (favId) {
+      const reg = await obterRegistroFavoritaIdb(favId);
+      return reg?.handle ?? null;
+    }
+    const avulsoId = parseChaveSelectAvulso(alvo);
+    if (avulsoId && handlesAvulsos[avulsoId]) {
+      return handlesAvulsos[avulsoId];
+    }
+    if (ehPastaPadrao(alvo)) {
+      const raiz = await obterPastaRaizOneDrive();
+      return obterPastaSugestaoParaPicker(raiz, alvo);
+    }
+    return obterPastaRaizOneDrive();
+  }
+
+  async function salvarPendenteComoFavorita() {
+    if (!pendenteFavorita) return;
+    setSalvandoFavorita(true);
+    setErro(null);
+    try {
+      const meta = await adicionarFavoritaIdb(pendenteFavorita.handle);
+      const lista = await listarFavoritasIdb();
+      setFavoritas(lista);
+      if (pendenteFavorita.itemId) {
+        setPastasEnvio((atual) => ({
+          ...atual,
+          [pendenteFavorita.itemId!]: chaveSelectFavorita(meta.id),
+        }));
+      }
+      setPendenteFavorita(null);
+      setOkMsg(
+        `Favorita salva: “${meta.nome}” (${lista.length}/${LIMITE_FAVORITAS_INBOX}). Agora use Enviar na sugerida.`
+      );
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível salvar a favorita.");
+    } finally {
+      setSalvandoFavorita(false);
+    }
+  }
+
+  /** Só define a pasta do item — não envia nem remove da fila. */
+  async function escolherPastaParaItem(id: string, alvoAtual: AlvoPastaEnvio) {
     setErro(null);
     setOkMsg(null);
-    setEnviandoOneDriveId(id);
+    setPendenteFavorita(null);
+    setEscolhendoPastaId(id);
     try {
       if (!apiOk) {
         setErro("OneDrive local só funciona no Chrome ou Edge neste computador.");
         return;
       }
-      const arquivo = await obterArquivoInboxAsync(id);
-      if (!arquivo) {
-        setErro("Não encontrei o arquivo salvo. Selecione de novo.");
-        return;
-      }
-      const raiz = await obterPastaRaizOneDrive();
-      const startIn = await obterPastaSugestaoParaPicker(raiz, pastaSugestao);
+      const startIn = await resolverStartInPicker(alvoAtual);
       const destino = await escolherPastaDestinoEscrita(startIn);
-      const gravado = await copiarArquivoParaPastaHandle(destino, arquivo);
-      removerItemInbox(id);
-      await flushPersistenciaInbox();
-      if (previewModal) fecharPreviewModal();
-      setOkMsg(`Enviado para a pasta “${gravado.pastaNome}”: ${gravado.nomeGravado}`);
+      setHandlesAvulsos((atual) => ({ ...atual, [id]: destino }));
+      setPastasEnvio((atual) => ({ ...atual, [id]: chaveSelectAvulso(id) }));
+      setOkMsg(
+        `Pasta “${destino.name}” definida. Clique em Enviar na sugerida para gravar o arquivo.`
+      );
+      if (podeAdicionarFavorita(favoritas.length)) {
+        setPendenteFavorita({
+          handle: destino,
+          pastaNome: destino.name,
+          itemId: id,
+        });
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Falha ao escolher pasta.";
-      // Usuário cancelou o diálogo — não assusta com erro vermelho
       if (/abort|cancel|denied/i.test(msg) || (e instanceof DOMException && e.name === "AbortError")) {
-        setOkMsg(null);
         return;
       }
       setErro(msg);
     } finally {
-      setEnviandoOneDriveId(null);
+      setEscolhendoPastaId(null);
     }
   }
 
-  async function enviarAoOneDrive(id: string, pasta: PastaRelativaInbox) {
+  async function adicionarFavoritaPeloGerenciador() {
+    setErro(null);
+    try {
+      if (!apiOk) {
+        setErro("OneDrive local só funciona no Chrome ou Edge neste computador.");
+        return;
+      }
+      if (!podeAdicionarFavorita(favoritas.length)) {
+        setErro(`Limite de ${LIMITE_FAVORITAS_INBOX} favoritas. Remova uma antes.`);
+        return;
+      }
+      const raiz = await obterPastaRaizOneDrive();
+      const destino = await escolherPastaDestinoEscrita(raiz);
+      const meta = await adicionarFavoritaIdb(destino);
+      await recarregarFavoritas();
+      setOkMsg(`Favorita adicionada: “${meta.nome}”.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Falha ao adicionar favorita.";
+      if (/abort|cancel|denied/i.test(msg) || (e instanceof DOMException && e.name === "AbortError")) {
+        return;
+      }
+      setErro(msg);
+    }
+  }
+
+  async function enviarAoOneDrive(id: string, alvo: AlvoPastaEnvio) {
     setErro(null);
     setOkMsg(null);
+    setPendenteFavorita(null);
     setEnviandoOneDriveId(id);
     try {
-      const gravado = await gravarNoOneDrive(id, pasta);
+      const favId = parseChaveSelectFavorita(alvo);
+      if (favId) {
+        const gravado = await gravarEmFavorita(id, favId);
+        removerItemInbox(id);
+        await flushPersistenciaInbox();
+        if (previewModal) fecharPreviewModal();
+        setHandlesAvulsos((atual) => {
+          const next = { ...atual };
+          delete next[id];
+          return next;
+        });
+        setOkMsg(`Enviado à favorita “${gravado.pastaNome}”: ${gravado.nomeGravado}`);
+        return;
+      }
+      const avulsoId = parseChaveSelectAvulso(alvo);
+      if (avulsoId) {
+        const handle = handlesAvulsos[id];
+        if (!handle) {
+          setErro("Pasta escolhida expirou. Use Escolher pasta de novo.");
+          return;
+        }
+        const arquivo = await obterArquivoInboxAsync(id);
+        if (!arquivo) {
+          setErro("Não encontrei o arquivo salvo. Selecione de novo.");
+          return;
+        }
+        const gravado = await copiarArquivoParaPastaHandle(handle, arquivo);
+        removerItemInbox(id);
+        await flushPersistenciaInbox();
+        if (previewModal) fecharPreviewModal();
+        setHandlesAvulsos((atual) => {
+          const next = { ...atual };
+          delete next[id];
+          return next;
+        });
+        setOkMsg(`Enviado para “${gravado.pastaNome}”: ${gravado.nomeGravado}`);
+        return;
+      }
+      if (!ehPastaPadrao(alvo)) {
+        setErro("Pasta sugerida inválida.");
+        return;
+      }
+      const gravado = await gravarNoOneDrive(id, alvo);
       removerItemInbox(id);
       await flushPersistenciaInbox();
       if (previewModal) fecharPreviewModal();
@@ -421,6 +708,11 @@ export default function CaixaEntrada() {
   async function confirmarItem(id: string, tipo: TipoDestinoInbox) {
     setErro(null);
     setOkMsg(null);
+    const aviso = avisosRetrabalho[id];
+    if (aviso?.bloqueiaConfirmacao) {
+      setErro(`${aviso.mensagem} Use Descartar para tirar da caixa.`);
+      return;
+    }
     setConfirmandoId(id);
     try {
       const arquivo = await obterArquivoInboxAsync(id);
@@ -447,21 +739,24 @@ export default function CaixaEntrada() {
         ]);
         marcarItemEmAndamento(id);
         await flushPersistenciaFilaLote();
-        removerItemInbox(id);
+        marcarItemInboxAConferir(id);
         await flushPersistenciaInbox();
         if (previewModal) fecharPreviewModal();
 
         if (sugestao.fluxoCompra === "financeiro") {
-          router.push(`/financeiro?importarLoteBoleto=${encodeURIComponent(id)}&aba=boletos`);
+          setOkMsg("Boleto na Conferência — fica em A conferir na caixa até concluir.");
+          router.push(`/financeiro?receberBoletoConferencia=${encodeURIComponent(id)}&aba=conferencia`);
           return;
         }
-        setOkMsg("Arquivo enviado à fila A conciliar do Recebimento.");
-        router.push("/recebimento?abrirLote=1");
+        setOkMsg("Arquivo no Recebimento — fica em A conferir na caixa até concluir.");
+        router.push(`/recebimento?abrirLote=1&itemLote=${encodeURIComponent(id)}`);
         return;
       }
 
       const pasta = (sugestao.pastaOneDrive ??
-        pastasEnvio[id] ??
+        (ehPastaPadrao(pastasEnvio[id] ?? "")
+          ? (pastasEnvio[id] as PastaRelativaInbox)
+          : null) ??
         pastaPadraoEnvioOneDrive(tipo)) as PastaRelativaInbox;
       const gravado = await gravarNoOneDrive(id, pasta);
       removerItemInbox(id);
@@ -470,6 +765,53 @@ export default function CaixaEntrada() {
       setOkMsg(`Gravado em ${gravado.caminhoRelativo}`);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao confirmar a ação.");
+    } finally {
+      setConfirmandoId(null);
+    }
+  }
+
+  async function continuarConferencia(id: string, tipo: TipoDestinoInbox) {
+    setErro(null);
+    setOkMsg(null);
+    setConfirmandoId(id);
+    try {
+      const sugestao = montarSugestaoInbox(tipo);
+      if (sugestao.canal !== "compra") {
+        setErro("Este item não é de compra.");
+        return;
+      }
+      const tipoCompra = tipoRecebimentoDaCompra(tipo);
+      if (!tipoCompra) {
+        setErro("Tipo de compra inválido.");
+        return;
+      }
+
+      await hidratarFilaLoteDoIdb();
+      if (!obterItemFila(id)) {
+        const arquivo = await obterArquivoInboxAsync(id);
+        if (!arquivo) {
+          setErro("Não encontrei o arquivo salvo. Selecione de novo.");
+          return;
+        }
+        acrescentarClassificados([
+          {
+            id,
+            arquivo,
+            classificacao: classificacaoStub(tipo, sugestao.detalhe),
+            tipoEscolhido: tipoCompra,
+          },
+        ]);
+        marcarItemEmAndamento(id);
+        await flushPersistenciaFilaLote();
+      }
+
+      if (sugestao.fluxoCompra === "financeiro") {
+        router.push(`/financeiro?receberBoletoConferencia=${encodeURIComponent(id)}&aba=conferencia`);
+        return;
+      }
+      router.push(`/recebimento?abrirLote=1&itemLote=${encodeURIComponent(id)}`);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Falha ao continuar a conferência.");
     } finally {
       setConfirmandoId(null);
     }
@@ -492,7 +834,8 @@ export default function CaixaEntrada() {
             <h2 className="text-lg font-bold">Caixa de entrada</h2>
             <p className="text-sm text-slate-600">
               Um lugar para e-mail, WhatsApp, foto ou arquivo. O sistema sugere; você confirma.
-              Compra segue no ComprasChef; o resto vai para pastas do OneDrive no PC.
+              Compra fica em <strong>A conferir</strong> até concluir no Recebimento ou na Conferência;
+              o resto vai para pastas do OneDrive no PC.
             </p>
           </div>
         </div>
@@ -514,7 +857,7 @@ export default function CaixaEntrada() {
             <code className="text-[11px]">{NOME_PASTA_INBOX}/…</code> ou abrir o diálogo e
             navegar até qualquer pasta do OneDrive.
           </p>
-          {!apiOk && (
+          {clientePronto && !apiOk && (
             <p className="text-sm text-amber-800">
               Este navegador não expõe pasta local. Use Chrome ou Edge no computador.
             </p>
@@ -527,6 +870,15 @@ export default function CaixaEntrada() {
           >
             <FolderOpen size={16} />
             {pastaPronta ? "Trocar pasta OneDrive" : "Escolher pasta OneDrive"}
+          </button>
+          <button
+            type="button"
+            className="btn-secundario inline-flex items-center gap-2 text-sm"
+            disabled={!apiOk}
+            onClick={() => setGerenciarFavoritasAberto(true)}
+          >
+            <Star size={16} />
+            Favoritas ({favoritas.length}/{LIMITE_FAVORITAS_INBOX})
           </button>
         </div>
 
@@ -583,157 +935,429 @@ export default function CaixaEntrada() {
         )}
         {erro && <p className="text-sm text-red-700">{erro}</p>}
         {okMsg && <p className="text-sm text-emerald-700">{okMsg}</p>}
+        {pendenteFavorita && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <Star size={16} className="text-amber-700" />
+            <p className="flex-1 text-sm text-amber-900">
+              Salvar “{pendenteFavorita.pastaNome}” como favorita? O arquivo continua na fila até você
+              enviar.
+            </p>
+            <button
+              type="button"
+              className="btn-primario inline-flex items-center gap-2 text-sm"
+              disabled={salvandoFavorita}
+              onClick={() => void salvarPendenteComoFavorita()}
+            >
+              {salvandoFavorita ? <Loader2 size={14} className="animate-spin" /> : <Star size={14} />}
+              Salvar favorita
+            </button>
+            <button
+              type="button"
+              className="btn-secundario text-sm"
+              onClick={() => setPendenteFavorita(null)}
+            >
+              Agora não
+            </button>
+          </div>
+        )}
       </Card>
 
       {fila.length > 0 && (
         <>
           <div className="flex flex-wrap items-center gap-2">
             <Badge cor="laranja">{fila.length} na inbox</Badge>
+            {aClassificar.length > 0 && (
+              <Badge cor="cinza">{aClassificar.length} a classificar</Badge>
+            )}
+            {aConferir.length > 0 && (
+              <Badge cor="azul">{aConferir.length} a conferir</Badge>
+            )}
             {TIPOS_DESTINO_INBOX.filter((t) => contagem[t] > 0).map((tipo) => (
               <Badge key={tipo} cor={corTipo(tipo)}>
                 {contagem[tipo]} {rotuloTipoDestinoInbox(tipo).split(" → ")[0]}
               </Badge>
             ))}
+            <span className="ml-auto flex flex-wrap items-center gap-1 text-sm text-slate-600">
+              <span className="mr-1 hidden sm:inline">Ordem:</span>
+              <button
+                type="button"
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                  recentesPrimeiro
+                    ? "bg-primaria text-white"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+                onClick={() => alternarOrdem(true)}
+              >
+                Recentes primeiro
+              </button>
+              <button
+                type="button"
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                  !recentesPrimeiro
+                    ? "bg-primaria text-white"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+                onClick={() => alternarOrdem(false)}
+              >
+                Antigos primeiro
+              </button>
+            </span>
           </div>
 
-          <ul className="space-y-3">
-            {fila.map((item) => {
-              const sugestao = montarSugestaoInbox(item.tipo);
-              const pastaEnvio =
-                pastasEnvio[item.id] ?? pastaPadraoEnvioOneDrive(item.tipo);
-              const ocupado =
-                confirmandoId === item.id || enviandoOneDriveId === item.id;
-              return (
-                <li key={item.id}>
-                  <Card className="p-4">
-                    <div className="flex flex-col gap-4 sm:flex-row">
-                      <div className="shrink-0 sm:w-36">
-                        <MiniaturaPreview preview={previews[item.id]} />
-                      </div>
-
-                      <div className="min-w-0 flex-1 space-y-3">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate font-semibold" title={item.nome}>
-                              {item.nome}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {(item.tamanho / 1024).toFixed(1)} KB
-                              {item.detalhe ? ` · ${item.detalhe}` : ""}
-                            </p>
+          {aClassificar.length > 0 && (
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">A classificar</h3>
+                <p className="text-sm text-slate-600">
+                  Confirme o destino. Compra vai ao Recebimento ou à Conferência e passa para A
+                  conferir.
+                </p>
+              </div>
+              <ul className="space-y-3">
+                {aClassificar.map((item) => {
+                  const sugestao = montarSugestaoInbox(item.tipo);
+                  const aviso = avisosRetrabalho[item.id];
+                  const pastaEnvio: AlvoPastaEnvio =
+                    pastasEnvio[item.id] ?? pastaPadraoEnvioOneDrive(item.tipo);
+                  const ocupado =
+                    confirmandoId === item.id ||
+                    enviandoOneDriveId === item.id ||
+                    escolhendoPastaId === item.id;
+                  const handleAvulso = handlesAvulsos[item.id];
+                  return (
+                    <li key={item.id}>
+                      <Card className={`p-4 ${aviso ? "border-amber-300 bg-amber-50/40" : ""}`}>
+                        <div className="flex flex-col gap-4 sm:flex-row">
+                          <div className="shrink-0 sm:w-36">
+                            <MiniaturaPreview preview={previews[item.id]} />
                           </div>
-                          <Badge cor={corTipo(item.tipo)}>
-                            {sugestao.canal === "compra" ? "Compra" : "OneDrive"}
-                          </Badge>
-                        </div>
 
-                        <label className="block text-sm text-slate-700">
-                          Destino sugerido (pode alterar)
-                          <select
-                            className="campo mt-1 w-full max-w-md"
-                            value={item.tipo}
-                            onChange={(e) =>
-                              aoMudarTipo(item.id, e.target.value as TipoDestinoInbox)
-                            }
-                          >
-                            {TIPOS_DESTINO_INBOX.map((tipo) => (
-                              <option key={tipo} value={tipo}>
-                                {rotuloTipoDestinoInbox(tipo)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                          <div className="min-w-0 flex-1 space-y-3">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-semibold" title={item.nome}>
+                                  {item.nome}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  {(item.tamanho / 1024).toFixed(1)} KB
+                                  {item.detalhe ? ` · ${item.detalhe}` : ""}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {aviso && <Badge cor="laranja">Já no sistema</Badge>}
+                                <Badge cor="cinza">{rotuloStatusItemInbox(item.status)}</Badge>
+                                <Badge cor={corTipo(item.tipo)}>
+                                  {sugestao.canal === "compra" ? "Compra" : "OneDrive"}
+                                </Badge>
+                              </div>
+                            </div>
 
-                        <p className="text-sm text-slate-600">{sugestao.detalhe}</p>
-
-                        <div className="flex flex-wrap items-end gap-2">
-                          <label className="block text-sm text-slate-700">
-                            Pasta sugerida (atalho)
-                            <select
-                              className="campo mt-1 w-full min-w-[12rem]"
-                              value={pastaEnvio}
-                              onChange={(e) =>
-                                setPastasEnvio((atual) => ({
-                                  ...atual,
-                                  [item.id]: e.target.value as PastaRelativaInbox,
-                                }))
-                              }
-                            >
-                              {PASTAS_INBOX.map((pasta) => (
-                                <option key={pasta} value={pasta}>
-                                  {rotuloPastaInbox(pasta)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            className="btn-primario inline-flex items-center gap-2 text-sm"
-                            disabled={ocupado}
-                            onClick={() => void confirmarItem(item.id, item.tipo)}
-                          >
-                            {confirmandoId === item.id ? (
-                              <Loader2 size={16} className="animate-spin" />
-                            ) : (
-                              <Check size={16} />
+                            {aviso && (
+                              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                                <TriangleAlert size={18} className="mt-0.5 shrink-0 text-amber-700" />
+                                <p>
+                                  {aviso.mensagem}{" "}
+                                  <strong>Descartar</strong> remove da caixa sem reimportar.
+                                </p>
+                              </div>
                             )}
-                            Confirmar ação
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-secundario inline-flex items-center gap-2 text-sm"
-                            disabled={ocupado || !apiOk}
-                            onClick={() => void enviarEscolhendoPasta(item.id, pastaEnvio)}
-                            title="Abre o diálogo do Windows para você navegar e escolher a pasta"
-                          >
-                            {enviandoOneDriveId === item.id ? (
-                              <Loader2 size={16} className="animate-spin" />
-                            ) : (
-                              <FolderOpen size={16} />
-                            )}
-                            Escolher pasta e enviar…
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-secundario inline-flex items-center gap-2 text-sm"
-                            disabled={ocupado || !apiOk}
-                            onClick={() => void enviarAoOneDrive(item.id, pastaEnvio)}
-                          >
-                            {enviandoOneDriveId === item.id ? (
-                              <Loader2 size={16} className="animate-spin" />
-                            ) : (
-                              <CloudUpload size={16} />
-                            )}
-                            Enviar na sugerida
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-secundario inline-flex items-center gap-2 text-sm"
-                            onClick={() => void verArquivoCompleto(item.id)}
-                          >
-                            <Eye size={16} /> Ver
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-secundario text-sm"
-                            disabled={ocupado}
-                            onClick={() => removerItemInbox(item.id)}
-                          >
-                            Descartar
-                          </button>
+
+                            <label className="block text-sm text-slate-700">
+                              Destino sugerido (pode alterar)
+                              <select
+                                className="campo mt-1 w-full max-w-md"
+                                value={item.tipo}
+                                onChange={(e) =>
+                                  aoMudarTipo(item.id, e.target.value as TipoDestinoInbox)
+                                }
+                              >
+                                {TIPOS_DESTINO_INBOX.map((tipo) => (
+                                  <option key={tipo} value={tipo}>
+                                    {rotuloTipoDestinoInbox(tipo)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <p className="text-sm text-slate-600">{sugestao.detalhe}</p>
+
+                            <div className="flex flex-wrap items-end gap-2">
+                              <label className="block text-sm text-slate-700">
+                                Pasta sugerida (atalho)
+                                <select
+                                  className="campo mt-1 w-full min-w-[14rem]"
+                                  value={pastaEnvio}
+                                  onChange={(e) =>
+                                    setPastasEnvio((atual) => ({
+                                      ...atual,
+                                      [item.id]: e.target.value as AlvoPastaEnvio,
+                                    }))
+                                  }
+                                >
+                                  {handleAvulso && (
+                                    <optgroup label="Escolhida agora">
+                                      <option value={chaveSelectAvulso(item.id)}>
+                                        → {handleAvulso.name}
+                                      </option>
+                                    </optgroup>
+                                  )}
+                                  <optgroup label="Padrão ComprasChef">
+                                    {PASTAS_INBOX.map((pasta) => (
+                                      <option key={pasta} value={pasta}>
+                                        {rotuloPastaInbox(pasta)}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                  {favoritas.length > 0 && (
+                                    <optgroup label="Minhas pastas">
+                                      {favoritas.map((fav) => (
+                                        <option key={fav.id} value={chaveSelectFavorita(fav.id)}>
+                                          {rotuloFavoritaNoSelect(fav)}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                </select>
+                              </label>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="btn-primario inline-flex items-center gap-2 text-sm"
+                                disabled={ocupado || Boolean(aviso?.bloqueiaConfirmacao)}
+                                onClick={() => void confirmarItem(item.id, item.tipo)}
+                                title={
+                                  aviso?.bloqueiaConfirmacao
+                                    ? "Arquivo já existe no sistema — use Descartar"
+                                    : undefined
+                                }
+                              >
+                                {confirmandoId === item.id ? (
+                                  <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                  <Check size={16} />
+                                )}
+                                Confirmar ação
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secundario inline-flex items-center gap-2 text-sm"
+                                disabled={ocupado || !apiOk}
+                                onClick={() => void escolherPastaParaItem(item.id, pastaEnvio)}
+                                title="Define a pasta sem enviar — depois use Enviar na sugerida"
+                              >
+                                {escolhendoPastaId === item.id ? (
+                                  <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                  <FolderOpen size={16} />
+                                )}
+                                Escolher pasta…
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secundario inline-flex items-center gap-2 text-sm"
+                                disabled={ocupado || !apiOk}
+                                onClick={() => void enviarAoOneDrive(item.id, pastaEnvio)}
+                              >
+                                {enviandoOneDriveId === item.id ? (
+                                  <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                  <CloudUpload size={16} />
+                                )}
+                                Enviar na sugerida
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secundario inline-flex items-center gap-2 text-sm"
+                                onClick={() => void verArquivoCompleto(item.id)}
+                              >
+                                <Eye size={16} /> Ver
+                              </button>
+                              <button
+                                type="button"
+                                className={`inline-flex items-center gap-2 text-sm ${
+                                  aviso ? "btn-primario" : "btn-secundario"
+                                }`}
+                                disabled={ocupado}
+                                onClick={() => removerItemInbox(item.id)}
+                              >
+                                <Trash2 size={16} /> Descartar
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  </Card>
-                </li>
-              );
-            })}
-          </ul>
+                      </Card>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+
+          {aConferir.length > 0 && (
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">A conferir</h3>
+                <p className="text-sm text-slate-600">
+                  Já encaminhados. Ficam aqui até concluir no Recebimento (mercadoria) ou na
+                  Conferência (boleto). Use Continuar se precisar voltar.
+                </p>
+              </div>
+              <ul className="space-y-3">
+                {aConferir.map((item) => {
+                  const sugestao = montarSugestaoInbox(item.tipo);
+                  const ocupado = confirmandoId === item.id;
+                  return (
+                    <li key={item.id}>
+                      <Card className="border-blue-100 bg-blue-50/30 p-4">
+                        <div className="flex flex-col gap-4 sm:flex-row">
+                          <div className="shrink-0 sm:w-36">
+                            <MiniaturaPreview preview={previews[item.id]} />
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-3">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-semibold" title={item.nome}>
+                                  {item.nome}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  {(item.tamanho / 1024).toFixed(1)} KB
+                                  {item.detalhe ? ` · ${item.detalhe}` : ""}
+                                </p>
+                                <p className="mt-1 text-sm text-slate-600">{sugestao.rotulo}</p>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                <Badge cor="azul">{rotuloStatusItemInbox(item.status)}</Badge>
+                                <Badge cor={corTipo(item.tipo)}>Compra</Badge>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="btn-primario inline-flex items-center gap-2 text-sm"
+                                disabled={ocupado}
+                                onClick={() => void continuarConferencia(item.id, item.tipo)}
+                              >
+                                {confirmandoId === item.id ? (
+                                  <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                  <Play size={16} />
+                                )}
+                                Continuar
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secundario inline-flex items-center gap-2 text-sm"
+                                onClick={() => void verArquivoCompleto(item.id)}
+                              >
+                                <Eye size={16} /> Ver
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secundario text-sm"
+                                disabled={ocupado}
+                                onClick={() => removerItemInbox(item.id)}
+                                title="Remove só da caixa; o trabalho no Recebimento/Financeiro continua"
+                              >
+                                Tirar da caixa
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
         </>
       )}
+
+      <Modal
+        aberto={gerenciarFavoritasAberto}
+        titulo="Pastas favoritas"
+        onFechar={() => setGerenciarFavoritasAberto(false)}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">
+            Até {LIMITE_FAVORITAS_INBOX} pastas. Também dá para salvar após{" "}
+            <strong>Escolher pasta…</strong> em um arquivo.
+          </p>
+          <button
+            type="button"
+            className="btn-primario inline-flex items-center gap-2 text-sm"
+            disabled={!apiOk || !podeAdicionarFavorita(favoritas.length)}
+            onClick={() => void adicionarFavoritaPeloGerenciador()}
+          >
+            <FolderOpen size={16} /> Adicionar pasta favorita…
+          </button>
+          {favoritas.length === 0 ? (
+            <p className="text-sm text-slate-500">Nenhuma favorita ainda.</p>
+          ) : (
+            <ul className="space-y-2">
+              {favoritas.map((fav) => (
+                <li
+                  key={fav.id}
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                >
+                  <Star size={14} className="shrink-0 text-amber-600" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium" title={fav.pastaNome}>
+                    {fav.nome}
+                    <span className="ml-1 font-normal text-slate-500">({fav.pastaNome})</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-secundario inline-flex items-center gap-1 text-xs"
+                    onClick={() => {
+                      const novo = window.prompt("Nome da favorita", fav.nome);
+                      if (novo == null) return;
+                      void (async () => {
+                        try {
+                          await renomearFavoritaIdb(fav.id, novo);
+                          await recarregarFavoritas();
+                        } catch (e) {
+                          setErro(e instanceof Error ? e.message : "Falha ao renomear.");
+                        }
+                      })();
+                    }}
+                  >
+                    <Pencil size={12} /> Renomear
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secundario inline-flex items-center gap-1 text-xs"
+                    onClick={() => {
+                      void (async () => {
+                        await removerFavoritaIdb(fav.id);
+                        setPastasEnvio((atual) => {
+                          const next = { ...atual };
+                          const chave = chaveSelectFavorita(fav.id);
+                          for (const [itemId, alvo] of Object.entries(next)) {
+                            if (alvo === chave) delete next[itemId];
+                          }
+                          return next;
+                        });
+                        await recarregarFavoritas();
+                      })();
+                    }}
+                  >
+                    <Trash2 size={12} /> Remover
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            className="btn-secundario text-sm"
+            onClick={() => setGerenciarFavoritasAberto(false)}
+          >
+            Fechar
+          </button>
+        </div>
+      </Modal>
 
       <Modal
         aberto={previewModal !== null}

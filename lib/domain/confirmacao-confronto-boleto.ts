@@ -7,10 +7,13 @@ import {
 } from "./documentos-boleto";
 import {
   confrontarBoletoComNfe,
+  confrontoTemDivergenciaCnpj,
   type DadosBoletoExtraidos,
   type ResultadoConfrontoBoletoNfe,
 } from "./boleto-nfe-confronto";
 import { validarBoleto } from "./boletos";
+
+const MARCA_SUSPEITO_CNPJ = "GOLPE SUSPEITO — CNPJ do boleto diverge da NF-e";
 
 export interface ConfirmarConfrontoBoletoEntrada {
   arquivo: ArquivoBoletoEntrada;
@@ -117,13 +120,54 @@ function revalidarSelecionadaEntreCandidatos(
   confrontoAtual: ResultadoConfrontoBoletoNfe,
   parcelaSelecionadaId?: string
 ): { confrontoRevalidado?: ResultadoConfrontoBoletoNfe; erro?: string; overrideParcial?: boolean } {
-  if (parcelaSelecionadaId && confrontoAtual.classificacao !== "multiplas_possibilidades") {
-    if (!confrontoAtual.parcela_id || confrontoAtual.parcela_id !== parcelaSelecionadaId) {
+  const classificacao = confrontoAtual.classificacao;
+
+  if (classificacao === "exata" || classificacao === "parcial") {
+    if (parcelaSelecionadaId && confrontoAtual.parcela_id && parcelaSelecionadaId !== confrontoAtual.parcela_id) {
       return { erro: "A parcela selecionada não está mais disponível no banco atual." };
     }
+    return { confrontoRevalidado: confrontoAtual };
   }
 
-  if (confrontoAtual.classificacao !== "multiplas_possibilidades") {
+  if (classificacao === "divergente") {
+    const idEscolhido =
+      parcelaSelecionadaId ||
+      (confrontoAtual.candidatos.length === 1 ? confrontoAtual.candidatos[0].boleto_id : undefined) ||
+      confrontoAtual.parcela_id;
+
+    if (!idEscolhido) {
+      return { erro: "Seleção de parcela é obrigatória para confirmar resultado divergente." };
+    }
+
+    const candidato =
+      confrontoAtual.candidatos.find((item) => item.boleto_id === idEscolhido) ??
+      (confrontoAtual.nota_id && confrontoAtual.parcela_id === idEscolhido
+        ? { nota_id: confrontoAtual.nota_id, boleto_id: idEscolhido }
+        : undefined);
+
+    if (!candidato) {
+      return { erro: "A parcela selecionada não pertence à lista atual de candidatos." };
+    }
+
+    const boleto = db.boletos.find((item) => item.id === candidato.boleto_id && item.nota_id === candidato.nota_id);
+    if (!boleto) {
+      return { erro: "A parcela selecionada não está mais disponível no banco atual." };
+    }
+
+    return {
+      confrontoRevalidado: {
+        ...confrontoAtual,
+        nota_id: candidato.nota_id,
+        parcela_id: candidato.boleto_id,
+        exige_confirmacao_humana: true,
+        criterios_coincidentes: Array.from(
+          new Set([...confrontoAtual.criterios_coincidentes, "selecao_humana_candidato"])
+        ),
+      },
+    };
+  }
+
+  if (classificacao !== "multiplas_possibilidades") {
     return { confrontoRevalidado: confrontoAtual };
   }
 
@@ -150,13 +194,19 @@ function revalidarSelecionadaEntreCandidatos(
   };
 
   const confrontoRevalidado = confrontarBoletoComNfe(db, dadosRefinados);
-  if (confrontoRevalidado.classificacao !== "exata" && confrontoRevalidado.classificacao !== "parcial") {
+  if (
+    confrontoRevalidado.classificacao !== "exata" &&
+    confrontoRevalidado.classificacao !== "parcial" &&
+    confrontoRevalidado.classificacao !== "divergente"
+  ) {
     return { erro: "A parcela selecionada ficou inválida após revalidação no banco atual." };
   }
 
   confrontoRevalidado.parcela_id = candidato.boleto_id;
   confrontoRevalidado.nota_id = candidato.nota_id;
-  confrontoRevalidado.classificacao = "parcial";
+  if (confrontoRevalidado.classificacao === "exata") {
+    confrontoRevalidado.classificacao = "parcial";
+  }
   confrontoRevalidado.exige_confirmacao_humana = true;
   if (!confrontoRevalidado.criterios_coincidentes.includes("selecao_humana_candidato")) {
     confrontoRevalidado.criterios_coincidentes.push("selecao_humana_candidato");
@@ -214,7 +264,11 @@ export async function confirmarConfrontoBoleto(
 
   const parcelaSelecionadaId =
     entrada.parcelaSelecionadaId ??
-    (confrontoBruto.classificacao === "multiplas_possibilidades" && boletoEsperado ? boletoEsperado.id : undefined);
+    ((confrontoBruto.classificacao === "multiplas_possibilidades" ||
+      confrontoBruto.classificacao === "divergente") &&
+    boletoEsperado
+      ? boletoEsperado.id
+      : undefined);
   const selecao = revalidarSelecionadaEntreCandidatos(db, entrada.dadosExtraidos, confrontoBruto, parcelaSelecionadaId);
   if (selecao.erro) {
     return erro(confrontoBruto, selecao.erro);
@@ -291,12 +345,21 @@ export async function confirmarConfrontoBoleto(
     return erro(confrontoAtual, "Documento de boleto já registrado com o mesmo código canônico.");
   }
 
-  if (confrontoAtual.classificacao !== "exata" && confrontoAtual.classificacao !== "parcial") {
+  const podeConfirmar =
+    confrontoAtual.classificacao === "exata" ||
+    confrontoAtual.classificacao === "parcial" ||
+    confrontoAtual.classificacao === "divergente";
+
+  if (!podeConfirmar) {
     return erro(confrontoAtual, `Resultado ${confrontoAtual.classificacao} não pode ser confirmado.`);
   }
 
   if (confrontoAtual.classificacao === "parcial" && !justificativa) {
     return erro(confrontoAtual, "Justificativa é obrigatória para confirmar resultado parcial.");
+  }
+
+  if (confrontoAtual.classificacao === "divergente" && !justificativa) {
+    return erro(confrontoAtual, "Justificativa é obrigatória para confirmar resultado divergente.");
   }
 
   if (!confrontoAtual.nota_id || !confrontoAtual.parcela_id) {
@@ -311,6 +374,8 @@ export async function confirmarConfrontoBoleto(
   if (boletoAtual.documento_boleto_id) {
     return erro(confrontoAtual, "Parcela já está ligada a outro DocumentoBoleto.");
   }
+
+  const cnpjDivergente = confrontoTemDivergenciaCnpj(confrontoAtual);
 
   const proximo = structuredClone(db) as DB;
   garanteColecoes(proximo);
@@ -362,7 +427,15 @@ export async function confirmarConfrontoBoleto(
   boletoConfirmado.status_conferencia = "conferido";
   boletoConfirmado.conferido_em = confirmadoEm;
   boletoConfirmado.conferido_por = responsavel;
-  boletoConfirmado.status = "liberado";
+  if (cnpjDivergente) {
+    boletoConfirmado.status = "suspeito";
+    const obs = `${MARCA_SUSPEITO_CNPJ}. Confirmado com justificativa em ${confirmadoEm.slice(0, 10)}.`;
+    boletoConfirmado.observacao = boletoConfirmado.observacao
+      ? `${boletoConfirmado.observacao} | ${obs}`
+      : obs;
+  } else {
+    boletoConfirmado.status = "liberado";
+  }
 
   Object.assign(db, proximo);
 

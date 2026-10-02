@@ -78,7 +78,7 @@ function bancoLegado(): DB {
     eventos_box_operacional: [],
     precos_historico: [],
     integracao_eventos: [],
-  } as DB;
+  } as unknown as DB;
 }
 
 describe("estoque boxes fase 1", () => {

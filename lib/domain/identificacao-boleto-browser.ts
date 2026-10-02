@@ -1,6 +1,7 @@
 import {
   eliminarDuplicidadeRepresentacaoBoletos,
   identificarBoletosValidosNoTexto,
+  ordenarCandidatosBoletoPorPlausibilidade,
   type ResultadoIdentificacaoTextoBoleto,
   type BoletoValidoIdentificado,
 } from "./identificacao-boleto";
@@ -18,7 +19,8 @@ interface BarcodeDetectorConstructorLike {
 }
 
 const FORMATOS_BARCODE_PRIORITARIOS = ["itf", "code_128", "code_39", "ean_13", "ean_8", "upc_a", "upc_e"];
-const MAXIMO_PAGINAS_PDF = 5;
+const MAXIMO_PAGINAS_PDF = 8;
+const ESCALA_RENDER_BOLETO = 2.75;
 
 type AcumuladoIdentificacao = { quantidadeCandidatos: number; validos: BoletoValidoIdentificado[] };
 
@@ -172,7 +174,7 @@ export function validarResultadosVisuaisBrutos(leituras: string[]): ResultadoIde
     }
   }
 
-  const validos = deduplicarResultados(acumulado.validos);
+  const validos = ordenarCandidatosBoletoPorPlausibilidade(deduplicarResultados(acumulado.validos));
   diagnostico.resultadoValidoEncontrado = validos.length > 0;
 
   return {
@@ -194,21 +196,44 @@ function extrairLeituraResultante(resultado: unknown): string | null {
   return null;
 }
 
-function criarCanvasRegiaoInferior(canvasOriginal: HTMLCanvasElement): HTMLCanvasElement {
-  const alturaRecorte = Math.max(1, Math.floor(canvasOriginal.height * 0.45));
-  const origemY = Math.max(0, canvasOriginal.height - alturaRecorte);
+function criarCanvasRegiao(
+  canvasOriginal: HTMLCanvasElement,
+  origemYRatio: number,
+  alturaRatio: number
+): HTMLCanvasElement {
+  const origemY = Math.max(0, Math.floor(canvasOriginal.height * origemYRatio));
+  const alturaRecorte = Math.max(1, Math.floor(canvasOriginal.height * alturaRatio));
   const recorte = document.createElement("canvas");
   recorte.width = canvasOriginal.width;
-  recorte.height = alturaRecorte;
+  recorte.height = Math.min(alturaRecorte, canvasOriginal.height - origemY);
   const contexto = recorte.getContext("2d");
   if (contexto) {
-    contexto.drawImage(canvasOriginal, 0, origemY, canvasOriginal.width, alturaRecorte, 0, 0, recorte.width, recorte.height);
+    contexto.drawImage(
+      canvasOriginal,
+      0,
+      origemY,
+      canvasOriginal.width,
+      recorte.height,
+      0,
+      0,
+      recorte.width,
+      recorte.height
+    );
   }
   return recorte;
 }
 
+function criarCanvasRegiaoInferior(canvasOriginal: HTMLCanvasElement): HTMLCanvasElement {
+  return criarCanvasRegiao(canvasOriginal, 0.55, 0.45);
+}
+
 function fontesDeLeituraDoCanvas(canvasOriginal: HTMLCanvasElement): HTMLCanvasElement[] {
-  return [canvasOriginal, criarCanvasRegiaoInferior(canvasOriginal)];
+  return [
+    canvasOriginal,
+    criarCanvasRegiaoInferior(canvasOriginal),
+    criarCanvasRegiao(canvasOriginal, 0.7, 0.3),
+    criarCanvasRegiao(canvasOriginal, 0.35, 0.4),
+  ];
 }
 
 async function identificarViaBarcode(
@@ -295,6 +320,48 @@ async function identificarCanvasComZXingITF(
   }
 }
 
+/** OCR da linha digitável: faixa inferior, depois página inteira se ainda falhar. */
+async function ocrFaixaLinhaDigitavel(
+  canvas: HTMLCanvasElement,
+  acumulado: AcumuladoIdentificacao,
+  diagnostico: DiagnosticoIdentificacaoBoleto
+): Promise<void> {
+  try {
+    const { ocrImagemDataUrl, ocrImagemTextoCompleto } = await import("./danfe-captura-browser");
+    const faixas = [
+      criarCanvasRegiaoInferior(canvas),
+      criarCanvasRegiao(canvas, 0.7, 0.3),
+    ];
+
+    for (const faixa of faixas) {
+      const validosAntes = acumulado.validos.length;
+      const textoDigitos = await ocrImagemDataUrl(faixa);
+      if (textoDigitos.trim()) {
+        diagnostico.textoEncontrado = true;
+        registrarResultadoTexto(textoDigitos, acumulado);
+        registrarResultadoTexto(textoDigitos.replace(/\D+/g, " "), acumulado);
+      }
+      if (acumulado.validos.length > validosAntes) return;
+    }
+
+    const textoLivreInferior = await ocrImagemTextoCompleto(criarCanvasRegiaoInferior(canvas));
+    if (textoLivreInferior.trim()) {
+      diagnostico.textoEncontrado = true;
+      registrarResultadoTexto(textoLivreInferior, acumulado);
+    }
+    if (acumulado.validos.length > 0) return;
+
+    const textoPagina = await ocrImagemTextoCompleto(canvas);
+    if (textoPagina.trim()) {
+      diagnostico.textoEncontrado = true;
+      registrarResultadoTexto(textoPagina, acumulado);
+      registrarResultadoTexto(textoPagina.replace(/\D+/g, " "), acumulado);
+    }
+  } catch {
+    registrarFalhaTecnica(diagnostico, "erro desconhecido");
+  }
+}
+
 async function identificarEmImagemArquivo(
   arquivo: File,
   acumulado: AcumuladoIdentificacao,
@@ -343,6 +410,9 @@ async function identificarEmImagemArquivo(
     }
     if (deveCancelar()) return;
     await identificarCanvasComZXingITF(canvas, acumulado, diagnostico);
+    if (acumulado.validos.length === 0) {
+      await ocrFaixaLinhaDigitavel(canvas, acumulado, diagnostico);
+    }
   } finally {
     bitmap.close();
   }
@@ -420,7 +490,7 @@ async function identificarEmPdfArquivo(
         registrarResultadoTexto(texto, acumulado);
       }
 
-      const viewport = pagina.getViewport({ scale: 2 });
+      const viewport = pagina.getViewport({ scale: ESCALA_RENDER_BOLETO });
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
@@ -447,6 +517,10 @@ async function identificarEmPdfArquivo(
         return;
       }
 
+      const plausiveisAntes = ordenarCandidatosBoletoPorPlausibilidade(
+        deduplicarResultados(acumulado.validos)
+      ).length;
+
       if (detector) {
         try {
           await identificarCanvasComBarcodeDetector(canvas, detector, acumulado, diagnostico);
@@ -461,6 +535,18 @@ async function identificarEmPdfArquivo(
       }
 
       await identificarCanvasComZXingITF(canvas, acumulado, diagnostico);
+
+      const plausiveisAgora = ordenarCandidatosBoletoPorPlausibilidade(
+        deduplicarResultados(acumulado.validos)
+      ).length;
+      // OCR se ainda não há leitura plausível, ou na última página (DANFE+boleto)
+      if (plausibleisAgora === plausiveisAntes || indicePagina === totalPaginas) {
+        await ocrFaixaLinhaDigitavel(canvas, acumulado, diagnostico);
+      }
+
+      if (acumulado.validos.length > 0 && deveCancelar()) {
+        return;
+      }
     }
   } finally {
     if (typeof loadingTask.destroy === "function") {
@@ -475,6 +561,27 @@ export interface ResultadoIdentificacaoArquivoBoleto {
   diagnostico: DiagnosticoIdentificacaoBoleto;
 }
 
+export interface PaginaBoletoIdentificada {
+  pagina: number;
+  pareceDanfe: boolean;
+  validos: BoletoValidoIdentificado[];
+}
+
+export interface ResultadoIdentificacaoPorPagina {
+  totalPaginas: number;
+  paginas: PaginaBoletoIdentificada[];
+  diagnostico: DiagnosticoIdentificacaoBoleto;
+}
+
+export function parecePaginaDanfeNoTexto(texto: string): boolean {
+  if (!texto.trim()) return false;
+  if (/DANF-?e|Documento\s+Auxiliar\s+da\s+Nota|CHAVE\s+DE\s+ACESSO|NATUREZA\s+DE\s+OPERA/i.test(texto)) {
+    return true;
+  }
+  const digitos = texto.replace(/\D+/g, "");
+  return /\d{44}/.test(digitos) && /NF-?e|DESTINAT|EMITENTE|ICMS/i.test(texto);
+}
+
 function tipoArquivoEhPdf(nomeArquivo: string): boolean {
   return nomeArquivo.toLowerCase().endsWith(".pdf");
 }
@@ -482,6 +589,146 @@ function tipoArquivoEhPdf(nomeArquivo: string): boolean {
 function tipoArquivoEhImagem(nomeArquivo: string): boolean {
   const nome = nomeArquivo.toLowerCase();
   return nome.endsWith(".png") || nome.endsWith(".jpg") || nome.endsWith(".jpeg");
+}
+
+/**
+ * Lê o PDF página a página: separa DANFE de boletos e tenta linha/código em cada página.
+ */
+export async function identificarBoletosPorPaginaNoPdf(
+  arquivo: File,
+  deveCancelar: () => boolean
+): Promise<ResultadoIdentificacaoPorPagina> {
+  const diagnostico = criarDiagnosticoInicial();
+  const paginas: PaginaBoletoIdentificada[] = [];
+
+  if (!tipoArquivoEhPdf(arquivo.name) && arquivo.type !== "application/pdf") {
+    return { totalPaginas: 0, paginas, diagnostico };
+  }
+
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => null);
+  if (!pdfjs?.getDocument) {
+    registrarFalhaTecnica(diagnostico, "módulo PDF não carregado");
+    return { totalPaginas: 0, paginas, diagnostico };
+  }
+
+  try {
+    configurarWorkerPdfLocal(pdfjs as { GlobalWorkerOptions?: { workerSrc?: string } });
+  } catch {
+    registrarFalhaTecnica(diagnostico, "worker não carregado");
+    return { totalPaginas: 0, paginas, diagnostico };
+  }
+
+  const bufferOriginal = await arquivo.arrayBuffer();
+  const dados = criarBytesPdfComCopia(bufferOriginal);
+  const loadingTask = (
+    pdfjs as {
+      getDocument: (params: { data: Uint8Array }) => { promise: Promise<unknown>; destroy?: () => Promise<void> };
+    }
+  ).getDocument({ data: dados });
+
+  const documento = await loadingTask.promise.catch((erro) => {
+    registrarFalhaTecnica(diagnostico, classificarFalhaPdf(erro));
+    return null;
+  });
+  if (!documento) {
+    return { totalPaginas: 0, paginas, diagnostico };
+  }
+  diagnostico.pdfAberto = true;
+
+  const detector = await criarDetectorCompativel().catch(() => null);
+  diagnostico.barcodeDetectorDisponivel = Boolean(detector);
+
+  try {
+    const documentoPdf = documento as {
+      numPages: number;
+      getPage: (indice: number) => Promise<{
+        getTextContent: () => Promise<unknown>;
+        getViewport: (opcoes: { scale: number }) => { width: number; height: number };
+        render: (opcoes: {
+          canvasContext: CanvasRenderingContext2D;
+          viewport: { width: number; height: number };
+          canvas: HTMLCanvasElement;
+        }) => { promise: Promise<void> };
+      }>;
+    };
+    const totalPaginas = Math.min(documentoPdf.numPages, MAXIMO_PAGINAS_PDF);
+
+    for (let indicePagina = 1; indicePagina <= totalPaginas; indicePagina += 1) {
+      if (deveCancelar()) {
+        registrarFalhaTecnica(diagnostico, "leitura cancelada");
+        break;
+      }
+
+      const acumuladoPagina: AcumuladoIdentificacao = { quantidadeCandidatos: 0, validos: [] };
+      const pagina = await documentoPdf.getPage(indicePagina).catch((erro) => {
+        registrarFalhaTecnica(diagnostico, classificarFalhaPdf(erro));
+        return null;
+      });
+      if (!pagina) continue;
+
+      let textoPagina = "";
+      const conteudoTexto = await pagina.getTextContent().catch(() => null);
+      if (conteudoTexto) {
+        textoPagina = combinarTextosPdfFragmentados(
+          conteudoTexto as { items: Array<{ str?: string; hasEOL?: boolean }> }
+        );
+        if (textoPagina.trim()) diagnostico.textoEncontrado = true;
+        registrarResultadoTexto(textoPagina, acumuladoPagina);
+      }
+
+      const pareceDanfe = parecePaginaDanfeNoTexto(textoPagina);
+      if (pareceDanfe) {
+        paginas.push({ pagina: indicePagina, pareceDanfe: true, validos: [] });
+        diagnostico.paginasProcessadas += 1;
+        continue;
+      }
+
+      const viewport = pagina.getViewport({ scale: ESCALA_RENDER_BOLETO });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.floor(viewport.width));
+      canvas.height = Math.max(1, Math.floor(viewport.height));
+      const contexto = canvas.getContext("2d", { alpha: false });
+      if (!contexto) {
+        paginas.push({ pagina: indicePagina, pareceDanfe: false, validos: [] });
+        continue;
+      }
+
+      const renderizado = await pagina
+        .render({ canvasContext: contexto, viewport, canvas })
+        .promise.then(() => true)
+        .catch((erro) => {
+          registrarFalhaTecnica(diagnostico, classificarFalhaPdf(erro));
+          return false;
+        });
+      if (!renderizado) {
+        paginas.push({ pagina: indicePagina, pareceDanfe: false, validos: [] });
+        continue;
+      }
+
+      diagnostico.paginasProcessadas += 1;
+      if (detector) {
+        try {
+          await identificarCanvasComBarcodeDetector(canvas, detector, acumuladoPagina, diagnostico);
+        } catch {
+          registrarFalhaTecnica(diagnostico, "erro desconhecido");
+        }
+      }
+      await identificarCanvasComZXingITF(canvas, acumuladoPagina, diagnostico);
+      if (acumuladoPagina.validos.length === 0) {
+        await ocrFaixaLinhaDigitavel(canvas, acumuladoPagina, diagnostico);
+      }
+
+      const validos = ordenarCandidatosBoletoPorPlausibilidade(deduplicarResultados(acumuladoPagina.validos));
+      paginas.push({ pagina: indicePagina, pareceDanfe: false, validos });
+    }
+
+    diagnostico.resultadoValidoEncontrado = paginas.some((p) => p.validos.length > 0);
+    return { totalPaginas: documentoPdf.numPages, paginas, diagnostico };
+  } finally {
+    if (typeof loadingTask.destroy === "function") {
+      await loadingTask.destroy().catch(() => undefined);
+    }
+  }
 }
 
 export async function identificarCodigoBoletoNoArquivoLocal(
@@ -504,7 +751,7 @@ export async function identificarCodigoBoletoNoArquivoLocal(
     registrarFalhaTecnica(diagnostico, "erro desconhecido");
   }
 
-  const validos = deduplicarResultados(acumulado.validos);
+  const validos = ordenarCandidatosBoletoPorPlausibilidade(deduplicarResultados(acumulado.validos));
   diagnostico.candidatosNumericosEncontrados = acumulado.quantidadeCandidatos;
   diagnostico.resultadoValidoEncontrado = validos.length > 0;
 

@@ -241,7 +241,7 @@ describe("confirmação e persistência do confronto boleto x NF-e", () => {
     expect(db.documentos_boleto[0].justificativa_confirmacao).toBe("Conferido manualmente com fornecedor");
   });
 
-  it("divergente não grava", async () => {
+  it("divergente sem justificativa não grava", async () => {
     const db = dbBase();
     const dados = { ...dadosExatos(), valor_codificado: 99 };
 
@@ -254,7 +254,45 @@ describe("confirmação e persistência do confronto boleto x NF-e", () => {
 
     expect(resultado.sucesso).toBe(false);
     expect(resultado.confrontoAtual?.classificacao).toBe("divergente");
+    expect(resultado.erros.some((e) => /justificativa/i.test(e))).toBe(true);
     expect(db.documentos_boleto).toHaveLength(0);
+  });
+
+  it("divergente com justificativa grava e libera", async () => {
+    const db = dbBase();
+    const dados = { ...dadosExatos(), valor_codificado: 10.5 };
+
+    const resultado = await confirmarConfrontoBoleto(db, {
+      arquivo: arquivoValido(),
+      linhaInformada: LINHA_BANCARIA_47,
+      dadosExtraidos: dados,
+      confirmacaoHumana: true,
+      justificativaConfirmacao: "Conferi DANFE: diferença de centavos aceita",
+    });
+
+    expect(resultado.sucesso).toBe(true);
+    expect(resultado.confrontoAtual?.classificacao).toBe("divergente");
+    expect(db.documentos_boleto).toHaveLength(1);
+    expect(db.boletos[0].status_conferencia).toBe("conferido");
+    expect(db.boletos[0].status).toBe("liberado");
+  });
+
+  it("divergente de CNPJ com justificativa grava como suspeito", async () => {
+    const db = dbBase();
+    const dados = { ...dadosExatos(), cnpj_beneficiario: "11111111000111", cnpjs_encontrados: ["11111111000111"] };
+
+    const resultado = await confirmarConfrontoBoleto(db, {
+      arquivo: arquivoValido(),
+      linhaInformada: LINHA_BANCARIA_47,
+      dadosExtraidos: dados,
+      confirmacaoHumana: true,
+      justificativaConfirmacao: "Fornecedor mudou CNPJ — confirmei por telefone",
+    });
+
+    expect(resultado.sucesso).toBe(true);
+    expect(db.boletos[0].status).toBe("suspeito");
+    expect(db.boletos[0].status_conferencia).toBe("conferido");
+    expect(db.boletos[0].observacao).toMatch(/CNPJ/i);
   });
 
   it("sem correspondência não grava", async () => {

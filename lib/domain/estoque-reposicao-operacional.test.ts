@@ -244,7 +244,7 @@ function bancoBase(): DB {
     eventos_box_operacional: [],
     precos_historico: [],
     integracao_eventos: [],
-  } as DB;
+  } as unknown as DB;
 }
 
 describe("reposicao do box operacional - fase 2", () => {

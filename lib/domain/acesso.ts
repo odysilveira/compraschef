@@ -4,13 +4,18 @@ import { permissoesPorPapel } from "./rh";
 /** Ordem: rotas mais específicas primeiro; `/` por último. */
 const ROTAS_MODULO: Array<{ prefixo: string; modulo: ModuloAcesso }> = [
   { prefixo: "/rh", modulo: "rh" },
+  { prefixo: "/caixa-entrada", modulo: "recebimento" },
   { prefixo: "/recebimento", modulo: "recebimento" },
   { prefixo: "/estoque", modulo: "estoque" },
   { prefixo: "/lista-compras", modulo: "lista_compras" },
   { prefixo: "/cotacoes", modulo: "cotacoes" },
   { prefixo: "/pedidos", modulo: "pedidos" },
   { prefixo: "/financeiro", modulo: "financeiro" },
+  { prefixo: "/fechamento-dia", modulo: "financeiro" },
+  { prefixo: "/dre", modulo: "financeiro" },
   { prefixo: "/relatorios", modulo: "relatorios" },
+  { prefixo: "/fichas-tecnicas", modulo: "cadastros" },
+  { prefixo: "/integracoes", modulo: "cadastros" },
   { prefixo: "/cadastros", modulo: "cadastros" },
   { prefixo: "/", modulo: "painel" },
 ];

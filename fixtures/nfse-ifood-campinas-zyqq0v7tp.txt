@@ -1,0 +1,88 @@
+Número / Série
+07/09/2026 04:38:45
+Data e hora de emissão
+A autenticidade desta NFSe Campinas
+pode ser verificada pela leitura deste
+código QR.
+DADOS DA NFSe Campinas
+Competência
+13358572 / E 08/2026
+Prefeitura Municipal Campinas
+Secretaria Municipal de Finanças
+NFSe Campinas - Prestador
+31/08/2026
+Data do RPS
+3720417 / 1
+Número / Série do RPS
+Nota Fiscal de Serviços eletrônica de Campinas
+Código de Verificação
+zYQQ0v7TP
+Chave de Acesso da NFSe Nacional
+35095021214380200000393000001335857226096004446848
+LICENCIAMENTO DE USO DE PROGRAM/SOFTWARE.|Licenciamento de Software |Valor aproximado dos impostos R$ 6,22 (5.65%) | conforme lei da transparencia
+12.741/12. Fonte: IBPT |Regra Geral
+RETENÇÕES
+ISSQN (R$) IRRF (R$) PIS (R$) COFINS (R$) INSS (R$) CSLL (R$) Outras retenções (R$)
+R$ 0,00 R$ 0,00 R$ 0,00 R$ 0,00 R$ 0,00 R$ 0,00 R$ 0,00
+R$ 110,00 R$ 0,00 R$ 0,00 R$ 110,00
+VALOR TOTAL
+Base de cálculo do ISSQN (R$) Retenções (R$) Desc. incondicionado (R$) Valor Líquido da NFSe Campinas (R$)
+INFORMAÇÕES COMPLEMENTARES
+IFOOD.COM AGENCIA DE RESTAURANTES ONLINE S.A.
+14.380.200/0003-93
+Nome / Nome Empresarial
+CPF / CNPJ / NIF Inscrição Municipal
+00.474.043-2
+Município
+RUA JASMIM 660 CHACARA PRIMAVERA CAMPINAS / SP BRASIL
+Nome / Nome Empresarial
+VERA BELA RESTAURANTE LTDA
+AVENIDA AYRTON SENNA DA SILVA 1055 GLEBA FAZENDA PALHANO
+Inscrição Municipal
+Município
+LONDRINA / PR BRASIL
+65.598.833/0001-41
+londrina@italinhouse.com
+E-mail
+DESCRIÇÃO DO SERVIÇO PRESTADO (EM ACORDO COM A CNAE/CBO IDENTIFICADA NO CAMPO SERVIÇO
+PRESTADO, ESPECIFICANDO A QUANTIDADE E O PREÇO UNITÁRIO)
+E-mail
+CEP
+Telefone
+Telefone
+CEP
+CNAE / CBO
+Serviço
+tributario@ifood.com.br
+00.000.000-0
+13087-460
+(11) 3634-3360
+(39) 9172-1055
+86050-460
+CÁLCULO DO ISSQN
+Valor total da NFSe Campinas (R$) Total das deduções (R$) Base de cálculo do ISSQN (R$) Alíq. (%) Valor do ISSQN (R$)
+2,000000 R$ 2,20 R$ 110,00 R$ 0,00 R$ 110,00 R$ 0,00
+TOMADOR DO SERVIÇO
+CPF / CNPJ / NIF
+6202-3/00-02 - DESENVOLVIMENTO E LICENCIAMENTO DE PROGRAMAS DE COMPUTADOR CUSTOMIZAVEIS
+01.05 - LICENCIAMENTO OU CESSÃO DE DIREITO DE USO DE PROGRAMAS DE COMPUTAÇÃO.
+Local da prestação do serviço
+Responsável pelo recolhimento do ISSQN
+Situação do prestador do serviço perante o Simples Nacional Regime especial de tributação do ISSQN
+Município da Incidência do ISSQN Exigibilidade do ISSQN
+CAMPINAS - SP
+CAMPINAS / SP
+PRESTADOR DO SERVIÇO EXIGÍVEL
+NÃO OPTANTE -
+Desc. incondicionado (R$)
+TRIBUTAÇÃO MUNICIPAL
+SERVIÇO PRESTADO
+País da prestação do serviço
+BRASIL
+Retenção do ISSQN
+NÃO RETIDO
+R$ 0,00
+Desc. condicionado (R$)
+EMITENTE PRESTADOR DO SERVIÇO
+Endereço
+Endereço

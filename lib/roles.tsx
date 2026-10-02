@@ -4,8 +4,10 @@
 // no seletor do topo (simulação) e persiste em localStorage.
 // Quando o Auth entrar, o papel virá de perfis.papel do usuário logado.
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import type { Papel } from "@/lib/types";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useDB } from "@/lib/data";
+import { permissoesEfetivasDoPapel, podeAcessarModulo } from "@/lib/domain/acesso";
+import type { ModuloAcesso, Papel, PermissoesModulos } from "@/lib/types";
 
 const STORAGE_KEY = "compraschef-papel";
 
@@ -53,4 +55,16 @@ export function PapelProvider({ children }: { children: ReactNode }) {
 
 export function usePapel(): PapelContexto {
   return useContext(Contexto);
+}
+
+/** Permissões do usuário simulado (pessoa RH do papel, ou padrão do papel). */
+export function usePermissoes(): PermissoesModulos {
+  const { papel } = usePapel();
+  const db = useDB();
+  return useMemo(() => permissoesEfetivasDoPapel(db, papel), [db, papel]);
+}
+
+export function usePodeAcessarModulo(modulo: ModuloAcesso): boolean {
+  const perms = usePermissoes();
+  return podeAcessarModulo(perms, modulo);
 }

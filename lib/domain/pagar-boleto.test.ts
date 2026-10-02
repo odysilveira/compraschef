@@ -5,6 +5,8 @@ import {
   acoesPagamentoDisponiveisNoLayout,
   alternarCodigoAberto,
   avaliarElegibilidadePagamentoBoleto,
+  boletoProntoParaAgendaPagamentos,
+  conciliarBoleto,
   criarSnapshotPagamentoBoleto,
   gerarPadraoInterleaved2of5,
   informarPagamentoBoleto,
@@ -62,6 +64,38 @@ function documentoBase(overrides: Partial<DocumentoBoleto> = {}): DocumentoBolet
     ...overrides,
   };
 }
+
+describe("boletoProntoParaAgendaPagamentos", () => {
+  it("exclui parcela ainda aguardando documento (não vai para A vencer)", () => {
+    expect(
+      boletoProntoParaAgendaPagamentos(
+        boletoBase({
+          status_conferencia: "aguardando_documento",
+          documento_boleto_id: undefined,
+          linha_digitavel: undefined,
+        })
+      )
+    ).toBe(false);
+  });
+
+  it("inclui boleto já conferido", () => {
+    expect(boletoProntoParaAgendaPagamentos(boletoBase())).toBe(true);
+  });
+
+  it("inclui PIX sem NFS-e mesmo sem status_conferencia conferido", () => {
+    expect(
+      boletoProntoParaAgendaPagamentos(
+        boletoBase({
+          nota_id: undefined,
+          meio_pagamento_esperado: "pix",
+          status_documento_fiscal: "aguardando_nfse",
+          status_conferencia: "conferido",
+          linha_digitavel: "00020126...",
+        })
+      )
+    ).toBe(true);
+  });
+});
 
 describe("elegibilidade de pagamento do boleto", () => {
   it("permite boleto liberado e conferido", () => {
@@ -255,6 +289,52 @@ describe("informar pagamento do boleto", () => {
     expect(resultado.sucesso).toBe(true);
     expect(db.boletos[0].pagamento_responsavel).toBe("usuário local");
     expect(db.boleto_pagamentos_historico[0].responsavel).toBe("usuário local");
+  });
+});
+
+describe("conciliar boleto", () => {
+  it("confirma data/banco e marca como pago", () => {
+    const db = dbTeste();
+    const snapshot = criarSnapshotPagamentoBoleto(db.boletos[0]);
+    informarPagamentoBoleto(db, "bol-ok", snapshot, {
+      dataPagamento: "2026-08-08",
+      valorPago: 318.4,
+      bancoConta: "Itaú - Conta Operacional",
+      confirmouAviso: true,
+    });
+
+    const resultado = conciliarBoleto(
+      db,
+      "bol-ok",
+      { confirmouDataEBanco: true, responsavel: "Marina" },
+      { agora: "2026-08-09T12:00:00.000Z", gerarIdHistorico: () => "bph-c1" }
+    );
+
+    expect(resultado.sucesso).toBe(true);
+    expect(db.boletos[0].status).toBe("pago");
+    expect(db.boleto_pagamentos_historico.at(-1)).toMatchObject({
+      id: "bph-c1",
+      acao: "conciliado",
+      status_anterior: "aguardando_conciliacao",
+      status_novo: "pago",
+      data_pagamento: "2026-08-08",
+      banco_conta: "Itaú - Conta Operacional",
+    });
+  });
+
+  it("exige confirmação explícita de data e banco", () => {
+    const db = dbTeste();
+    const snapshot = criarSnapshotPagamentoBoleto(db.boletos[0]);
+    informarPagamentoBoleto(db, "bol-ok", snapshot, {
+      dataPagamento: "2026-08-08",
+      valorPago: 318.4,
+      bancoConta: "Banco X",
+      confirmouAviso: true,
+    });
+
+    const resultado = conciliarBoleto(db, "bol-ok", { confirmouDataEBanco: false });
+    expect(resultado.sucesso).toBe(false);
+    expect(db.boletos[0].status).toBe("aguardando_conciliacao");
   });
 });
 

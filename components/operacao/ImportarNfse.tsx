@@ -10,6 +10,7 @@ import { mutate, uid, useDB } from "@/lib/data";
 import { extrairTextoPdfBrowser } from "@/lib/domain/folha-recibo-pdf-browser";
 import {
   TEXTO_NFSE_DEMO_ANOTA_AI,
+  TEXTO_NFSE_DEMO_IFOOD_SP,
   chaveNfseValida,
   extrairDadosNfseDoTexto,
   garantirFornecedorNfse,
@@ -68,9 +69,11 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
   const [salvando, setSalvando] = useState(false);
 
   const fornecedorExistente = useMemo(() => {
-    const digitos = cnpj.replace(/\D/g, "");
+    const digitos = (cnpj ?? "").replace(/\D/g, "");
     if (digitos.length !== 14) return null;
-    return db.fornecedores.find((f) => f.cnpj.replace(/\D/g, "") === digitos) ?? null;
+    return (
+      db.fornecedores.find((f) => (f.cnpj ?? "").replace(/\D/g, "") === digitos) ?? null
+    );
   }, [db.fornecedores, cnpj]);
 
   function aplicarDados(extraidos: DadosNfseExtraidos, nomeArquivo?: string) {
@@ -85,6 +88,10 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
     setDescricao(extraidos.descricao_servico ?? "");
     const base = extraidos.emitida_em || soData(new Date().toISOString());
     setVencimento(adicionarDiasIso(base, 14));
+    const nome = (extraidos.razao_social_prestador ?? "").toUpperCase();
+    if (/IFOOD|I\s*FOOD|ANOTA\s*AI|RAPPI|KEETA|UBER\s*EATS/i.test(nome)) {
+      setMeio("plataforma");
+    }
     setErro(null);
   }
 
@@ -157,7 +164,13 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
       setErro("Data de emissão inválida.");
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(vencimento)) {
+    const vencimentoEfetivo =
+      meio === "plataforma"
+        ? /^\d{4}-\d{2}-\d{2}$/.test(vencimento)
+          ? vencimento
+          : emitidaEm
+        : vencimento;
+    if (meio !== "plataforma" && !/^\d{4}-\d{2}-\d{2}$/.test(vencimentoEfetivo)) {
       setErro("Vencimento do pagamento inválido.");
       return;
     }
@@ -189,7 +202,7 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
             municipio_emissao: dados?.municipio,
             arquivo_pdf_nome: arquivoNome ?? undefined,
             meio_pagamento: meio,
-            vencimento,
+            vencimento: vencimentoEfetivo,
           },
           { gerarIdNota: () => uid("nfse"), gerarIdBoleto: () => uid("bol") }
         );
@@ -222,9 +235,10 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
 
       <Card className="space-y-3 p-4">
         <p className="text-sm text-slate-600">
-          A maioria das notas de serviço chega em <strong>PDF</strong> (prefeitura). O sistema extrai o texto,
-          você confere e escolhe se o pagamento será por <strong>boleto</strong> ou <strong>PIX</strong>. Não
-          passa pelo estoque — o título já nasce liberado na agenda financeira.
+          Use <strong>Escolher PDF</strong> para ler a nota que você baixou. Os botões “Exemplo…” só
+          carregam um texto de demonstração (não abrem o arquivo da sua pasta Downloads). Escolha se o
+          pagamento será por <strong>boleto</strong>, <strong>PIX</strong> ou{" "}
+          <strong>já debitado na plataforma</strong> (iFood etc.). Não passa pelo estoque.
         </p>
         <div className="flex flex-wrap gap-2">
           <label className="btn-primario cursor-pointer">
@@ -240,6 +254,17 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
           </label>
           <button type="button" className="btn-secundario" onClick={carregarDemo}>
             <FlaskConical size={16} /> Exemplo Anota AI (Osasco)
+          </button>
+          <button
+            type="button"
+            className="btn-secundario"
+            onClick={() => {
+              setTextoExtraido(TEXTO_NFSE_DEMO_IFOOD_SP);
+              aplicarDados(extrairDadosNfseDoTexto(TEXTO_NFSE_DEMO_IFOOD_SP), "demo-ifood-sp.txt");
+              setMeio("plataforma");
+            }}
+          >
+            <FlaskConical size={16} /> Exemplo iFood (SP)
           </button>
         </div>
         {arquivoNome && (
@@ -281,13 +306,13 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
               <Campo rotulo="Valor total *">
                 <input className="campo" value={valor} onChange={(e) => setValor(e.target.value)} required />
               </Campo>
-              <Campo rotulo="Vencimento do pagamento *">
+              <Campo rotulo={meio === "plataforma" ? "Vencimento (opcional)" : "Vencimento do pagamento *"}>
                 <input
                   type="date"
                   className="campo"
                   value={vencimento}
                   onChange={(e) => setVencimento(e.target.value)}
-                  required
+                  required={meio !== "plataforma"}
                 />
               </Campo>
             </div>
@@ -303,7 +328,25 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
             <div className="flex items-center gap-2 font-semibold">
               <Wallet size={18} className="text-primaria" /> Como vai pagar?
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <label
+                className={`flex cursor-pointer items-start gap-2 rounded-lg border-2 p-3 ${
+                  meio === "plataforma" ? "border-primaria bg-primaria-clara" : "border-slate-200"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="meio"
+                  checked={meio === "plataforma"}
+                  onChange={() => setMeio("plataforma")}
+                />
+                <span>
+                  <span className="block font-semibold">Já debitado</span>
+                  <span className="text-sm text-slate-600">
+                    iFood e similares: valor já descontado na plataforma — sem pendência na agenda.
+                  </span>
+                </span>
+              </label>
               <label
                 className={`flex cursor-pointer items-start gap-2 rounded-lg border-2 p-3 ${
                   meio === "pix" ? "border-primaria bg-primaria-clara" : "border-slate-200"
@@ -333,8 +376,10 @@ export default function ImportarNfse({ onVoltar, onConcluido, arquivoInicial }: 
             </div>
             {emitidaEm && vencimento && (
               <p className="text-sm text-slate-600">
-                Resumo: {moeda(parseValorCampo(valor) ?? 0)} · emitir {dataBR(emitidaEm)} · pagar até{" "}
-                {dataBR(vencimento)} · via {meio.toUpperCase()}
+                Resumo: {moeda(parseValorCampo(valor) ?? 0)} · emitir {dataBR(emitidaEm)}
+                {meio === "plataforma"
+                  ? " · já debitado (sem pagar)"
+                  : ` · pagar até ${dataBR(vencimento)} · via ${meio.toUpperCase()}`}
               </p>
             )}
           </Card>

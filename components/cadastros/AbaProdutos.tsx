@@ -3,7 +3,7 @@
 // Aba Produtos — requisitos 2 e 3 (vínculo fornecedor × produto).
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link2, Plus, X } from "lucide-react";
+import { Eraser, Link2, Plus, X } from "lucide-react";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
 import { estoqueAtual, mutate, nomeFornecedor, precoMedioHistorico, siglaUnidadeUso, uid, useDB } from "@/lib/data";
@@ -11,6 +11,18 @@ import { podeVerValores, usePapel } from "@/lib/roles";
 import { dataBR, moeda, qtd } from "@/lib/format";
 import type { CategoriaProduto, Produto, TipoProduto, ProdutoCodigoBarras } from "@/lib/types";
 import { associarCategoriasProdutos } from "@/lib/domain/produtos";
+import {
+  desativarProdutosNomeTitulo,
+  listarProdutosNomeTitulo,
+} from "@/lib/domain/produtos-limpeza-nome";
+import { inferirEntraNoCmv } from "@/lib/domain/produto-cmv";
+import {
+  aplicarSugestaoContaDreProdutos,
+  listarProdutosSemContaDre,
+  nomeContaSugerida,
+  sugerirContaDrePorNome,
+} from "@/lib/domain/sugerir-conta-dre-nome";
+import { SelectContaDre } from "@/components/cadastros/SelectContaDre";
 import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
 
 function produtoVazio(unidadePadraoId: string): Produto {
@@ -24,6 +36,7 @@ function produtoVazio(unidadePadraoId: string): Produto {
     controla_lote: false,
     controla_validade: false,
     validade_padrao_dias: 30,
+    entra_no_cmv: true,
     ativo: true,
   };
 }
@@ -38,6 +51,8 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
   const [novoCodigoBarras, setNovoCodigoBarras] = useState("");
   const [fornecedorParaVincular, setFornecedorParaVincular] = useState("");
   const [mensagemVinculo, setMensagemVinculo] = useState<string | null>(null);
+  /** Se marcado, o preço digitado vira custo das fichas; senão mantém a média histórica. */
+  const [assumirPrecoComoCusto, setAssumirPrecoComoCusto] = useState(false);
   const produtoAbertoPorUrl = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -55,6 +70,8 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
   }, [produtoParaAbrirId, db.produtos]);
 
   const categorias = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
+  const candidatosLimpezaNome = listarProdutosNomeTitulo(db);
+  const semContaDre = listarProdutosSemContaDre(db.produtos);
   const lista = db.produtos
     .filter((p) => p.ativo)
     .filter((p) => {
@@ -66,11 +83,60 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
     })
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
+  function limparNomesTitulo() {
+    const qtde = candidatosLimpezaNome.length;
+    if (qtde === 0) return;
+    const amostra = candidatosLimpezaNome
+      .slice(0, 8)
+      .map((p) => `• ${p.nome}`)
+      .join("\n");
+    const resto = qtde > 8 ? `\n… e mais ${qtde - 8}` : "";
+    if (
+      !window.confirm(
+        `Remover ${qtde} produto(s) com nome em minúsculas/título?\n\nMantém só os em CAIXA ALTA da NF.\nEx.: remove "4 Queijos G", "Base de risoto…"; mantém "ACUCAR REFINADO…".\n\n${amostra}${resto}`
+      )
+    ) {
+      return;
+    }
+    mutate((banco) => {
+      desativarProdutosNomeTitulo(banco);
+      banco.produtos_limpeza_nome_titulo_v1 = true;
+      banco.produtos_limpeza_nome_titulo_v2 = true;
+    });
+    setForm(null);
+  }
+
+  function sugerirContasDreEmLote() {
+    const qtde = semContaDre.length;
+    if (qtde === 0) return;
+    const amostra = semContaDre
+      .slice(0, 8)
+      .map((p) => {
+        const contaId = sugerirContaDrePorNome(p.nome);
+        return `• ${p.nome} → ${nomeContaSugerida(db.contas_dre, contaId)}`;
+      })
+      .join("\n");
+    const resto = qtde > 8 ? `\n… e mais ${qtde - 8}` : "";
+    if (
+      !window.confirm(
+        `Sugerir conta DRE em ${qtde} produto(s) sem classificação?\n\nNão altera produtos que já têm conta.\n\n${amostra}${resto}`
+      )
+    ) {
+      return;
+    }
+    mutate((banco) => {
+      aplicarSugestaoContaDreProdutos(banco, { soSemConta: true });
+      banco.produtos_sugestao_conta_dre_v1 = true;
+    });
+    setForm(null);
+  }
+
   function alterar(mudanca: Partial<Produto>) {
     setForm((atual) => (atual ? { ...atual, ...mudanca } : atual));
   }
 
   function abrir(p: Produto | null) {
+    setAssumirPrecoComoCusto(false);
     if (!p) {
       const categoriaPadrao = categorias.find((c) => c.codigo === "sem-categoria")?.id;
       setForm({ ...produtoVazio(db.unidades[0]?.id ?? ""), categoria_id: categoriaPadrao });
@@ -99,6 +165,7 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
     if (!form) return;
     const eraNovo = !form.id;
     let produtoIdSalvo = form.id || "";
+    let custoSalvo = form.custo_unitario;
     mutate((banco) => {
       const categoriaSelecionada = form.categoria_id
         ? banco.categorias_produtos.find((c) => c.id === form.categoria_id)
@@ -111,12 +178,23 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
         ? [{ id: `pcb-${produtoId}-${Date.now()}`, produto_id: produtoId, codigo_barras: form.codigo_barras, principal: true }]
         : [];
       const principalCodigo = codigos.find((c) => c.principal)?.codigo_barras ?? form.codigo_barras;
+
+      const mediaHistorica = precoMedioHistorico(banco, produtoId);
+      let custoUnitario = form.custo_unitario;
+      // Sem marcar: custo das fichas fica na média histórica (promoção / pico temporário).
+      // Sem histórico, usa o valor digitado normalmente.
+      if (!assumirPrecoComoCusto && mediaHistorica !== undefined) {
+        custoUnitario = Number(mediaHistorica.toFixed(4));
+      }
+      custoSalvo = custoUnitario;
+
       const produtoParaSalvar = {
         ...form,
         categoria: undefined,
         categoria_id: categoriaSelecionada ? categoriaSelecionada.id : undefined,
         codigo_barras: principalCodigo,
         id: produtoId,
+        custo_unitario: custoUnitario,
       } as Produto;
       if (form.id) {
         const i = banco.produtos.findIndex((p) => p.id === form.id);
@@ -147,7 +225,9 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
       ...form,
       id: produtoIdSalvo,
       codigo_barras: form.codigo_barras,
+      custo_unitario: custoSalvo,
     });
+    setAssumirPrecoComoCusto(false);
     if (eraNovo) setMensagemVinculo("Produto salvo. Agora você pode vincular o fornecedor.");
   }
 
@@ -202,9 +282,31 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
     <div>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <BarraBusca valor={busca} onMudar={setBusca} placeholder="Buscar por nome, categoria, código…" />
-        <button className="btn-primario mb-4" onClick={() => abrir(null)}>
-          <Plus size={16} /> Novo produto
-        </button>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {candidatosLimpezaNome.length > 0 ? (
+            <button
+              type="button"
+              className="btn-secundario"
+              title="Remove comprados com nome tipo 'Tomate'; mantém 'TOMATE' da NF"
+              onClick={limparNomesTitulo}
+            >
+              <Eraser size={16} /> Limpar nomes em minúsculas ({candidatosLimpezaNome.length})
+            </button>
+          ) : null}
+          {semContaDre.length > 0 ? (
+            <button
+              type="button"
+              className="btn-secundario"
+              title="Preenche Conta DRE pelo nome (limpeza, laticínios, massas…)"
+              onClick={sugerirContasDreEmLote}
+            >
+              Sugerir contas DRE ({semContaDre.length})
+            </button>
+          ) : null}
+          <button className="btn-primario" onClick={() => abrir(null)}>
+            <Plus size={16} /> Novo produto
+          </button>
+        </div>
       </div>
 
       {lista.length === 0 ? (
@@ -251,7 +353,28 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
           <form onSubmit={salvar} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <Campo rotulo="Nome *">
-                <input className="campo" required value={form.nome} onChange={(e) => alterar({ nome: e.target.value })} />
+                <input
+                  className="campo"
+                  required
+                  value={form.nome}
+                  onChange={(e) => {
+                    const nome = e.target.value;
+                    if (!form.id) {
+                      const contaId = sugerirContaDrePorNome(nome);
+                      alterar({
+                        nome,
+                        conta_dre_id: contaId || undefined,
+                        entra_no_cmv: inferirEntraNoCmv({
+                          nome,
+                          contaDreId: contaId || form.conta_dre_id,
+                          contasDre: db.contas_dre,
+                        }),
+                      });
+                    } else {
+                      alterar({ nome });
+                    }
+                  }}
+                />
               </Campo>
             </div>
             <Campo rotulo="Código no ERP parceiro">
@@ -385,7 +508,7 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                 ))}
               </select>
             </Campo>
-            <Campo rotulo="Fator de conversão *">
+            <Campo rotulo="Fator de conversão (compra → uso) *">
               <input
                 type="number"
                 min={0}
@@ -395,6 +518,69 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                 value={form.fator_conversao}
                 onChange={(e) => alterar({ fator_conversao: numOpcional(e.target.value) ?? 1 })}
               />
+            </Campo>
+            <Campo rotulo="Subunidade (conteúdo)">
+              <select
+                className="campo"
+                value={form.subunidade_id ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value || undefined;
+                  alterar(
+                    id
+                      ? { subunidade_id: id }
+                      : { subunidade_id: undefined, quantidade_subunidade: undefined }
+                  );
+                }}
+              >
+                <option value="">— nenhuma —</option>
+                {db.unidades.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nome} ({u.sigla})
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <Campo rotulo="Qtd. por unidade de uso">
+              <input
+                type="number"
+                min={0}
+                step="any"
+                className="campo"
+                placeholder="ex.: 10000"
+                disabled={!form.subunidade_id}
+                value={form.quantidade_subunidade ?? ""}
+                onChange={(e) => alterar({ quantidade_subunidade: numOpcional(e.target.value) })}
+              />
+            </Campo>
+            <Campo rotulo="Conta DRE">
+              <SelectContaDre
+                db={db}
+                value={form.conta_dre_id}
+                onChange={(id) => {
+                  const entra = inferirEntraNoCmv({
+                    nome: form.nome,
+                    contaDreId: id,
+                    contasDre: db.contas_dre,
+                  });
+                  alterar({ conta_dre_id: id, entra_no_cmv: entra });
+                }}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Usada na conferência da NF e no DRE (ex.: Carnes — costela, Material de limpeza).
+              </p>
+            </Campo>
+            <Campo rotulo="Entra no CMV">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.entra_no_cmv !== false}
+                  onChange={(e) => alterar({ entra_no_cmv: e.target.checked })}
+                />
+                Sim — compras deste produto contam no CMV food
+              </label>
+              <p className="mt-1 text-xs text-slate-500">
+                Desmarque limpeza, bobina, canudo etc. Eles vão para custo de operação, não para food.
+              </p>
             </Campo>
             <Campo rotulo="Fator de correção">
               <input
@@ -416,7 +602,7 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                 onChange={(e) => alterar({ rendimento: numOpcional(e.target.value) })}
               />
             </Campo>
-            <Campo rotulo="Custo unitário">
+            <Campo rotulo="Preço / custo unitário">
               <input
                 type="number"
                 min={0}
@@ -438,6 +624,26 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                   : "—"}
               </div>
             </Campo>
+            <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={assumirPrecoComoCusto}
+                  onChange={(e) => setAssumirPrecoComoCusto(e.target.checked)}
+                />
+                <span className="text-sm text-slate-700">
+                  <span className="font-medium">Assumir este preço como custo atual das fichas</span>
+                  <span className="block text-slate-500 mt-0.5">
+                    {assumirPrecoComoCusto
+                      ? "O valor digitado será o custo nas fichas técnicas (útil em pico de preço ou promoção)."
+                      : form.id && precoMedioHistorico(db, form.id) !== undefined
+                        ? `Desmarcado: o custo das fichas fica na média histórica (${moeda(precoMedioHistorico(db, form.id) ?? 0)}).`
+                        : "Desmarcado: mantém o custo atual / média histórica, sem trocar pelo valor digitado."}
+                  </span>
+                </span>
+              </label>
+            </div>
             <Campo rotulo="Estoque mínimo (na unid. de uso) *">
               <input
                 type="number"
@@ -547,9 +753,34 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                 />
               </div>
             </Campo>
-            <p className="text-xs text-slate-500 sm:col-span-2">
-              1 unidade de compra = {form.fator_conversao || "?"} unidade(s) de uso.
-            </p>
+            <div className="space-y-1 text-xs text-slate-500 sm:col-span-2">
+              {form.unidade_compra_id ? (
+                <p>
+                  1{" "}
+                  {db.unidades.find((u) => u.id === form.unidade_compra_id)?.sigla ?? "compra"} ={" "}
+                  {form.fator_conversao || "?"}{" "}
+                  {db.unidades.find((u) => u.id === form.unidade_uso_id)?.sigla ?? "uso"}
+                  {" "}(compra → uso / estoque).
+                </p>
+              ) : (
+                <p>Sem unidade de compra: o estoque e o consumo usam só a unidade de uso.</p>
+              )}
+              {form.subunidade_id && form.quantidade_subunidade && form.quantidade_subunidade > 0 ? (
+                <p>
+                  1 {db.unidades.find((u) => u.id === form.unidade_uso_id)?.sigla ?? "uso"} ={" "}
+                  {form.quantidade_subunidade.toLocaleString("pt-BR", { maximumFractionDigits: 4 })}{" "}
+                  {db.unidades.find((u) => u.id === form.subunidade_id)?.sigla ?? "sub"}
+                  {mostrarPrecos && form.custo_unitario != null && form.custo_unitario > 0
+                    ? ` · ≈ ${moeda(form.custo_unitario / form.quantidade_subunidade)} por ${
+                        db.unidades.find((u) => u.id === form.subunidade_id)?.sigla ?? "sub"
+                      }`
+                    : ""}
+                  {" "}(conteúdo para orçamento; o consumo continua na unidade de uso).
+                </p>
+              ) : form.subunidade_id ? (
+                <p>Informe a quantidade de subunidades em 1 unidade de uso (ex.: 1 pct = 10.000 pc).</p>
+              ) : null}
+            </div>
 
             {form.id ? (
               <div className="rounded-card border border-slate-200 p-3 sm:col-span-2">

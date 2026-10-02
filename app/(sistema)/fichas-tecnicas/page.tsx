@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { BookOpenText, Plus, Search } from "lucide-react";
 import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
+import { TabelaPrecosVenda } from "@/components/fichas/TabelaPrecosVenda";
+import { TourLondrinaCmv } from "@/components/fichas/TourLondrinaCmv";
 import { useDB } from "@/lib/data";
 import { dataHoraBR } from "@/lib/format";
 import {
@@ -115,7 +117,7 @@ export default function FichasTecnicasPage() {
     <div className="space-y-4">
       <TituloPagina
         titulo="Fichas técnicas"
-        subtitulo="Catálogo inicial de receitas e sub-receitas com criação rápida de rascunho básico."
+        subtitulo="Porcionamentos (bases) e pratos finalizados — filtre por tipo ou veja todos."
         acao={
           <button className="btn-primario" onClick={abrirModal}>
             <Plus className="h-4 w-4" /> Nova ficha
@@ -126,7 +128,48 @@ export default function FichasTecnicasPage() {
       {aviso && <p className="rounded-card bg-sucesso-clara px-4 py-3 text-sm font-medium text-primaria-escura">{aviso}</p>}
 
       <Card className="space-y-4">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_220px_220px]">
+        <div>
+          <span className="rotulo mb-2 block">Mostrar</span>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por tipo de ficha">
+            {(
+              [
+                { valor: "todos" as const, rotulo: "Todos", qtd: itens.length },
+                {
+                  valor: "sub_receita" as const,
+                  rotulo: "Porcionamentos",
+                  qtd: itens.filter((i) => i.tipo === "sub_receita").length,
+                },
+                {
+                  valor: "prato" as const,
+                  rotulo: "Pratos finalizados",
+                  qtd: itens.filter((i) => i.tipo === "prato").length,
+                },
+              ] as const
+            ).map((opcao) => {
+              const ativo = filtroTipo === opcao.valor;
+              return (
+                <button
+                  key={opcao.valor}
+                  type="button"
+                  className={
+                    ativo
+                      ? "btn-primario text-sm"
+                      : "btn-secundario text-sm"
+                  }
+                  aria-pressed={ativo}
+                  onClick={() => setFiltroTipo(opcao.valor)}
+                >
+                  {opcao.rotulo}
+                  <span className={ativo ? "opacity-90" : "text-stone-500"}>
+                    ({opcao.qtd})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_220px]">
           <label className="block">
             <span className="rotulo mb-1 block">Busca por nome ou código</span>
             <div className="relative">
@@ -134,20 +177,12 @@ export default function FichasTecnicasPage() {
               <input
                 type="search"
                 className="campo pl-9"
-                placeholder="Ex.: molho, FT-001"
+                placeholder="Ex.: molho, penne bolonhesa, IT-BASE"
                 value={busca}
                 onChange={(event) => setBusca(event.target.value)}
               />
             </div>
           </label>
-
-          <Campo rotulo="Tipo">
-            <select className="campo" value={filtroTipo} onChange={(event) => setFiltroTipo(event.target.value as "todos" | TipoReceitaFichaTecnica)}>
-              <option value="todos">Todos</option>
-              <option value="prato">Prato</option>
-              <option value="sub_receita">Sub-receita</option>
-            </select>
-          </Campo>
 
           <Campo rotulo="Status">
             <select className="campo" value={filtroStatus} onChange={(event) => setFiltroStatus(event.target.value as "todos" | FichaTecnicaStatus)}>
@@ -159,6 +194,13 @@ export default function FichasTecnicasPage() {
           </Campo>
         </div>
       </Card>
+
+      {(filtroTipo === "prato" || filtroTipo === "todos") && (
+        <div className="space-y-4">
+          <TabelaPrecosVenda />
+          <TourLondrinaCmv />
+        </div>
+      )}
 
       {vazioBase ? (
         <Vazio mensagem="Nenhuma ficha técnica cadastrada ainda. Crie um rascunho básico para começar o catálogo." />
@@ -236,8 +278,8 @@ export default function FichasTecnicasPage() {
               value={formulario.tipo}
               onChange={(event) => setFormulario((atual) => ({ ...atual, tipo: event.target.value as TipoReceitaFichaTecnica }))}
             >
-              <option value="prato">Prato</option>
-              <option value="sub_receita">Sub-receita</option>
+              <option value="prato">Prato finalizado</option>
+              <option value="sub_receita">Porcionamento</option>
             </select>
           </Campo>
 

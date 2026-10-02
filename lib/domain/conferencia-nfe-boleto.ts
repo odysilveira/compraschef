@@ -10,6 +10,10 @@
  */
 
 import type { Boleto, DB, DocumentoBoleto, NotaFiscal } from "../types";
+import {
+  extrairValorDoCodigoBoleto,
+  extrairVencimentoDoCodigoBoleto,
+} from "./boleto-nfe-confronto";
 import { filtrarItensAbertos, type ItemFilaLote } from "./lote-recebimento-fila";
 
 const MARCA_GOLPE = "GOLPE CONFIRMADO";
@@ -24,7 +28,8 @@ export type MotivoDocumentoPendente =
   | "nao_confirmado"
   | "sem_parcela"
   | "parcela_nao_conferida"
-  | "confronto_bloqueado";
+  | "confronto_bloqueado"
+  | "leitura_incompleta";
 
 export interface ParcelaAguardandoDocumento {
   boleto: Boleto;
@@ -49,6 +54,19 @@ export interface NotaComBoletoPendente {
   parcelasPendentes: Boleto[];
   quantidadePendentes: number;
   valorPendente: number;
+  /** Menor vencimento entre as parcelas ainda sem boleto conferido. */
+  proximoVencimento?: string;
+}
+
+export interface BoletoSemNfConferida {
+  documento: DocumentoBoleto;
+  motivo: MotivoDocumentoPendente;
+  rotuloMotivo: string;
+  valor?: number;
+  vencimento?: string;
+  fornecedorNome?: string;
+  boleto?: Boleto;
+  nota?: NotaFiscal;
 }
 
 export interface ResumoFilasConferenciaNfeBoleto {
@@ -93,7 +111,15 @@ function rotuloMotivoDocumento(motivo: MotivoDocumentoPendente): string {
       return "Parcela ligada, mas ainda não conferida";
     case "confronto_bloqueado":
       return "Confronto divergente ou sem correspondência";
+    case "leitura_incompleta":
+      return "PDF reconhecido, mas a linha digitável não foi lida";
   }
+}
+
+function documentoSemCodigoLido(documento: DocumentoBoleto): boolean {
+  const codigo = (documento.codigo_canonico || "").replace(/\D+/g, "");
+  const linha = (documento.linha_informada || "").replace(/\D+/g, "");
+  return codigo.length < 44 && linha.length < 44;
 }
 
 function motivoParcelaPendente(boleto: Boleto): MotivoParcelaPendente | null {
@@ -108,6 +134,10 @@ function motivoParcelaPendente(boleto: Boleto): MotivoParcelaPendente | null {
 }
 
 function motivoDocumentoPendente(db: DB, documento: DocumentoBoleto): MotivoDocumentoPendente | null {
+  if (documentoSemCodigoLido(documento) && !documento.confirmado_em) {
+    return "leitura_incompleta";
+  }
+
   const resultado = documento.resultado_confronto;
   if (
     resultado === "divergente" ||
@@ -182,14 +212,16 @@ export function listarDocumentosAguardandoVinculo(db: DB): DocumentoAguardandoVi
   return itens.sort((a, b) => b.documento.criado_em.localeCompare(a.documento.criado_em));
 }
 
-/** Notas com pelo menos uma parcela ainda sem boleto conferido. */
+/** Notas com parcela pendente OU sem nenhuma parcela (boleto ainda vai chegar). */
 export function listarNotasComBoletoPendente(db: DB): NotaComBoletoPendente[] {
   const porNota = new Map<string, Boleto[]>();
 
   for (const item of listarParcelasAguardandoDocumento(db)) {
-    const lista = porNota.get(item.boleto.nota_id) ?? [];
+    const notaId = item.boleto.nota_id;
+    if (!notaId) continue;
+    const lista = porNota.get(notaId) ?? [];
     lista.push(item.boleto);
-    porNota.set(item.boleto.nota_id, lista);
+    porNota.set(notaId, lista);
   }
 
   const notas: NotaComBoletoPendente[] = [];
@@ -205,10 +237,94 @@ export function listarNotasComBoletoPendente(db: DB): NotaComBoletoPendente[] {
         (s: number, p: Boleto) => s + (Number.isFinite(p.valor) ? p.valor : 0),
         0
       ),
+      proximoVencimento: parcelasPendentes
+        .map((p) => p.vencimento)
+        .filter((v): v is string => Boolean(v))
+        .sort()[0],
     });
   }
 
-  return notas.sort((a, b) => b.quantidadePendentes - a.quantidadePendentes);
+  // Notas sem parcela (XML sem <dup> ou boleto à parte): ficam na Conferência para parear
+  for (const nota of db.notas_fiscais) {
+    if (porNota.has(nota.id)) continue;
+    const parcelasDaNota = (db.boletos ?? []).filter(
+      (b) => b.nota_id === nota.id && !golpeConfirmado(b)
+    );
+    const temConferidoOuPago = parcelasDaNota.some(
+      (b) =>
+        b.status_conferencia === "conferido" ||
+        b.status === "pago" ||
+        b.status === "aguardando_conciliacao"
+    );
+    if (parcelasDaNota.length > 0 && temConferidoOuPago) continue;
+    if (parcelasDaNota.length > 0) continue; // outras pendências já cobertas acima
+
+    notas.push({
+      nota,
+      fornecedorNome: nomeFornecedorNota(db, nota),
+      parcelasPendentes: [],
+      quantidadePendentes: 0,
+      valorPendente: Number.isFinite(nota.valor_total) ? nota.valor_total : 0,
+      proximoVencimento: undefined,
+    });
+  }
+
+  return notas.sort((a, b) => {
+    const va = a.proximoVencimento || "9999";
+    const vb = b.proximoVencimento || "9999";
+    if (va !== vb) return va.localeCompare(vb);
+    return b.quantidadePendentes - a.quantidadePendentes;
+  });
+}
+
+function enriquecerValorVencimentoDocumento(
+  documento: DocumentoBoleto,
+  boleto?: Boleto
+): { valor?: number; vencimento?: string } {
+  const codigo = documento.codigo_canonico || documento.linha_informada || boleto?.linha_digitavel;
+  const valor =
+    (boleto && Number.isFinite(boleto.valor) ? boleto.valor : undefined) ??
+    (codigo ? extrairValorDoCodigoBoleto(codigo) : undefined);
+  const vencimento =
+    boleto?.vencimento ||
+    (codigo ? extrairVencimentoDoCodigoBoleto(codigo) : undefined) ||
+    undefined;
+  return { valor, vencimento };
+}
+
+/**
+ * Boletos (PDFs) ainda sem vínculo confirmado com NF-e — espelho da fila “notas sem boleto”.
+ * Inclui parcela ligada mas ainda não conferida (retrabalho / importação antiga).
+ */
+export function listarBoletosSemNfConferida(db: DB): BoletoSemNfConferida[] {
+  return listarDocumentosAguardandoVinculo(db)
+    .filter(
+      (item) =>
+        item.motivo === "sem_parcela" ||
+        item.motivo === "nao_confirmado" ||
+        item.motivo === "confronto_bloqueado" ||
+        item.motivo === "parcela_nao_conferida" ||
+        item.motivo === "leitura_incompleta"
+    )
+    .map((item) => {
+      const { valor, vencimento } = enriquecerValorVencimentoDocumento(item.documento, item.boleto);
+      return {
+        documento: item.documento,
+        motivo: item.motivo,
+        rotuloMotivo: item.rotuloMotivo,
+        valor,
+        vencimento,
+        fornecedorNome: item.fornecedorNome,
+        boleto: item.boleto,
+        nota: item.nota,
+      };
+    })
+    .sort((a, b) => {
+      const va = a.vencimento || "9999";
+      const vb = b.vencimento || "9999";
+      if (va !== vb) return va.localeCompare(vb);
+      return a.documento.nome_arquivo.localeCompare(b.documento.nome_arquivo, "pt-BR");
+    });
 }
 
 export function montarResumoFilasConferenciaNfeBoleto(db: DB): ResumoFilasConferenciaNfeBoleto {

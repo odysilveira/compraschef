@@ -1,8 +1,17 @@
-/** Extração de texto de PDF no navegador (folha do contador). */
+/** Extração de texto de PDF no navegador (folha do contador / DANFE). */
 
 import { configurarWorkerPdfjs } from "./pdfjs-worker";
+import type { TokenPdfDanfe } from "./danfe-extracao";
 
 export async function extrairTextoPdfBrowser(buffer: ArrayBuffer): Promise<string> {
+  const { texto } = await extrairTextoETokensPdfBrowser(buffer);
+  return texto;
+}
+
+/** Texto + tokens com posição (para montar linhas de produto da DANFE). */
+export async function extrairTextoETokensPdfBrowser(
+  buffer: ArrayBuffer
+): Promise<{ texto: string; tokens: TokenPdfDanfe[] }> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => null);
   if (!pdfjs?.getDocument) {
     throw new Error("Não foi possível carregar o leitor de PDF.");
@@ -13,6 +22,7 @@ export async function extrairTextoPdfBrowser(buffer: ArrayBuffer): Promise<strin
   const loadingTask = pdfjs.getDocument({ data: dados });
   const doc = await loadingTask.promise;
   const partes: string[] = [];
+  const tokens: TokenPdfDanfe[] = [];
 
   try {
     for (let i = 1; i <= doc.numPages; i++) {
@@ -25,7 +35,9 @@ export async function extrairTextoPdfBrowser(buffer: ArrayBuffer): Promise<strin
       for (const item of content.items as Array<{ str?: string; transform?: number[] }>) {
         const str = (item.str ?? "").replace(/\u00a0/g, " ").trim();
         if (!str) continue;
+        const x = item.transform?.[4] ?? 0;
         const y = Math.round(item.transform?.[5] ?? 0);
+        tokens.push({ str, x, y });
         if (lastY !== null && Math.abs(y - lastY) > 3) {
           lines.push(row.join(" ").replace(/[ \t]+/g, " ").trim());
           row = [];
@@ -43,5 +55,5 @@ export async function extrairTextoPdfBrowser(buffer: ArrayBuffer): Promise<strin
     if (destruirTask) await destruirTask.call(loadingTask).catch(() => undefined);
   }
 
-  return partes.join("\n\n");
+  return { texto: partes.join("\n\n"), tokens };
 }

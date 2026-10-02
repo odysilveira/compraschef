@@ -3,6 +3,7 @@ import {
   calcularPrecificacaoPorCanal,
   campoComercialNaoInformado,
   canaisPadraoSemPremissa,
+  normalizarCanaisPrecoFicha,
 } from "./fichas-tecnicas-comercial";
 
 describe("precificação comercial da ficha técnica", () => {
@@ -10,17 +11,43 @@ describe("precificação comercial da ficha técnica", () => {
     const canais = canaisPadraoSemPremissa();
 
     expect(canais).toEqual([
-      { canal: "salao", preco_praticado: 0, taxa_percentual: 0, taxa_fixa: 0, impostos_percentual: 0, cmv_desejado_percentual: 0 },
       { canal: "balcao", preco_praticado: 0, taxa_percentual: 0, taxa_fixa: 0, impostos_percentual: 0, cmv_desejado_percentual: 0 },
-      { canal: "delivery_proprio", preco_praticado: 0, taxa_percentual: 0, taxa_fixa: 0, impostos_percentual: 0, cmv_desejado_percentual: 0 },
       { canal: "ifood", preco_praticado: 0, taxa_percentual: 0, taxa_fixa: 0, impostos_percentual: 0, cmv_desejado_percentual: 0 },
+      { canal: "delivery_99", preco_praticado: 0, taxa_percentual: 0, taxa_fixa: 0, impostos_percentual: 0, cmv_desejado_percentual: 0 },
     ]);
     expect(campoComercialNaoInformado(canais[0], "preco_praticado")).toBe(true);
     expect(campoComercialNaoInformado(canais[0], "cmv_desejado_percentual")).toBe(true);
   });
 
+  it("migra preço de salão para loja/Saipos quando balcão está vazio", () => {
+    const normalizados = normalizarCanaisPrecoFicha([
+      {
+        canal: "salao",
+        preco_praticado: 42,
+        taxa_percentual: 0,
+        taxa_fixa: 0,
+        impostos_percentual: 0,
+        cmv_desejado_percentual: 30,
+      },
+      {
+        canal: "ifood",
+        preco_praticado: 48,
+        taxa_percentual: 12,
+        taxa_fixa: 0,
+        impostos_percentual: 0,
+        cmv_desejado_percentual: 28,
+      },
+    ]);
+
+    expect(normalizados.map((c) => c.canal)).toEqual(["balcao", "ifood", "delivery_99"]);
+    expect(normalizados[0].preco_praticado).toBe(42);
+    expect(normalizados[0].cmv_desejado_percentual).toBe(30);
+    expect(normalizados[1].preco_praticado).toBe(48);
+    expect(normalizados[2].preco_praticado).toBe(0);
+  });
+
   it("mantém valores já gravados em fichas antigas", () => {
-    const [linha] = calcularPrecificacaoPorCanal(
+    const linhas = calcularPrecificacaoPorCanal(
       [
         {
           canal: "ifood",
@@ -33,12 +60,13 @@ describe("precificação comercial da ficha técnica", () => {
       ],
       1000
     );
+    const linha = linhas.find((item) => item.canal === "ifood");
 
-    expect(linha.preco_praticado).toBe(50);
-    expect(linha.taxa_percentual).toBe(10);
-    expect(linha.taxa_fixa).toBe(2);
-    expect(linha.impostos_percentual).toBe(5);
-    expect(linha.cmv_desejado_percentual).toBe(25);
+    expect(linha?.preco_praticado).toBe(50);
+    expect(linha?.taxa_percentual).toBe(10);
+    expect(linha?.taxa_fixa).toBe(2);
+    expect(linha?.impostos_percentual).toBe(5);
+    expect(linha?.cmv_desejado_percentual).toBe(25);
   });
 
   it("campos zerados não produzem NaN nem Infinity", () => {
@@ -58,7 +86,7 @@ describe("precificação comercial da ficha técnica", () => {
     const [linha] = calcularPrecificacaoPorCanal(
       [
         {
-          canal: "salao",
+          canal: "balcao",
           preco_praticado: 50,
           taxa_percentual: 10,
           taxa_fixa: 2,

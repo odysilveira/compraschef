@@ -5,8 +5,20 @@
 
 import type { ReactNode } from "react";
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`card ${className}`}>{children}</div>;
+export function Card({
+  children,
+  className = "",
+  id,
+}: {
+  children: ReactNode;
+  className?: string;
+  id?: string;
+}) {
+  return (
+    <div id={id} className={`card ${className}`}>
+      {children}
+    </div>
+  );
 }
 
 export function TituloPagina({
@@ -105,21 +117,25 @@ export function Modal({
   onFechar,
   children,
   fecharAoClicarFundo = true,
+  tamanho = "md",
 }: {
   aberto: boolean;
   titulo: string;
   onFechar: () => void;
   children: ReactNode;
   fecharAoClicarFundo?: boolean;
+  /** md = padrão; lg = notas/DANFE e formulários mais largos. */
+  tamanho?: "md" | "lg";
 }) {
   if (!aberto) return null;
+  const largura = tamanho === "lg" ? "max-w-3xl" : "max-w-lg";
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
       onClick={fecharAoClicarFundo ? onFechar : undefined}
     >
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-card bg-superficie p-5 shadow-xl sm:rounded-card"
+        className={`max-h-[90vh] w-full ${largura} overflow-y-auto rounded-t-card bg-superficie p-5 shadow-xl sm:rounded-card`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">

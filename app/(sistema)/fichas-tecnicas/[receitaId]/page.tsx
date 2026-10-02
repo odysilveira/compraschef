@@ -28,7 +28,11 @@ import {
   campoComercialNaoInformado,
   canaisPadraoSemPremissa,
   MENSAGEM_DADOS_COMERCIAIS_PENDENTES,
+  normalizarCanaisPrecoFicha,
+  rotuloCanalVenda,
 } from "@/lib/domain/fichas-tecnicas-comercial";
+import { formatarPercentualAcimaDoSaipos } from "@/lib/domain/tabela-precos-venda";
+import { TourLondrinaCmv } from "@/components/fichas/TourLondrinaCmv";
 import {
   atualizarLinhaNutricional,
   criarInformacaoNutricionalPadrao,
@@ -39,9 +43,11 @@ import {
   MIDIA_MIME_IMAGENS_PERMITIDOS,
   MIDIA_MIME_VIDEOS_PERMITIDOS,
   criarMidiaUrlExterna,
+  detectarTipoMidiaPorUrl,
   sanitizarMidiasPersistiveis,
   substituirMidiaDoPasso,
   substituirMidiaPrincipal,
+  urlEmbedYoutube,
   validarArquivoMidia,
 } from "@/lib/domain/fichas-tecnicas-midias";
 import { criarRepositorioFichasTecnicasLocal } from "@/lib/domain/fichas-tecnicas-repositorio-local";
@@ -71,13 +77,6 @@ const ABAS = [
 
 type AbaFicha = (typeof ABAS)[number];
 
-const CANAIS: Array<{ canal: CanalVendaFichaTecnica; nome: string }> = [
-  { canal: "salao", nome: "Salão" },
-  { canal: "balcao", nome: "Balcão" },
-  { canal: "delivery_proprio", nome: "Delivery próprio" },
-  { canal: "ifood", nome: "iFood" },
-];
-
 const AVISO_PREVIA_LOCAL =
   "Esta prévia local será perdida ao recarregar a página. O armazenamento definitivo será habilitado com o Supabase.";
 
@@ -100,8 +99,41 @@ function garantirPassoComId(passo: FichaTecnicaPasso, indice: number): FichaTecn
 
 function midiaPrincipalPersistida(midias: FichaTecnicaMidia[]): FichaTecnicaMidia | undefined {
   return [...midias]
-    .filter((midia) => midia.passo_id === undefined && midia.tipo === "FOTO")
+    .filter((midia) => midia.passo_id === undefined)
     .sort((a, b) => b.criado_em.localeCompare(a.criado_em))[0];
+}
+
+function PreviewMidiaFicha({
+  url,
+  tipo,
+  alt,
+  className = "h-40 w-full rounded-card object-cover",
+}: {
+  url: string;
+  tipo?: "FOTO" | "VIDEO";
+  alt: string;
+  className?: string;
+}) {
+  const embed = urlEmbedYoutube(url);
+  if (embed) {
+    return (
+      <div className="aspect-video w-full overflow-hidden rounded-card bg-black">
+        <iframe
+          title={alt}
+          src={embed}
+          className="h-full w-full"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+      </div>
+    );
+  }
+  if (tipo === "VIDEO" || detectarTipoMidiaPorUrl(url) === "VIDEO") {
+    return <video className={className} controls src={url} />;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={alt} className={className} />;
 }
 
 function midiaDoPassoPersistida(midias: FichaTecnicaMidia[], passoId: string): FichaTecnicaMidia | undefined {
@@ -160,7 +192,7 @@ function criarEstadoEditavel(receita: ReceitaFichaTecnica, versao: ReceitaFichaT
     custo_preparacao_centavos: base.custo_preparacao_centavos ?? 0,
     custo_coccao_centavos: base.custo_coccao_centavos ?? 0,
     custo_montagem_centavos: base.custo_montagem_centavos ?? 0,
-    canais_preco: base.canais_preco?.length ? base.canais_preco : canaisPadraoSemPremissa(),
+    canais_preco: normalizarCanaisPrecoFicha(base.canais_preco),
     configuracoes_porcionamento: configuracoes,
     porcionamento_ativo_id: base.porcionamento_ativo_id ?? configuracoes.find((cfg) => cfg.ativa)?.id ?? configuracoes[0]?.id,
     informacao_nutricional: normalizarInformacaoNutricional(base.informacao_nutricional ?? criarInformacaoNutricionalPadrao()),
@@ -470,10 +502,6 @@ export default function FichaTecnicaDetalhePage() {
     setErro(null);
     try {
       const tipo = validarArquivoMidia({ name: arquivo.name, type: arquivo.type, size: arquivo.size });
-      if (tipo !== "FOTO") {
-        throw new Error("A foto principal aceita apenas formatos de imagem.");
-      }
-
       const objectUrl = URL.createObjectURL(arquivo);
       setFotoLocalTemporaria((anterior) => {
         if (anterior) {
@@ -481,7 +509,7 @@ export default function FichaTecnicaDetalhePage() {
         }
         return {
           id: uid("mid-local"),
-          tipo: "FOTO",
+          tipo,
           objectUrl,
           nomeArquivo: arquivo.name,
           mimeType: arquivo.type,
@@ -490,7 +518,7 @@ export default function FichaTecnicaDetalhePage() {
       });
       setMensagem(AVISO_PREVIA_LOCAL);
     } catch (error) {
-      setErro(error instanceof Error ? error.message : "Arquivo de foto inválido.");
+      setErro(error instanceof Error ? error.message : "Arquivo de mídia inválido.");
     }
   }
 
@@ -505,16 +533,17 @@ export default function FichaTecnicaDetalhePage() {
     }
 
     try {
+      const tipo = detectarTipoMidiaPorUrl(limpa);
       const nova = criarMidiaUrlExterna({
         id: uid("mid-ft"),
         versaoId: versaoAtual.id,
-        tipo: "FOTO",
+        tipo,
         url: limpa,
       });
       removerFotoPrincipalLocal();
       atualizarMidias((midiasAtuais) => substituirMidiaPrincipal(midiasAtuais, nova));
     } catch (error) {
-      setErro(error instanceof Error ? error.message : "URL de foto inválida.");
+      setErro(error instanceof Error ? error.message : "URL de mídia inválida.");
     }
   }
 
@@ -579,7 +608,7 @@ export default function FichaTecnicaDetalhePage() {
     }
 
     try {
-      const tipo: "FOTO" | "VIDEO" = /\.(mp4|webm|mov)(\?.*)?$/i.test(limpa) ? "VIDEO" : "FOTO";
+      const tipo = detectarTipoMidiaPorUrl(limpa);
       const nova = criarMidiaUrlExterna({
         id: uid("mid-ft"),
         versaoId: versaoAtual.id,
@@ -765,7 +794,9 @@ export default function FichaTecnicaDetalhePage() {
       if (!atual) return atual;
       return {
         ...atual,
-        canais_preco: (atual.canais_preco ?? []).map((item) => (item.canal === canal ? { ...item, ...parcial } : item)),
+        canais_preco: normalizarCanaisPrecoFicha(atual.canais_preco).map((item) =>
+          item.canal === canal ? { ...item, ...parcial } : item
+        ),
       };
     });
   }
@@ -1027,7 +1058,7 @@ export default function FichaTecnicaDetalhePage() {
             custo_embalagem_centavos: Math.max(0, Number(cfg.custo_embalagem_centavos) || 0),
           })),
           porcionamento_ativo_id: fichaEditavel.porcionamento_ativo_id,
-          canais_preco: (fichaEditavel.canais_preco ?? []).map((canal) => ({
+          canais_preco: normalizarCanaisPrecoFicha(fichaEditavel.canais_preco).map((canal) => ({
             ...canal,
             preco_praticado: Math.max(0, Number(canal.preco_praticado) || 0),
             taxa_percentual: Math.max(0, Number(canal.taxa_percentual) || 0),
@@ -1189,6 +1220,10 @@ export default function FichaTecnicaDetalhePage() {
   const informacaoNutricional = fichaEditavel.informacao_nutricional ?? criarInformacaoNutricionalPadrao();
   const fotoPrincipalPreviewUrl =
     fotoLocalTemporaria?.objectUrl ?? midiaPrincipalAtual?.url ?? fichaEditavel.foto_url?.trim() ?? undefined;
+  const tipoMidiaPrincipal: "FOTO" | "VIDEO" | undefined =
+    fotoLocalTemporaria?.tipo ??
+    midiaPrincipalAtual?.tipo ??
+    (fotoPrincipalPreviewUrl ? detectarTipoMidiaPorUrl(fotoPrincipalPreviewUrl) : undefined);
 
   const blocosGrafico = [
     { nome: "Ingredientes", valor: custosResumo.custoIngredientesCent, cor: "#f59e0b" },
@@ -1236,8 +1271,12 @@ export default function FichaTecnicaDetalhePage() {
       <Card className="grid gap-4 lg:grid-cols-[220px_1fr]">
         <div className="rounded-card border border-dashed border-stone-300 p-3">
           {fotoPrincipalPreviewUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={fotoPrincipalPreviewUrl} alt={fichaEditavel.nome} className="h-40 w-full rounded-card object-cover" />
+            <PreviewMidiaFicha
+              url={fotoPrincipalPreviewUrl}
+              tipo={tipoMidiaPrincipal}
+              alt={fichaEditavel.nome}
+              className="h-40 w-full rounded-card object-cover"
+            />
           ) : (
             <div className="flex h-40 items-center justify-center rounded-card bg-stone-100 text-stone-500">
               <ChefHat className="h-8 w-8" />
@@ -1252,7 +1291,7 @@ export default function FichaTecnicaDetalhePage() {
           </div>
           <div>
             <p className="rotulo">Tipo</p>
-            <p className="font-semibold">{fichaEditavel.tipo_receita === "sub_receita" ? "Sub-receita" : "Prato"}</p>
+            <p className="font-semibold">{fichaEditavel.tipo_receita === "sub_receita" ? "Porcionamento" : "Prato finalizado"}</p>
           </div>
           <div>
             <p className="rotulo">Categoria</p>
@@ -1328,8 +1367,8 @@ export default function FichaTecnicaDetalhePage() {
             </Campo>
             <Campo rotulo="Tipo">
               <select className="campo" value={fichaEditavel.tipo_receita ?? "prato"} onChange={(e) => atualizarFicha({ tipo_receita: e.target.value as TipoReceitaFichaTecnica })}>
-                <option value="prato">Prato</option>
-                <option value="sub_receita">Sub-receita</option>
+                <option value="prato">Prato finalizado</option>
+                <option value="sub_receita">Porcionamento</option>
               </select>
             </Campo>
             <Campo rotulo="Dificuldade">
@@ -1358,20 +1397,24 @@ export default function FichaTecnicaDetalhePage() {
           </div>
 
           <Card className="space-y-3 border border-stone-200 bg-stone-50/60">
-            <h3 className="text-sm font-semibold text-stone-800">Foto principal</h3>
+            <h3 className="text-sm font-semibold text-stone-800">Mídia principal (foto ou vídeo)</h3>
+            <p className="text-xs text-stone-500">
+              Cole o link do YouTube ou de um MP4 hospedado para gravar de forma permanente. Upload
+              local (foto/MP4) serve só como prévia nesta sessão.
+            </p>
             <div className="grid gap-3 md:grid-cols-2">
               <Campo rotulo="Upload local (preview temporária)">
                 <input
                   type="file"
-                  accept={MIDIA_MIME_IMAGENS_PERMITIDOS.join(",")}
+                  accept={formatoAceitoInputMidia()}
                   className="campo"
                   onChange={onSelecionarFotoPrincipalArquivo}
                 />
               </Campo>
-              <Campo rotulo="URL externa (persistida)">
+              <Campo rotulo="URL externa (YouTube ou MP4 — persistida)">
                 <input
                   className="campo"
-                  placeholder="https://..."
+                  placeholder="https://www.youtube.com/watch?v=... ou https://.../video.mp4"
                   value={fichaEditavel.foto_url ?? midiaPrincipalAtual?.url ?? ""}
                   onChange={(e) => atualizarFicha({ foto_url: e.target.value })}
                   onBlur={(e) => salvarFotoPrincipalUrlExterna(e.target.value)}
@@ -1381,8 +1424,18 @@ export default function FichaTecnicaDetalhePage() {
             {fotoLocalTemporaria ? (
               <p className="text-xs text-amber-700">{AVISO_PREVIA_LOCAL}</p>
             ) : null}
+            {fotoPrincipalPreviewUrl ? (
+              <PreviewMidiaFicha
+                url={fotoPrincipalPreviewUrl}
+                tipo={tipoMidiaPrincipal}
+                alt={`Mídia de ${fichaEditavel.nome}`}
+                className="h-48 w-full rounded-card object-cover"
+              />
+            ) : null}
             <div className="flex flex-wrap gap-2">
-              <button className="btn-secundario" onClick={removerFotoPrincipal}>Remover foto principal</button>
+              <button className="btn-secundario" onClick={removerFotoPrincipal}>
+                Remover mídia principal
+              </button>
             </div>
           </Card>
 
@@ -1561,10 +1614,10 @@ export default function FichaTecnicaDetalhePage() {
                   <Campo rotulo="Temperatura (°C)">
                     <input type="number" className="campo" value={numeroSeguro(passo.temperatura_celsius)} onChange={(e) => atualizarPasso(indice, { temperatura_celsius: Number(e.target.value) })} />
                   </Campo>
-                  <Campo rotulo="URL externa da mídia">
+                  <Campo rotulo="URL externa (YouTube ou MP4)">
                     <input
                       className="campo"
-                      placeholder="https://..."
+                      placeholder="https://www.youtube.com/watch?v=... ou https://.../video.mp4"
                       value={passo.foto_url ?? midiaPersistidaPasso?.url ?? ""}
                       onChange={(e) => atualizarPasso(indice, { foto_url: e.target.value })}
                       onBlur={(e) => {
@@ -1590,12 +1643,15 @@ export default function FichaTecnicaDetalhePage() {
                   </Campo>
                   <div className="rounded-card border border-dashed border-stone-300 p-3">
                     {midiaPassoPreview ? (
-                      tipoMidiaPasso === "VIDEO" ? (
-                        <video className="h-36 w-full rounded-card object-cover" controls src={midiaPassoPreview} />
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img className="h-36 w-full rounded-card object-cover" src={midiaPassoPreview} alt={`Mídia do passo ${passo.ordem}`} />
-                      )
+                      <PreviewMidiaFicha
+                        url={midiaPassoPreview}
+                        tipo={
+                          tipoMidiaPasso ??
+                          (midiaPassoPreview ? detectarTipoMidiaPorUrl(midiaPassoPreview) : undefined)
+                        }
+                        alt={`Mídia do passo ${passo.ordem}`}
+                        className="h-36 w-full rounded-card object-cover"
+                      />
                     ) : (
                       <p className="text-sm text-stone-500">Sem mídia neste passo.</p>
                     )}
@@ -1775,14 +1831,19 @@ export default function FichaTecnicaDetalhePage() {
           <Card className="space-y-3">
             <h3 className="text-sm font-semibold text-stone-800">Formação de preço por canal</h3>
             <p className="text-sm text-stone-600">
-              Preencha preço, taxas, impostos e objetivo de CMV de cada canal para liberar os cálculos comerciais sem premissas fictícias.
+              Use a tabela da franquia: <strong>Loja / Saipos</strong> (mesmo preço de balcão e salão),{" "}
+              <strong>iFood</strong> e <strong>99</strong>. Preencha preço, taxas e CMV desejado para liberar os
+              cálculos. A promoção Tour Londrina tem CMV à parte (abaixo).
             </p>
             <div className="overflow-x-auto">
-              <table className="min-w-[1150px] w-full text-sm">
+              <table className="min-w-[1250px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-left">
                     <th className="rotulo px-2 py-2">Canal</th>
                     <th className="rotulo px-2 py-2">Preço praticado</th>
+                    <th className="rotulo px-2 py-2" title="Quanto o canal está acima do preço Loja/Saipos">
+                      % vs Saipos
+                    </th>
                     <th className="rotulo px-2 py-2">Taxa %</th>
                     <th className="rotulo px-2 py-2">Taxa fixa</th>
                     <th className="rotulo px-2 py-2">Impostos %</th>
@@ -1795,10 +1856,18 @@ export default function FichaTecnicaDetalhePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {precificacaoPorCanal.map((linha) => (
+                  {precificacaoPorCanal.map((linha) => {
+                    const precoSaipos =
+                      precificacaoPorCanal.find((c) => c.canal === "balcao")?.preco_praticado ?? 0;
+                    const pctVsSaipos =
+                      linha.canal === "balcao"
+                        ? "—"
+                        : formatarPercentualAcimaDoSaipos(linha.preco_praticado, precoSaipos);
+                    return (
                     <tr key={linha.canal}>
-                      <td className="px-2 py-2 font-semibold">{CANAIS.find((item) => item.canal === linha.canal)?.nome ?? linha.canal}</td>
+                      <td className="px-2 py-2 font-semibold">{rotuloCanalVenda(linha.canal)}</td>
                       <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "preco_praticado") ? "" : numeroOuVazio(linha.preco_praticado)} onChange={(e) => atualizarCanal(linha.canal, { preco_praticado: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
+                      <td className="px-2 py-2 font-semibold text-stone-700">{pctVsSaipos}</td>
                       <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "taxa_percentual") ? "" : numeroOuVazio(linha.taxa_percentual)} onChange={(e) => atualizarCanal(linha.canal, { taxa_percentual: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
                       <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "taxa_fixa") ? "" : numeroOuVazio(linha.taxa_fixa)} onChange={(e) => atualizarCanal(linha.canal, { taxa_fixa: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
                       <td className="px-2 py-2"><input type="number" step="0.01" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "impostos_percentual") ? "" : numeroOuVazio(linha.impostos_percentual)} onChange={(e) => atualizarCanal(linha.canal, { impostos_percentual: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
@@ -1809,11 +1878,14 @@ export default function FichaTecnicaDetalhePage() {
                       <td className="px-2 py-2"><input type="number" step="0.1" min={0} className="campo" placeholder="Não informado" value={campoComercialNaoInformado(linha, "cmv_desejado_percentual") ? "" : numeroOuVazio(linha.cmv_desejado_percentual)} onChange={(e) => atualizarCanal(linha.canal, { cmv_desejado_percentual: e.target.value === "" ? 0 : Number(e.target.value) })} /></td>
                       <td className="px-2 py-2 font-semibold text-stone-600">{linha.precoSugerido === null ? MENSAGEM_DADOS_COMERCIAIS_PENDENTES : moeda(linha.precoSugerido)}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </Card>
+
+          {(fichaEditavel.tipo_receita ?? "prato") === "prato" && <TourLondrinaCmv />}
         </div>
       )}
 

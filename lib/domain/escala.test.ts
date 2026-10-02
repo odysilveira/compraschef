@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DB, PessoaRH } from "../types";
+import type { ConvocacaoIntermitente, DB, PessoaRH } from "../types";
 import { hojeIsoLocal, somarDiasIso } from "./documentos-pessoa";
 import {
   antecedenciaMinimaOk,
@@ -880,7 +880,7 @@ describe("escala domain", () => {
           criado_em: "2026-08-01T12:00:00.000Z",
           atualizado_em: "2026-08-01T12:00:00.000Z",
         },
-      ],
+      ] as unknown as ConvocacaoIntermitente[],
       {
         nomePorId: (id) => (id === "p1" ? "Ana" : id === "p3" ? "Bia" : "X"),
         telefonePorId: (id) => (id === "p1" ? "43999990001" : undefined),

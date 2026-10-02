@@ -6,6 +6,7 @@ import {
   detalharNotaFiscalFinanceiro,
   listarNotasFiscaisFinanceiro,
   montarResumoNotaFiscalFinanceiro,
+  statusPagamentoNota,
 } from "./nfe-financeiro";
 
 function dbBase(): DB {
@@ -163,5 +164,34 @@ describe("notas fiscais no financeiro", () => {
     const lista = listarNotasFiscaisFinanceiro(db, { completude: "todas" });
 
     expect(lista).toEqual([]);
+  });
+
+  it("marca nota como quitada quando todas as parcelas estão pagas", () => {
+    const db = dbBase();
+    db.notas_fiscais = [
+      criarNota({ id: "nf-quit", numero: "900", chave_acesso: "CHAVE-900", valor_total: 100 }),
+    ];
+    db.boletos = [
+      {
+        id: "b1",
+        nota_id: "nf-quit",
+        valor: 50,
+        vencimento: "2026-08-01",
+        status: "pago",
+        status_conferencia: "conferido",
+      },
+      {
+        id: "b2",
+        nota_id: "nf-quit",
+        valor: 50,
+        vencimento: "2026-09-01",
+        status: "pago",
+        status_conferencia: "conferido",
+      },
+    ];
+
+    expect(statusPagamentoNota(db, db.notas_fiscais[0])).toBe("quitada");
+    const lista = listarNotasFiscaisFinanceiro(db, { statusPagamento: "quitada" });
+    expect(lista.map((item) => item.nota.id)).toEqual(["nf-quit"]);
   });
 });

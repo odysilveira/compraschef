@@ -4,31 +4,124 @@
 // Quando o Supabase for configurado, estas funções serão trocadas por consultas reais
 // mantendo as mesmas assinaturas.
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Caixa, ContaPagar, ContaPagarHistorico, DB, Produto, StatusContaPagar } from "@/lib/types";
 import { seedDB } from "./seed";
-import { LOCAL_ESTOQUE_SECO, LOCAL_GELADEIRA_2, produtosReais, UNIDADE_PACOTE, UNIDADE_SACO } from "./catalogo";
+import {
+  LOCAL_ESTOQUE_SECO,
+  LOCAL_GELADEIRA_2,
+  produtosReais,
+  UNIDADE_FRASCO,
+  UNIDADE_ML,
+  UNIDADE_PACOTE,
+  UNIDADE_PECA,
+  UNIDADE_SACO,
+} from "./catalogo";
+import { aplicarCardapioItalian } from "./italian-cardapio";
+import { PRECOS_FRANQUIA_LONDINA_BOX_G } from "./precos-franquia-londrina";
+import { aplicarTabelaFranquiaNasFichas } from "../domain/tabela-precos-venda";
 import { compararPrioridadeConsumo, saldoDosLotes } from "../domain/estoque";
 import { validarPosicaoFisicaBox, validarTipoBox } from "../domain/estoque-boxes";
 import { extrairCnpjEmitenteDaChaveAcesso } from "../domain/nfe-parcelas";
 import { associarCategoriasProdutos } from "../domain/produtos";
+import { desativarProdutosNomeTitulo } from "../domain/produtos-limpeza-nome";
+import { garantirEntraNoCmvProdutos } from "../domain/produto-cmv";
+import { aplicarSugestaoContaDreProdutos } from "../domain/sugerir-conta-dre-nome";
 import { recuperarVinculosLegadosBoletos } from "../domain/recuperacao-boleto-legado";
+import { pessoaParaSeedDePerfil } from "../domain/rh";
+import { garantirChecklistDocumentos } from "../domain/documentos-pessoa";
+import { garantirContasDre, garantirEquipamentos } from "../domain/dre";
 
 const STORAGE_KEY = "compraschef-db-v1";
+const BACKUP_KEY = "compraschef-db-v1-backup";
 
 let current: DB = structuredClone(seedDB);
 let loaded = false;
+/** Só após o 1º paint no cliente — evita hidratação divergir do seed (SSR) vs localStorage. */
+let clientePronto = false;
 const listeners = new Set<() => void>();
 
 function emit() {
   listeners.forEach((cb) => cb());
 }
 
+function contarCadastros(db: Pick<DB, "fornecedores" | "produtos">): { fornecedores: number; produtos: number } {
+  return {
+    fornecedores: db.fornecedores?.length ?? 0,
+    produtos: db.produtos?.length ?? 0,
+  };
+}
+
+/** Evita gravar o seed de demo por cima de um banco real maior. */
+function persistenciaPerigosa(prevRaw: string, next: DB): boolean {
+  try {
+    const prev = JSON.parse(prevRaw) as DB;
+    const a = contarCadastros(prev);
+    const b = contarCadastros(next);
+    const seed = contarCadastros(seedDB);
+    // Sumiram vários fornecedores ou muitos produtos de uma vez → bloqueia.
+    if (a.fornecedores >= seed.fornecedores + 2 && b.fornecedores <= seed.fornecedores) return true;
+    if (a.produtos >= 150 && b.produtos <= seed.produtos + 30 && b.fornecedores <= seed.fornecedores) return true;
+    if (a.fornecedores > b.fornecedores + 3) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function persist() {
   try {
+    if (typeof localStorage === "undefined") return;
+    const prevRaw = localStorage.getItem(STORAGE_KEY);
+    if (prevRaw) {
+      // Backup rolante do último estado válido antes de sobrescrever.
+      try {
+        localStorage.setItem(BACKUP_KEY, prevRaw);
+      } catch {
+        // quota — segue sem backup
+      }
+      if (persistenciaPerigosa(prevRaw, current)) {
+        console.error(
+          "[ComprasChef] Persistência bloqueada: gravaria um banco menor (possível perda de fornecedores/produtos)."
+        );
+        return;
+      }
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
   } catch {
     // sem localStorage (SSR ou navegação privada) — segue só em memória
+  }
+}
+
+/** Restaura o backup automático do localStorage, se existir. */
+export function recuperarBackupDB(): { ok: boolean; mensagem: string } {
+  if (typeof window === "undefined") return { ok: false, mensagem: "Indisponível no servidor." };
+  try {
+    const raw = localStorage.getItem(BACKUP_KEY);
+    if (!raw) return { ok: false, mensagem: "Nenhum backup encontrado neste navegador." };
+    const carregado = carregarBancoPersistido(raw);
+    current = carregado.db;
+    loaded = true;
+    clientePronto = true;
+    // Grava sem passar pelo bloqueio de “encolher” (é recuperação explícita).
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+    emit();
+    const c = contarCadastros(current);
+    return {
+      ok: true,
+      mensagem: `Backup restaurado: ${c.fornecedores} fornecedores, ${c.produtos} produtos.`,
+    };
+  } catch (e) {
+    return { ok: false, mensagem: e instanceof Error ? e.message : "Falha ao restaurar backup." };
+  }
+}
+
+export function temBackupDB(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return Boolean(localStorage.getItem(BACKUP_KEY));
+  } catch {
+    return false;
   }
 }
 
@@ -140,7 +233,189 @@ export function migrarColecoesFichasTecnicas(db: DB): boolean {
 export function atualizarComNovidades(db: DB): boolean {
   let mudou = false;
 
+  if (!Array.isArray(db.pessoas)) {
+    const agora = new Date().toISOString();
+    db.pessoas = (db.perfis ?? []).map((perfil) =>
+      pessoaParaSeedDePerfil({
+        id: perfil.id,
+        nome: perfil.nome,
+        papel: perfil.papel,
+        agora,
+      })
+    );
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.pagamentos_pessoas)) {
+    db.pagamentos_pessoas = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.consumos_pessoas)) {
+    db.consumos_pessoas = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.anotacoes_pessoas)) {
+    db.anotacoes_pessoas = [];
+    mudou = true;
+  } else {
+    for (const anotacao of db.anotacoes_pessoas) {
+      if (!anotacao.tipo || !["elogio", "aviso", "observacao"].includes(anotacao.tipo)) {
+        anotacao.tipo = "observacao";
+        mudou = true;
+      }
+    }
+  }
+
+  if (!Array.isArray(db.avaliacoes_pessoas)) {
+    db.avaliacoes_pessoas = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.escala_slots)) {
+    db.escala_slots = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.convocacoes)) {
+    db.convocacoes = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.contas_bancarias)) {
+    db.contas_bancarias = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.extrato_importacoes)) {
+    db.extrato_importacoes = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.extrato_linhas)) {
+    db.extrato_linhas = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.batidas_ponto)) {
+    db.batidas_ponto = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.pendencias_ponto)) {
+    db.pendencias_ponto = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.normas_rh)) {
+    db.normas_rh = [];
+    mudou = true;
+  }
+
+  if (Array.isArray(db.pessoas)) {
+    const agoraDocs = new Date().toISOString();
+    for (const pessoa of db.pessoas) {
+      if (!Array.isArray(pessoa.documentos)) {
+        pessoa.documentos = garantirChecklistDocumentos(pessoa, agoraDocs);
+        mudou = true;
+      }
+    }
+  }
+
+  if (!db.config_rh) {
+    db.config_rh = {
+      antecedencia_minima_dias: 3,
+      aviso_ponto_horas: 24,
+      tolerancia_atraso_minutos: 10,
+      atualizado_em: new Date().toISOString(),
+    };
+    mudou = true;
+  } else {
+    if (
+      typeof db.config_rh.aviso_ponto_horas !== "number" ||
+      !Number.isFinite(db.config_rh.aviso_ponto_horas)
+    ) {
+      db.config_rh.aviso_ponto_horas = 24;
+      mudou = true;
+    }
+    if (
+      typeof db.config_rh.antecedencia_minima_dias !== "number" ||
+      !Number.isFinite(db.config_rh.antecedencia_minima_dias)
+    ) {
+      db.config_rh.antecedencia_minima_dias = 3;
+      mudou = true;
+    }
+    if (
+      typeof db.config_rh.tolerancia_atraso_minutos !== "number" ||
+      !Number.isFinite(db.config_rh.tolerancia_atraso_minutos) ||
+      db.config_rh.tolerancia_atraso_minutos < 0
+    ) {
+      db.config_rh.tolerancia_atraso_minutos = 10;
+      mudou = true;
+    }
+  }
+
+
   if (migrarColecoesFichasTecnicas(db)) {
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.fichas_tecnicas_excluidas_ids)) {
+    db.fichas_tecnicas_excluidas_ids = [];
+    mudou = true;
+  }
+
+  if (!Array.isArray(db.fechamentos_dia)) {
+    db.fechamentos_dia = [];
+    mudou = true;
+  }
+
+  if (garantirContasDre(db)) mudou = true;
+  if (garantirEquipamentos(db)) mudou = true;
+
+  {
+    const PADROES_TIPO_LOCAL = [
+      { id: "tl-freezer", nome: "Freezer", codigo: "freezer", ativo: true },
+      { id: "tl-geladeira", nome: "Geladeira", codigo: "geladeira", ativo: true },
+      { id: "tl-prateleira", nome: "Prateleira", codigo: "prateleira", ativo: true },
+      { id: "tl-despensa", nome: "Despensa", codigo: "despensa", ativo: true },
+    ] as const;
+    if (!Array.isArray(db.tipos_local)) {
+      db.tipos_local = PADROES_TIPO_LOCAL.map((t) => ({ ...t }));
+      mudou = true;
+    }
+    const porCodigo = new Map(db.tipos_local.map((t) => [t.codigo, t]));
+    for (const padrao of PADROES_TIPO_LOCAL) {
+      if (!porCodigo.has(padrao.codigo)) {
+        db.tipos_local.push({ ...padrao });
+        porCodigo.set(padrao.codigo, padrao);
+        mudou = true;
+      }
+    }
+    for (const local of db.locais ?? []) {
+      const codigo = (local.tipo || "").trim();
+      if (!codigo) continue;
+      if (!porCodigo.has(codigo)) {
+        const nome =
+          codigo.charAt(0).toUpperCase() + codigo.slice(1).replace(/[-_]/g, " ");
+        const novo = { id: uid("tl"), nome, codigo, ativo: true };
+        db.tipos_local.push(novo);
+        porCodigo.set(codigo, novo);
+        mudou = true;
+      }
+    }
+  }
+
+  if (!db.tour_londrina) {
+    db.tour_londrina = {
+      pratos_elegiveis_ids: [],
+      adicionais_padrao: [
+        { id: "tour-add-proteina", nome: "Dobrar proteína", preco_venda: 0, custo: 0 },
+        { id: "tour-add-sobremesa", nome: "Sobremesa", preco_venda: 0, custo: 0 },
+        { id: "tour-add-bebida", nome: "Bebida", preco_venda: 0, custo: 0 },
+      ],
+    };
     mudou = true;
   }
 
@@ -283,6 +558,7 @@ export function atualizarComNovidades(db: DB): boolean {
   }
   const boletosPorNota = new Map<string, Array<{ boleto: (typeof db.boletos)[number]; ordemOriginal: number }>>();
   db.boletos.forEach((boleto, indice) => {
+    if (!boleto.nota_id) return;
     const grupo = boletosPorNota.get(boleto.nota_id) ?? [];
     grupo.push({ boleto, ordemOriginal: indice });
     boletosPorNota.set(boleto.nota_id, grupo);
@@ -341,6 +617,15 @@ export function atualizarComNovidades(db: DB): boolean {
       mudou = true;
     }
   }
+  if (garantirEntraNoCmvProdutos(db.produtos, db.contas_dre)) {
+    mudou = true;
+  }
+  if (!db.produtos_sugestao_conta_dre_v1) {
+    const sugestao = aplicarSugestaoContaDreProdutos(db, { soSemConta: true });
+    if (sugestao.preenchidos > 0) mudou = true;
+    db.produtos_sugestao_conta_dre_v1 = true;
+    mudou = true;
+  }
   for (const caixa of db.caixas) {
     if (!validarTipoBox(caixa.tipo_box as string)) {
       caixa.tipo_box = "NAO_CLASSIFICADO";
@@ -351,13 +636,11 @@ export function atualizarComNovidades(db: DB): boolean {
       mudou = true;
     }
   }
-  if (!db.unidades.some((u) => u.id === UNIDADE_SACO.id)) {
-    db.unidades.push({ ...UNIDADE_SACO });
-    mudou = true;
-  }
-  if (!db.unidades.some((u) => u.id === UNIDADE_PACOTE.id)) {
-    db.unidades.push({ ...UNIDADE_PACOTE });
-    mudou = true;
+  for (const unidadePadrao of [UNIDADE_SACO, UNIDADE_PACOTE, UNIDADE_FRASCO, UNIDADE_PECA, UNIDADE_ML]) {
+    if (!db.unidades.some((u) => u.id === unidadePadrao.id)) {
+      db.unidades.push({ ...unidadePadrao });
+      mudou = true;
+    }
   }
   if (!Array.isArray(db.fornecedor_produtos)) {
     db.fornecedor_produtos = [];
@@ -409,42 +692,80 @@ export function atualizarComNovidades(db: DB): boolean {
       mudou = true;
     }
   }
-  for (const semente of seedDB.notas_fiscais) {
-    if (semente.id !== "nf-adg-613") continue;
-    if (!db.notas_fiscais.some((n) => n.id === semente.id)) {
-      db.notas_fiscais.push(structuredClone(semente));
+  // Não reinsere NF/boleto de demonstração: se o usuário limpou, permanece vazio.
+
+  if (aplicarCardapioItalian(db)) {
+    mudou = true;
+  }
+
+  // Fornecedores sem campo `ativo` sumiam da lista (filtro truthy). Corrige legado.
+  for (const fornecedor of db.fornecedores ?? []) {
+    if (fornecedor.ativo === undefined) {
+      fornecedor.ativo = true;
       mudou = true;
     }
   }
-  for (const semente of seedDB.boletos) {
-    if (semente.id !== "bol-adg-613") continue;
-    if (!db.boletos.some((b) => b.id === semente.id)) {
-      db.boletos.push(structuredClone(semente));
-      mudou = true;
-    }
+
+  // Reaplica limpeza: Title Case / minúsculas saem; CAIXA ALTA da NF permanece.
+  // (Corrige a restauração indevida da v1; não toca fornecedores.)
+  if (!db.produtos_limpeza_nome_titulo_v3) {
+    desativarProdutosNomeTitulo(db);
+    db.produtos_limpeza_nome_titulo_v1 = true;
+    db.produtos_limpeza_nome_titulo_v2 = true;
+    db.produtos_limpeza_nome_titulo_v3 = true;
+    db.produtos_restauracao_nome_titulo_v1 = true;
+    mudou = true;
+  }
+
+  // Preenche preço de venda (Loja/iFood) da planilha Londrina só onde ainda estiver vazio.
+  if (aplicarTabelaFranquiaNasFichas(db, PRECOS_FRANQUIA_LONDINA_BOX_G, { somenteVazios: true }) > 0) {
+    mudou = true;
   }
 
   return mudou;
 }
 
 function ensureLoaded() {
-  if (loaded || typeof window === "undefined") return;
+  if (loaded || typeof window === "undefined" || !clientePronto) return;
   loaded = true;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const carregado = carregarBancoPersistido(raw);
+      current = carregado.db;
       if (carregado.migrado) {
-        current = carregado.db;
         persist();
-      } else {
-        current = carregado.db;
       }
       emit();
+      return;
     }
-  } catch {
-    current = seedDB;
+  } catch (erro) {
+    console.error("[ComprasChef] Falha ao carregar banco do localStorage:", erro);
+    // Nunca sobrescreve o LS com seed aqui — tenta backup primeiro.
+    try {
+      const backup = localStorage.getItem(BACKUP_KEY);
+      if (backup) {
+        current = carregarBancoPersistido(backup).db;
+        emit();
+        return;
+      }
+    } catch {
+      // ignora
+    }
+    current = structuredClone(seedDB);
+    emit();
+    return;
   }
+}
+
+function liberarClienteECarregar() {
+  if (typeof window === "undefined") return;
+  const jaPronto = clientePronto;
+  clientePronto = true;
+  ensureLoaded();
+  // Se o LS já tinha sido carregado noutro caminho, ainda assim notifica após o mount.
+  if (jaPronto) return;
+  emit();
 }
 
 export function subscribe(cb: () => void): () => void {
@@ -453,6 +774,10 @@ export function subscribe(cb: () => void): () => void {
 }
 
 export function getDB(): DB {
+  if (typeof window === "undefined" || !clientePronto) {
+    // Mesma base do SSR / 1ª pintura — evita mismatch de hidratação.
+    return seedDB;
+  }
   ensureLoaded();
   return current;
 }
@@ -465,10 +790,12 @@ export function carregarBancoPersistido(raw: string): { db: DB; migrado: boolean
 
 export function sincronizarDBLocalSalvo(): DB {
   if (typeof window === "undefined") return current;
+  clientePronto = true;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return current;
     current = carregarBancoPersistido(raw).db;
+    loaded = true;
     emit();
   } catch {
     return current;
@@ -478,7 +805,7 @@ export function sincronizarDBLocalSalvo(): DB {
 
 /** Substitui o banco por completo em uma única gravação (persist + notificação). */
 export function substituirDB(next: DB): DB {
-  ensureLoaded();
+  liberarClienteECarregar();
   current = next;
   persist();
   emit();
@@ -487,13 +814,41 @@ export function substituirDB(next: DB): DB {
 
 /** Aplica uma mutação ao banco (clona, altera, persiste e notifica). */
 export function mutate(fn: (db: DB) => void): DB {
-  ensureLoaded();
+  liberarClienteECarregar();
   const next = structuredClone(current);
   fn(next);
   current = next;
   persist();
   emit();
   return current;
+}
+
+/**
+ * Zera notas fiscais, boletos, documentos de boleto e histórico de pagamento.
+ * Estoque, cadastros e caixa de entrada não são alterados.
+ */
+export function limparNotasEBoletos(): { notas: number; boletos: number; documentos: number } {
+  liberarClienteECarregar();
+  const notas = current.notas_fiscais?.length ?? 0;
+  const boletos = current.boletos?.length ?? 0;
+  const documentos = current.documentos_boleto?.length ?? 0;
+
+  mutate((db) => {
+    db.notas_fiscais = [];
+    db.boletos = [];
+    db.documentos_boleto = [];
+    db.boleto_pagamentos_historico = [];
+  });
+
+  if (typeof indexedDB !== "undefined") {
+    try {
+      indexedDB.deleteDatabase("compraschef-documentos-boleto");
+    } catch {
+      // ignore
+    }
+  }
+
+  return { notas, boletos, documentos };
 }
 
 export function calcularValorFinal(valorOriginal: number, juros = 0, desconto = 0): number {
@@ -563,20 +918,28 @@ export function uid(prefixo: string): string {
   return `${prefixo}-${Date.now().toString(36)}-${seq}`;
 }
 
-/** Hook reativo: re-renderiza quando o banco muda. */
+/**
+ * Hook reativo: re-renderiza quando o banco muda.
+ * Até o 1º mount no cliente devolve o seed (igual ao SSR), e só então
+ * carrega o localStorage — evita hydration mismatch em navegações SPA.
+ */
 export function useDB(): DB {
-  const db = useSyncExternalStore(
+  const [montado, setMontado] = useState(false);
+
+  useEffect(() => {
+    liberarClienteECarregar();
+    setMontado(true);
+  }, []);
+
+  return useSyncExternalStore(
     subscribe,
     () => {
+      if (!montado) return seedDB;
       ensureLoaded();
       return current;
     },
     () => seedDB
   );
-  useEffect(() => {
-    ensureLoaded();
-  }, []);
-  return db;
 }
 
 // ---------- Helpers de domínio ----------

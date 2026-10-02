@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   classificarArquivoRecebimento,
   contarPorTipo,
+  identificarDanfeParaClassificacao,
+  pareceArquivoOffice,
+  pareceContextoDanfe,
+  pareceDocumentoPessoal,
   pareceXmlNfe,
 } from "./classificar-arquivo-recebimento";
 import { TEXTO_NFSE_DEMO_ANOTA_AI } from "./nfse";
@@ -32,6 +36,45 @@ describe("pareceXmlNfe", () => {
 
   it("rejeita HTML genérico", () => {
     expect(pareceXmlNfe("<html><body>nota</body></html>")).toBe(false);
+  });
+});
+
+describe("endurecimento classificação", () => {
+  it("reconhece office e documento pessoal", () => {
+    expect(pareceArquivoOffice("Producao_diaria.docx")).toBe(true);
+    expect(pareceDocumentoPessoal("CNH-e.pdf.pdf")).toBe(true);
+    expect(pareceDocumentoPessoal("scan.pdf", "CARTEIRA NACIONAL DE HABILITAÇÃO DETRAN")).toBe(
+      true
+    );
+  });
+
+  it("não classifica Word como DANFE/compra", () => {
+    const r = classificarArquivoRecebimento({
+      nomeArquivo: "Producao_diaria.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      texto: `DANFE Chave de Acesso ${CHAVE_NFE}`,
+    });
+    expect(r.tipo).toBe("desconhecido");
+    expect(r.detalhe).toMatch(/escritório/i);
+  });
+
+  it("não classifica CNH como DANFE mesmo com muitos dígitos", () => {
+    const ruido = `Nome JOAO SILVA CPF 12345678901 ${CHAVE_NFE} DETRAN SP habilitacao`;
+    const r = classificarArquivoRecebimento({
+      nomeArquivo: "CNH-e.pdf.pdf",
+      mimeType: "application/pdf",
+      texto: ruido,
+    });
+    expect(r.tipo).toBe("desconhecido");
+    expect(r.sinais.temChaveDanfe).toBe(false);
+  });
+
+  it("exige contexto fiscal para DANFE por janela de 44 dígitos", () => {
+    expect(pareceContextoDanfe(`só numeros ${CHAVE_NFE}`)).toBe(false);
+    expect(identificarDanfeParaClassificacao(`documento aleatorio ${CHAVE_NFE}`)).toBeNull();
+    expect(
+      identificarDanfeParaClassificacao(`DANFE\nChave de Acesso\n${CHAVE_NFE}`)
+    ).not.toBeNull();
   });
 });
 
@@ -101,6 +144,16 @@ describe("classificarArquivoRecebimento", () => {
       texto: "",
     });
     expect(r.tipo).toBe("desconhecido");
+    expect(r.confianca).toBe("baixa");
+  });
+
+  it("nome boleto.pdf sugere boleto mesmo sem texto", () => {
+    const r = classificarArquivoRecebimento({
+      nomeArquivo: "boleto vera bela 2408.pdf",
+      mimeType: "application/pdf",
+      texto: "",
+    });
+    expect(r.tipo).toBe("pdf_boleto");
     expect(r.confianca).toBe("baixa");
   });
 

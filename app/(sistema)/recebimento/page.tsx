@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   FileStack,
   ArrowLeft,
@@ -45,8 +46,11 @@ import {
   indicadorCompletudeNota,
 } from "@/lib/domain/nfe-completude";
 import {
+  hidratarFilaLoteDoIdb,
   marcarItemConcluido,
   marcarItemPendente,
+  obterArquivoFilaAsync,
+  obterItemFila,
   quantidadeFilaAberta,
   useFilaLoteRecebimento,
 } from "@/lib/domain/lote-recebimento-store";
@@ -105,6 +109,8 @@ function lerFotoPequena(arquivo: File): Promise<string> {
 }
 
 export default function RecebimentoPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const db = useDB();
   const { papel } = usePapel();
   const verValores = podeVerValores(papel);
@@ -120,18 +126,6 @@ export default function RecebimentoPage() {
   const [modoLote, setModoLote] = useState(false);
   const [arquivoLote, setArquivoLote] = useState<File | null>(null);
   const [itemLoteId, setItemLoteId] = useState<string | null>(null);
-  const handoffInboxProcessado = useRef(false);
-
-  /** Handoff da Caixa de entrada: abre a fila A conciliar. */
-  useEffect(() => {
-    if (typeof window === "undefined" || handoffInboxProcessado.current) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("abrirLote") !== "1") return;
-    handoffInboxProcessado.current = true;
-    setModoLote(true);
-    window.history.replaceState({}, "", "/recebimento");
-  }, []);
-
   const [notaConferirId, setNotaConferirId] = useState<string | null>(null);
   const [notaCorrecaoId, setNotaCorrecaoId] = useState<string | null>(null);
   const [filtroCompletudeNfe, setFiltroCompletudeNfe] = useState<"todas" | "pendentes" | "completas">("todas");
@@ -146,6 +140,56 @@ export default function RecebimentoPage() {
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const timerDestaque = useRef<ReturnType<typeof setTimeout> | null>(null);
   const salvandoCorrecaoNfeRef = useRef(false);
+  const handoffInboxProcessado = useRef(false);
+
+  /** Handoff da Caixa de entrada: abre o fluxo do item (ou a fila A conciliar). */
+  useEffect(() => {
+    if (typeof window === "undefined" || handoffInboxProcessado.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("abrirLote") !== "1") return;
+    handoffInboxProcessado.current = true;
+    const itemId = params.get("itemLote");
+    router.replace("/recebimento");
+
+    void (async () => {
+      try {
+        await hidratarFilaLoteDoIdb();
+        if (itemId) {
+          const item = obterItemFila(itemId);
+          const arquivo = await obterArquivoFilaAsync(itemId);
+          if (item && arquivo && item.tipo !== "desconhecido") {
+            setItemLoteId(itemId);
+            setArquivoLote(arquivo);
+            if (item.tipo === "xml_nfe") setModoNota(true);
+            else if (item.tipo === "pdf_nfse") setModoNfse(true);
+            else if (item.tipo === "pdf_danfe" || item.tipo === "imagem") setModoDanfe(true);
+            else setModoLote(true);
+            return;
+          }
+          // Item sumiu da fila — não trava em lote vazio; mostra o Recebimento normal.
+          console.warn(
+            "[recebimento] Handoff da inbox: arquivo não encontrado na fila.",
+            itemId
+          );
+          return;
+        }
+        if (quantidadeFilaAberta() > 0) setModoLote(true);
+      } catch (e) {
+        console.warn("[recebimento] Falha no handoff da inbox:", e);
+      }
+    })();
+  }, [router]);
+
+  /** Deep link da Conferência financeira: abre a conferência de itens da nota. */
+  useEffect(() => {
+    const notaId = searchParams.get("conferirNota");
+    if (!notaId) return;
+    const nota = db.notas_fiscais.find((n) => n.id === notaId);
+    if (!nota?.itens_importados?.length) return;
+    setNotaConferirId(notaId);
+    router.replace("/recebimento", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- abre uma vez a partir do deep link
+  }, [searchParams]);
 
   const pedidosParaReceber = db.pedidos.filter((p) => p.status === "enviado" || p.status === "confirmado");
   // DANFEs baixadas da Receita (via certificado) aguardando conferência
@@ -549,9 +593,13 @@ export default function RecebimentoPage() {
               status: r.status,
               temNota: true,
               boletosLiberados: r.boletosLiberados,
-              mensagemExtra: `Nota de ${r.fornecedorNome} registrada no financeiro${
-                r.boletos > 0 ? ` com ${r.boletos} boleto${r.boletos === 1 ? "" : "s"}` : ""
-              }${r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""}.`,
+              mensagemExtra: r.avisoRetrabalho
+                ? `NF-e de ${r.fornecedorNome} já estava conferida — estoque não foi lançado de novo${
+                    r.boletos > 0 ? ` · ${r.boletos} parcela(s) criada(s)` : ""
+                  }.`
+                : `Nota de ${r.fornecedorNome} registrada no financeiro${
+                    r.boletos > 0 ? ` com ${r.boletos} boleto${r.boletos === 1 ? "" : "s"}` : ""
+                  }${r.vinculouPedido ? " · pedido do fornecedor marcado como entregue" : ""}.`,
             });
           }}
         />
@@ -575,11 +623,16 @@ export default function RecebimentoPage() {
           }}
           onConcluido={(r) => {
             finalizarItemLoteSeHouver();
+            const meioLabel =
+              r.meio === "plataforma" ? "já debitado na plataforma" : `pagamento via ${r.meio.toUpperCase()}`;
             setResultado({
               status: "ok",
               temNota: true,
-              boletosLiberados: 1,
-              mensagemExtra: `NFS-e de ${r.fornecedorNome} (${moeda(r.valor)}) registrada · pagamento via ${r.meio.toUpperCase()} · título liberado na agenda (sem estoque).`,
+              boletosLiberados: r.meio === "plataforma" ? 0 : 1,
+              mensagemExtra:
+                r.meio === "plataforma"
+                  ? `NFS-e de ${r.fornecedorNome} (${moeda(r.valor)}) registrada · ${meioLabel} · sem pendência na agenda (sem estoque).`
+                  : `NFS-e de ${r.fornecedorNome} (${moeda(r.valor)}) registrada · ${meioLabel} · título liberado na agenda (sem estoque).`,
             });
           }}
         />

@@ -49,14 +49,17 @@ describe("interface importar boleto - utilitários", () => {
   it("apresentação de divergente", () => {
     const view = apresentarResultadoConfronto({
       classificacao: "divergente",
-      candidatos: [],
+      candidatos: [{ nota_id: "nf-a", boleto_id: "bol-a" }],
+      parcela_id: "bol-a",
+      nota_id: "nf-a",
       criterios_coincidentes: [],
-      divergencias: ["Valor divergente."],
+      divergencias: ["Valor difere R$ 0,50 (parcela R$ 10,00 × boleto R$ 10,50)."],
       avisos: [],
       exige_confirmacao_humana: true,
     });
     expect(view.variante).toBe("vermelho");
-    expect(view.podeConfirmar).toBe(false);
+    expect(view.podeConfirmar).toBe(true);
+    expect(view.exigeJustificativa).toBe(true);
   });
 
   it("apresentação de duplicada", () => {

@@ -12,6 +12,7 @@ import {
 } from "./inbox-entrada";
 import {
   arquivoParaRegistroInboxIdb,
+  itemInboxAberto,
   limparInboxIdb,
   listarRegistrosInboxIdb,
   registroInboxIdbParaArquivo,
@@ -24,6 +25,9 @@ import {
 
 const arquivosPorId = new Map<string, File>();
 let itens: ItemFilaInbox[] = [];
+/** Snapshot estável dos abertos — mesma referência até a fila mudar (evita loop no React). */
+let snapshotAbertos: ItemFilaInbox[] = [];
+const SNAPSHOT_VAZIO: ItemFilaInbox[] = [];
 const ouvintes = new Set<() => void>();
 let hidratado = false;
 let hidratando: Promise<void> | null = null;
@@ -35,6 +39,7 @@ let versaoFila = 0;
 
 function notificar() {
   versaoFila += 1;
+  snapshotAbertos = filtrarAbertos(itens);
   ouvintes.forEach((ouvinte) => ouvinte());
 }
 
@@ -43,7 +48,7 @@ function marcarMutacaoLocal() {
 }
 
 function filtrarAbertos(lista: ItemFilaInbox[]): ItemFilaInbox[] {
-  return lista.filter((i) => i.status === "pendente" || i.status === "em_andamento");
+  return lista.filter((i) => itemInboxAberto(i.status));
 }
 
 function agendarPersistencia() {
@@ -113,7 +118,7 @@ export function hidratarInboxDoIdb(): Promise<void> {
 
       const restaurados: ItemFilaInbox[] = [];
       for (const registro of registros) {
-        if (registro.status !== "pendente" && registro.status !== "em_andamento") continue;
+        if (!itemInboxAberto(registro.status)) continue;
         arquivosPorId.set(registro.id, registroInboxIdbParaArquivo(registro));
         restaurados.push(registroInboxIdbParaItem(registro));
       }
@@ -132,9 +137,21 @@ export function hidratarInboxDoIdb(): Promise<void> {
   return hidratando;
 }
 
+function fingerprintsDeClassificado(c: ItemLoteClassificado): Pick<
+  ItemFilaInbox,
+  "chaveNfe" | "chaveNfse" | "codigoBoleto"
+> {
+  return {
+    chaveNfe: c.classificacao.resumo?.chaveNfe,
+    chaveNfse: c.classificacao.resumo?.chaveNfse,
+    codigoBoleto: c.classificacao.resumo?.numeroBoleto,
+  };
+}
+
 export function acrescentarClassificadosNaInbox(classificados: ItemLoteClassificado[]) {
   marcarMutacaoLocal();
-  const novos: ItemFilaInbox[] = classificados.map((c) => {
+  const agora = Date.now();
+  const novos: ItemFilaInbox[] = classificados.map((c, i) => {
     arquivosPorId.set(c.id, c.arquivo);
     const tipo = mapearTipoRecebimentoParaInbox(c.tipoEscolhido, {
       mimeType: c.arquivo.type,
@@ -147,6 +164,8 @@ export function acrescentarClassificadosNaInbox(classificados: ItemLoteClassific
       tipo,
       status: "pendente" as StatusItemInbox,
       detalhe: c.classificacao.detalhe,
+      adicionadoEm: agora + i,
+      ...fingerprintsDeClassificado(c),
     };
   });
   const abertos = filtrarAbertos(itens);
@@ -158,7 +177,8 @@ export function acrescentarClassificadosNaInbox(classificados: ItemLoteClassific
 export function definirFilaInboxDeClassificados(classificados: ItemLoteClassificado[]) {
   marcarMutacaoLocal();
   arquivosPorId.clear();
-  itens = classificados.map((c) => {
+  const agora = Date.now();
+  itens = classificados.map((c, i) => {
     arquivosPorId.set(c.id, c.arquivo);
     const tipo = mapearTipoRecebimentoParaInbox(c.tipoEscolhido, {
       mimeType: c.arquivo.type,
@@ -171,6 +191,8 @@ export function definirFilaInboxDeClassificados(classificados: ItemLoteClassific
       tipo,
       status: "pendente" as StatusItemInbox,
       detalhe: c.classificacao.detalhe,
+      adicionadoEm: agora + i,
+      ...fingerprintsDeClassificado(c),
     };
   });
   notificar();
@@ -181,8 +203,34 @@ export function alterarTipoItemInbox(id: string, tipo: TipoDestinoInbox) {
   atualizarItem(id, { tipo });
 }
 
+export function atualizarFingerprintsItemInbox(
+  id: string,
+  fingerprints: Partial<
+    Pick<ItemFilaInbox, "chaveNfe" | "chaveNfse" | "codigoBoleto" | "hashSha256">
+  >
+) {
+  atualizarItem(id, fingerprints);
+}
+
 export function marcarItemInboxEmAndamento(id: string) {
-  atualizarItem(id, { status: "em_andamento" });
+  atualizarItem(id, { status: "a_conferir" });
+}
+
+/** Compra confirmada: fica na caixa em “A conferir” até o fluxo concluir. */
+export function marcarItemInboxAConferir(id: string) {
+  atualizarItem(id, { status: "a_conferir" });
+}
+
+/** Ciclo fechado no Recebimento/Conferência — some da fila aberta. */
+export function marcarItemInboxConcluido(id: string) {
+  const atual = itens.find((i) => i.id === id);
+  if (!atual) return;
+  marcarMutacaoLocal();
+  itens = itens.filter((i) => i.id !== id);
+  arquivosPorId.delete(id);
+  notificar();
+  void removerRegistroInboxIdb(id).catch(() => undefined);
+  agendarPersistencia();
 }
 
 export function removerItemInbox(id: string) {
@@ -220,15 +268,17 @@ function subscribe(ouvinte: () => void) {
   };
 }
 
-function getSnapshot() {
-  return versaoFila;
+function getSnapshot(): ItemFilaInbox[] {
+  return snapshotAbertos;
+}
+
+function getServerSnapshot(): ItemFilaInbox[] {
+  return SNAPSHOT_VAZIO;
 }
 
 export function useFilaInboxEntrada(): ItemFilaInbox[] {
-  const versao = useSyncExternalStore(subscribe, getSnapshot, () => 0);
   useEffect(() => {
     void hidratarInboxDoIdb();
   }, []);
-  void versao;
-  return filtrarAbertos(itens);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

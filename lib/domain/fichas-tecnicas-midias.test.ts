@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { FichaTecnicaMidia } from "../types";
 import {
   criarMidiaUrlExterna,
+  detectarTipoMidiaPorUrl,
+  ehUrlYoutube,
+  extrairIdYoutube,
   listarMidiasDaVersao,
   MIDIA_MAX_BYTES_IMAGEM,
   removerMidiaPorId,
@@ -9,6 +12,7 @@ import {
   sanitizarMidiasPersistiveis,
   substituirMidiaDoPasso,
   substituirMidiaPrincipal,
+  urlEmbedYoutube,
   validarArquivoMidia,
 } from "./fichas-tecnicas-midias";
 
@@ -123,4 +127,31 @@ describe("mídias da ficha técnica", () => {
     const resultado = removerMidiaPorId(origem, "a");
     expect(resultado.map((item) => item.id)).toEqual(["b"]);
   });
+
+  it("13. reconhece URLs do YouTube e monta embed", () => {
+    expect(extrairIdYoutube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(extrairIdYoutube("https://youtu.be/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(extrairIdYoutube("https://www.youtube.com/shorts/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(ehUrlYoutube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(true);
+    expect(urlEmbedYoutube("https://youtu.be/dQw4w9WgXcQ")).toBe(
+      "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    );
+    expect(detectarTipoMidiaPorUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe("VIDEO");
+    expect(detectarTipoMidiaPorUrl("https://cdn.exemplo.com/preparo.mp4")).toBe("VIDEO");
+    expect(detectarTipoMidiaPorUrl("https://cdn.exemplo.com/prato.jpg")).toBe("FOTO");
+  });
+
+  it("14. substitui vídeo principal sem manter a foto antiga", () => {
+    const foto = midiaBase({ id: "foto", tipo: "FOTO" });
+    const video = midiaBase({
+      id: "video",
+      tipo: "VIDEO",
+      url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    });
+    const resultado = substituirMidiaPrincipal([foto], video);
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].tipo).toBe("VIDEO");
+    expect(resultado[0].id).toBe("video");
+  });
+
 });

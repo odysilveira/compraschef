@@ -11,8 +11,11 @@ import { ArrowLeft, Building2, CircleCheck, CircleX, FileUp, FlaskConical, Packa
 import { Badge, Campo, Card, Modal, Vazio } from "@/components/ui";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import CodeScanner from "@/components/scanner/CodeScanner";
+import { SelectContaDre } from "@/components/cadastros/SelectContaDre";
 import { estoqueAtual, mutate, nomeFornecedor, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
+import { memorizarContaDre, sugerirContaDre } from "@/lib/domain/dre";
+import { inferirEntraNoCmv } from "@/lib/domain/produto-cmv";
 import {
   converterParaUnidadeUso,
   codigoDeBarrasValido,
@@ -56,6 +59,7 @@ interface DecisaoItem {
   quantidade: number;
   validade: string;
   produtoId: string; // "" = não reconhecido / ignorar
+  contaDreId: string;
 }
 
 interface CadastroProdutoNota {
@@ -87,6 +91,8 @@ export interface ResultadoNota {
   boletos: number;
   boletosLiberados: number;
   vinculouPedido: boolean;
+  /** DANFE reenviada: estoque não foi lançado de novo. */
+  avisoRetrabalho?: boolean;
 }
 
 function somenteDigitos(s: string): string {
@@ -225,6 +231,11 @@ function daNotaImportada(db: DB, notaId: string): {
       quantidade: item.qCom,
       validade: hojeMais(produto?.validade_padrao_dias ?? 30),
       produtoId,
+      contaDreId: sugerirContaDre(db, {
+        produtoId,
+        fornecedorId: nf.fornecedor_id,
+        nomeHint: item.xProd,
+      }),
     };
   }
   return {
@@ -297,6 +308,11 @@ export default function ReceberPorNota({
         quantidade: item.qCom,
         validade: hojeMais(produto?.validade_padrao_dias ?? 30),
         produtoId,
+        contaDreId: sugerirContaDre(db, {
+          produtoId,
+          fornecedorId: fornecedorLido?.id,
+          nomeHint: item.xProd,
+        }),
       };
     }
     setDecisoes(iniciais);
@@ -415,6 +431,11 @@ export default function ReceberPorNota({
         estoque_maximo: typeof produtoForm.estoqueMaximo === "number" ? produtoForm.estoqueMaximo : undefined,
         consumo_medio_mensal:
           typeof produtoForm.consumoMedioMensal === "number" ? produtoForm.consumoMedioMensal : undefined,
+        entra_no_cmv: inferirEntraNoCmv({
+          nome: produtoForm.nome,
+          contaDreId: produtoForm.contaDreId,
+          contasDre: d.contas_dre,
+        }),
         ativo: true,
       });
       if (!Array.isArray(d.produto_codigos_barras)) {
@@ -449,6 +470,7 @@ export default function ReceberPorNota({
       produtoId,
       validade: hojeMais(validadePadraoDias),
       decisao: "pendente",
+      contaDreId: "",
     });
     setProdutoForm(null);
     return produtoId;
@@ -652,6 +674,13 @@ export default function ReceberPorNota({
           fornecedorId: fornecedor?.id,
         });
         const recebimentoItemId = uid("ri");
+        const contaDreId =
+          dec.contaDreId ||
+          sugerirContaDre(d, {
+            produtoId: dec.produtoId,
+            fornecedorId: fornecedor?.id,
+            nomeHint: item.xProd,
+          });
         d.recebimento_itens.push({
           id: recebimentoItemId,
           recebimento_id: recebimentoId,
@@ -664,7 +693,15 @@ export default function ReceberPorNota({
           fator_conversao_aplicado: recebidaConvertida.fator,
           validade: recusado ? undefined : dec.validade || undefined,
           divergencia: recusado ? `Recusado no recebimento (${item.xProd})` : undefined,
+          conta_dre_id: contaDreId || undefined,
         });
+        if (contaDreId && !recusado) {
+          memorizarContaDre(d, {
+            produtoId: dec.produtoId,
+            fornecedorId: fornecedor?.id,
+            contaDreId,
+          });
+        }
         if (recebidaConvertida.quantidadeUso > 0) {
           criarLote(d, {
             id: uid("lote"),
@@ -864,10 +901,16 @@ export default function ReceberPorNota({
                   className="campo"
                   value={dec.produtoId}
                   onChange={(e) => {
-                    const produto = db.produtos.find((p) => p.id === e.target.value);
+                    const produtoId = e.target.value;
+                    const produto = db.produtos.find((p) => p.id === produtoId);
                     alterar(item.indice, {
-                      produtoId: e.target.value,
+                      produtoId,
                       validade: hojeMais(produto?.validade_padrao_dias ?? 30),
+                      contaDreId: sugerirContaDre(db, {
+                        produtoId,
+                        fornecedorId: fornecedor?.id,
+                        nomeHint: item.xProd,
+                      }),
                     });
                   }}
                 >
@@ -890,6 +933,15 @@ export default function ReceberPorNota({
 
               {!recusado && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {dec.produtoId ? (
+                    <Campo rotulo="Conta DRE (pré-classificada — pode alterar)">
+                      <SelectContaDre
+                        db={db}
+                        value={dec.contaDreId ?? ""}
+                        onChange={(id) => alterar(item.indice, { contaDreId: id ?? "" })}
+                      />
+                    </Campo>
+                  ) : null}
                   <Campo rotulo="Quantidade recebida">
                     <CampoQuantidade
                       valor={dec.quantidade}

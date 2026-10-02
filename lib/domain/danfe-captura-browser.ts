@@ -1,8 +1,13 @@
 /** Captura de DANFE no navegador: PDF (texto/OCR) e foto (OCR). */
 
-import { extrairTextoPdfBrowser } from "./folha-recibo-pdf-browser";
+import { extrairTextoETokensPdfBrowser, extrairTextoPdfBrowser } from "./folha-recibo-pdf-browser";
 import { configurarWorkerPdfjs } from "./pdfjs-worker";
-import { extrairDadosDanfeDoTexto, type DadosDanfeExtraidos } from "./danfe-extracao";
+import {
+  extrairDadosDanfeDoTexto,
+  extrairItensDanfeDeTokens,
+  extrairItensDanfeDoTexto,
+  type DadosDanfeExtraidos,
+} from "./danfe-extracao";
 import { identificarNotaPorTexto, type NotaIdentificadaDanfe } from "./danfe-identificacao";
 
 export type OrigemIdentificacaoDanfe = "pdf_texto" | "pdf_ocr" | "foto_ocr" | "qr";
@@ -61,7 +66,11 @@ export async function ocrImagemTextoCompleto(
   }
 }
 
-export async function renderizarPaginaPdfParaCanvas(buffer: ArrayBuffer, pagina = 1): Promise<HTMLCanvasElement> {
+export async function renderizarPaginaPdfParaCanvas(
+  buffer: ArrayBuffer,
+  pagina = 1,
+  escala = 2.5
+): Promise<HTMLCanvasElement> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => null);
   if (!pdfjs?.getDocument) {
     throw new Error("Não foi possível carregar o leitor de PDF.");
@@ -73,7 +82,7 @@ export async function renderizarPaginaPdfParaCanvas(buffer: ArrayBuffer, pagina 
   const doc = await loadingTask.promise;
   try {
     const page = await doc.getPage(pagina);
-    const viewport = page.getViewport({ scale: 2 });
+    const viewport = page.getViewport({ scale: escala });
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.floor(viewport.width));
     canvas.height = Math.max(1, Math.floor(viewport.height));
@@ -81,6 +90,22 @@ export async function renderizarPaginaPdfParaCanvas(buffer: ArrayBuffer, pagina 
     if (!contexto) throw new Error("Canvas indisponível para OCR do PDF.");
     await page.render({ canvasContext: contexto, viewport, canvas }).promise;
     return canvas;
+  } finally {
+    const destruir = (doc as { destroy?: () => Promise<void> }).destroy;
+    if (destruir) await destruir.call(doc).catch(() => undefined);
+  }
+}
+
+/** Quantidade de páginas do PDF (para OCR multi-página na Caixa). */
+export async function contarPaginasPdf(buffer: ArrayBuffer): Promise<number> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => null);
+  if (!pdfjs?.getDocument) return 0;
+  configurarWorkerPdfjs(pdfjs);
+  const dados = new Uint8Array(buffer.slice(0));
+  const loadingTask = pdfjs.getDocument({ data: dados });
+  const doc = await loadingTask.promise;
+  try {
+    return Number(doc.numPages) || 0;
   } finally {
     const destruir = (doc as { destroy?: () => Promise<void> }).destroy;
     if (destruir) await destruir.call(doc).catch(() => undefined);
@@ -99,8 +124,15 @@ export async function identificarDanfeDeArquivo(arquivo: File): Promise<Resultad
     const buffer = await arquivo.arrayBuffer();
     let textoPdf = "";
     try {
-      textoPdf = await extrairTextoPdfBrowser(buffer);
-      const dados = extrairDadosDanfeDoTexto(textoPdf);
+      const { texto, tokens } = await extrairTextoETokensPdfBrowser(buffer);
+      textoPdf = texto;
+      const dadosBase = extrairDadosDanfeDoTexto(textoPdf);
+      const itensLayout = extrairItensDanfeDeTokens(tokens);
+      const itens =
+        itensLayout.length > dadosBase.itens.length ? itensLayout : dadosBase.itens.length
+          ? dadosBase.itens
+          : extrairItensDanfeDoTexto(textoPdf);
+      const dados: DadosDanfeExtraidos = { ...dadosBase, itens };
       if (dados.nota) {
         return { nota: dados.nota, origem: "pdf_texto", dados };
       }

@@ -24,8 +24,17 @@ import {
   Search,
   BookOpenText,
   Inbox,
+  Users,
+  WalletCards,
+  UtensilsCrossed,
+  CalendarDays,
+  Fingerprint,
+  Scale,
+  Calculator,
+  PieChart,
+  QrCode,
 } from "lucide-react";
-import { PapelProvider, usePapel, podeVerValores, ROTULO_PAPEL } from "@/lib/roles";
+import { PapelProvider, usePapel, podeVerValores, usePodeAcessarModulo, ROTULO_PAPEL } from "@/lib/roles";
 import { useDB } from "@/lib/data";
 import type { Papel } from "@/lib/types";
 
@@ -34,6 +43,8 @@ interface ItemMenu {
   rotulo: string;
   icone: React.ComponentType<{ size?: number | string; className?: string }>;
   precisaVerValores?: boolean;
+  /** Se true, só aparece quando o papel pode acessar o módulo RH. */
+  precisaRh?: boolean;
 }
 
 interface SecaoMenu {
@@ -63,8 +74,22 @@ const MENU: SecaoMenu[] = [
   {
     titulo: "Financeiro",
     itens: [
-      { href: "/financeiro", rotulo: "Boletos e contas", icone: Wallet, precisaVerValores: true },
+      { href: "/financeiro", rotulo: "Pagamentos", icone: Wallet, precisaVerValores: true },
+      { href: "/fechamento-dia", rotulo: "Fechamento do dia", icone: Calculator, precisaVerValores: true },
+      { href: "/dre", rotulo: "DRE", icone: PieChart, precisaVerValores: true },
       { href: "/relatorios", rotulo: "Relatórios", icone: BarChart3, precisaVerValores: true },
+    ],
+  },
+  {
+    titulo: "RH",
+    itens: [
+      { href: "/rh", rotulo: "Pessoas", icone: Users, precisaRh: true },
+      { href: "/rh/pagamentos", rotulo: "Pagamentos", icone: WalletCards, precisaRh: true },
+      { href: "/rh/pagar-equipe", rotulo: "Pagar equipe", icone: QrCode, precisaRh: true },
+      { href: "/rh/consumos", rotulo: "Consumos", icone: UtensilsCrossed, precisaRh: true },
+      { href: "/rh/escala", rotulo: "Escala", icone: CalendarDays, precisaRh: true },
+      { href: "/rh/ponto", rotulo: "Ponto", icone: Fingerprint, precisaRh: true },
+      { href: "/rh/normas", rotulo: "Normas", icone: Scale, precisaRh: true },
     ],
   },
   {
@@ -73,6 +98,7 @@ const MENU: SecaoMenu[] = [
       { href: "/cadastros", rotulo: "Cadastros", icone: FolderCog },
       { href: "/fichas-tecnicas", rotulo: "Fichas técnicas", icone: BookOpenText },
       { href: "/integracoes/saipos", rotulo: "Integração Saipos", icone: FileSpreadsheet },
+      { href: "/integracoes/saipos-consumo", rotulo: "Consumo teórico Saipos", icone: FileSpreadsheet },
     ],
   },
 ];
@@ -128,12 +154,14 @@ function RodapeUsuario() {
 function Navegacao({ aoNavegar }: { aoNavegar?: () => void }) {
   const pathname = usePathname();
   const { papel } = usePapel();
+  const podeRh = usePodeAcessarModulo("rh");
   const [busca, setBusca] = useState("");
 
   const secoes = MENU.map((secao) => ({
     ...secao,
     itens: secao.itens
       .filter((i) => !i.precisaVerValores || podeVerValores(papel))
+      .filter((i) => !i.precisaRh || podeRh)
       .filter((i) => i.rotulo.toLowerCase().includes(busca.trim().toLowerCase())),
   })).filter((secao) => secao.itens.length > 0);
 

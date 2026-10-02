@@ -8,7 +8,43 @@ const DB_NOME = "compraschef-caixa-entrada";
 const DB_VERSAO = 1;
 const STORE = "itens";
 
-export type StatusItemInbox = "pendente" | "em_andamento" | "concluido" | "descartado";
+/**
+ * pendente = a classificar (ainda na caixa, destino a confirmar)
+ * a_conferir = enviado à compra; fica até Recebimento/Conferência concluir
+ * em_andamento = legado (trata como a conferir)
+ */
+export type StatusItemInbox =
+  | "pendente"
+  | "a_conferir"
+  | "em_andamento"
+  | "concluido"
+  | "descartado";
+
+export type FaseFilaInbox = "a_classificar" | "a_conferir";
+
+export function itemInboxAberto(status: StatusItemInbox): boolean {
+  return status === "pendente" || status === "a_conferir" || status === "em_andamento";
+}
+
+export function faseFilaInbox(status: StatusItemInbox): FaseFilaInbox | null {
+  if (status === "pendente") return "a_classificar";
+  if (status === "a_conferir" || status === "em_andamento") return "a_conferir";
+  return null;
+}
+
+export function rotuloStatusItemInbox(status: StatusItemInbox): string {
+  switch (status) {
+    case "pendente":
+      return "A classificar";
+    case "a_conferir":
+    case "em_andamento":
+      return "A conferir";
+    case "concluido":
+      return "Concluído";
+    case "descartado":
+      return "Descartado";
+  }
+}
 
 export interface ItemFilaInbox {
   id: string;
@@ -17,6 +53,13 @@ export interface ItemFilaInbox {
   tipo: TipoDestinoInbox;
   status: StatusItemInbox;
   detalhe?: string;
+  /** Quando entrou na caixa (ms). Usado para ordenar recentes/antigos. */
+  adicionadoEm?: number;
+  /** Impressões digitais para aviso de retrabalho. */
+  chaveNfe?: string;
+  chaveNfse?: string;
+  codigoBoleto?: string;
+  hashSha256?: string;
 }
 
 export interface RegistroInboxIdb {
@@ -29,6 +72,11 @@ export interface RegistroInboxIdb {
   mimeType: string;
   lastModified: number;
   blob: Blob;
+  adicionadoEm?: number;
+  chaveNfe?: string;
+  chaveNfse?: string;
+  codigoBoleto?: string;
+  hashSha256?: string;
 }
 
 export function arquivoParaRegistroInboxIdb(
@@ -45,6 +93,11 @@ export function arquivoParaRegistroInboxIdb(
     mimeType: arquivo.type || "application/octet-stream",
     lastModified: arquivo.lastModified || Date.now(),
     blob: arquivo,
+    adicionadoEm: item.adicionadoEm,
+    chaveNfe: item.chaveNfe,
+    chaveNfse: item.chaveNfse,
+    codigoBoleto: item.codigoBoleto,
+    hashSha256: item.hashSha256,
   };
 }
 
@@ -63,6 +116,11 @@ export function registroInboxIdbParaItem(registro: RegistroInboxIdb): ItemFilaIn
     tipo: registro.tipo,
     status: registro.status,
     detalhe: registro.detalhe,
+    adicionadoEm: registro.adicionadoEm ?? registro.lastModified,
+    chaveNfe: registro.chaveNfe,
+    chaveNfse: registro.chaveNfse,
+    codigoBoleto: registro.codigoBoleto,
+    hashSha256: registro.hashSha256,
   };
 }
 

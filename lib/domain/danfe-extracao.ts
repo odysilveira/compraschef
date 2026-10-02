@@ -22,6 +22,15 @@ export interface DadosDanfeExtraidos {
   origemTexto: boolean;
 }
 
+export interface TokenPdfDanfe {
+  str: string;
+  x: number;
+  y: number;
+}
+
+const UNIDADES =
+  "UN|UND|KG|CX|PCT|PC|PÇ|LT|L|FD|SC|M|M2|M3|ML|G|GR|DZ|RL|PAR|KIT|BD|BL|TB|GL|CJ|PR|JG|CT|AMP";
+
 function somenteDigitos(s: string): string {
   return s.replace(/\D/g, "");
 }
@@ -71,51 +80,107 @@ export function extrairValorTotalDanfe(texto: string): number | undefined {
   return bruto ? parseNumeroDanfe(bruto) : undefined;
 }
 
+function itemValido(item: ItemDanfeExtraido): boolean {
+  if (!item.descricao || item.quantidade <= 0) return false;
+  if (/^(DANFE|NFE|PRODUTO|DESCRI|C[ÓO]DIGO|NCM|CST|CFOP)/i.test(item.descricao)) return false;
+  return true;
+}
+
+function parseLinhaProduto(linha: string): ItemDanfeExtraido | null {
+  const limpa = linha.replace(/[ \t]+/g, " ").trim();
+  if (limpa.length < 10) return null;
+  if (/^(NCM|CST|CFOP|DADOS|CALCULO|DESTINAT|EMITENTE|CHAVE|VALOR|BASE|ICMS|IPI|PIS|COFINS)/i.test(limpa)) {
+    return null;
+  }
+
+  // código + descrição + UN + qtd + v.unit + v.total (+ colunas extras opcionais: NCM etc.)
+  const padraoFlexivel = new RegExp(
+    `^(\\S{1,24})\\s+(.+?)\\s+(${UNIDADES})\\s+(\\d+[.,]\\d+|\\d+)\\s+(\\d+[.,]\\d+)\\s+(\\d+[.,]\\d+)(?:\\s+.*)?$`,
+    "i"
+  );
+  const m = limpa.match(padraoFlexivel);
+  if (!m) return null;
+
+  const quantidade = parseNumeroDanfe(m[4]);
+  if (quantidade === undefined || quantidade <= 0) return null;
+
+  const item: ItemDanfeExtraido = {
+    codigo: m[1].trim(),
+    descricao: m[2].replace(/\s+/g, " ").trim(),
+    unidade: m[3].toUpperCase().replace("UND", "UN").replace("PÇ", "PC"),
+    quantidade: Number(quantidade.toFixed(4)),
+    valorUnitario: parseNumeroDanfe(m[5]),
+    valorTotal: parseNumeroDanfe(m[6]),
+  };
+  return itemValido(item) ? item : null;
+}
+
 /**
  * Heurística para linhas de produto em DANFE com texto.
- * Formato típico: código + descrição + UN + qtd + v.unit + v.total
+ * Aceita unidades extras e colunas à direita (NCM/CST).
  */
 export function extrairItensDanfeDoTexto(texto: string): ItemDanfeExtraido[] {
   const linhas = texto.replace(/\u00a0/g, " ").split(/\r?\n/);
   const itens: ItemDanfeExtraido[] = [];
   const visto = new Set<string>();
 
-  // Ex.: 1100 DETERGENTE ... UN 40,0000 7,5000 300,00
-  const padrao =
-    /^(\S{1,20})\s+(.+?)\s+(UN|KG|CX|PCT|PC|LT|L|FD|SC|M|M2|M3)\s+(\d+[.,]\d+|\d+)\s+(\d+[.,]\d+)\s+(\d+[.,]\d+)\s*$/i;
+  for (let i = 0; i < linhas.length; i += 1) {
+    let candidato = linhas[i];
+    let item = parseLinhaProduto(candidato);
 
-  for (const linhaBruta of linhas) {
-    const linha = linhaBruta.replace(/[ \t]+/g, " ").trim();
-    if (linha.length < 12) continue;
-    if (/^(NCM|CST|CFOP|DADOS|CALCULO|DESTINAT|EMITENTE|CHAVE|VALOR)/i.test(linha)) continue;
+    // descrição quebrada em 2 linhas: junta com a próxima se a atual não fechou
+    if (!item && i + 1 < linhas.length) {
+      const junta = `${linhas[i]} ${linhas[i + 1]}`.replace(/[ \t]+/g, " ").trim();
+      item = parseLinhaProduto(junta);
+      if (item) i += 1;
+    }
 
-    const m = linha.match(padrao);
-    if (!m) continue;
-
-    const codigo = m[1].trim();
-    const descricao = m[2].replace(/\s+/g, " ").trim();
-    const unidade = m[3].toUpperCase();
-    const quantidade = parseNumeroDanfe(m[4]);
-    const valorUnitario = parseNumeroDanfe(m[5]);
-    const valorTotal = parseNumeroDanfe(m[6]);
-    if (!descricao || quantidade === undefined || quantidade <= 0) continue;
-    if (/^(DANFE|NFE|PRODUTO)/i.test(descricao)) continue;
-
-    const chave = `${codigo}|${descricao}|${quantidade}`;
+    if (!item) continue;
+    const chave = `${item.codigo}|${item.descricao}|${item.quantidade}`;
     if (visto.has(chave)) continue;
     visto.add(chave);
-
-    itens.push({
-      codigo,
-      descricao,
-      unidade,
-      quantidade: Number(quantidade.toFixed(4)),
-      valorUnitario,
-      valorTotal,
-    });
+    itens.push(item);
   }
 
   return itens.slice(0, 80);
+}
+
+/**
+ * Agrupa tokens do pdfjs por linha (Y) e tenta montar produtos pelas colunas (X).
+ * Útil quando o texto vem fragmentado e a regex de linha única falha.
+ */
+export function extrairItensDanfeDeTokens(tokens: TokenPdfDanfe[]): ItemDanfeExtraido[] {
+  if (!tokens.length) return [];
+
+  const ordenados = [...tokens]
+    .map((t) => ({
+      str: (t.str ?? "").replace(/\u00a0/g, " ").trim(),
+      x: t.x,
+      y: Math.round(t.y),
+    }))
+    .filter((t) => t.str);
+
+  const porLinha = new Map<number, typeof ordenados>();
+  for (const token of ordenados) {
+    let chaveY = token.y;
+    for (const yExistente of Array.from(porLinha.keys())) {
+      if (Math.abs(yExistente - token.y) <= 3) {
+        chaveY = yExistente;
+        break;
+      }
+    }
+    const lista = porLinha.get(chaveY) ?? [];
+    lista.push(token);
+    porLinha.set(chaveY, lista);
+  }
+
+  const linhasY = Array.from(porLinha.keys()).sort((a, b) => b - a);
+  const linhasTexto = linhasY.map((y) => {
+    const toks = (porLinha.get(y) ?? []).sort((a, b) => a.x - b.x);
+    return toks.map((t) => t.str).join(" ");
+  });
+
+  return extrairItensDanfeDoTexto(linhasTexto.join("\n"));
 }
 
 export function extrairDadosDanfeDoTexto(texto: string): DadosDanfeExtraidos {

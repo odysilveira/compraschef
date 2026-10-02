@@ -33,6 +33,53 @@ function validarUrlExterna(url: string): void {
   }
 }
 
+const ID_YOUTUBE = /^[\w-]{11}$/;
+
+/** Extrai o id do vídeo de watch / youtu.be / embed / shorts / live. */
+export function extrairIdYoutube(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim());
+    const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+
+    if (host === "youtu.be") {
+      const id = parsed.pathname.split("/").filter(Boolean)[0] ?? "";
+      return ID_YOUTUBE.test(id) ? id : null;
+    }
+
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      if (parsed.pathname === "/watch" || parsed.pathname === "/watch/") {
+        const id = parsed.searchParams.get("v") ?? "";
+        return ID_YOUTUBE.test(id) ? id : null;
+      }
+      const match = parsed.pathname.match(/^\/(?:embed|shorts|live)\/([\w-]{11})(?:\/|$)/i);
+      if (match?.[1] && ID_YOUTUBE.test(match[1])) return match[1];
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function ehUrlYoutube(url: string): boolean {
+  return extrairIdYoutube(url) !== null;
+}
+
+/** URL pronta para iframe (youtube-nocookie). */
+export function urlEmbedYoutube(url: string): string | null {
+  const id = extrairIdYoutube(url);
+  return id ? `https://www.youtube-nocookie.com/embed/${id}` : null;
+}
+
+export function ehUrlArquivoVideo(url: string): boolean {
+  return /\.(mp4|webm|mov)(\?.*)?$/i.test(url.trim());
+}
+
+/** Classifica URL externa: YouTube / arquivo de vídeo → VIDEO; demais → FOTO. */
+export function detectarTipoMidiaPorUrl(url: string): TipoMidiaFichaTecnica {
+  const limpa = url.trim();
+  if (ehUrlYoutube(limpa) || ehUrlArquivoVideo(limpa)) return "VIDEO";
+  return "FOTO";
+}
 export function detectarTipoMidiaPorMime(mimeType: string): TipoMidiaFichaTecnica {
   const mime = mimeType.trim().toLowerCase();
   if (MIDIA_MIME_IMAGENS_PERMITIDOS.includes(mime as (typeof MIDIA_MIME_IMAGENS_PERMITIDOS)[number])) {
@@ -84,9 +131,13 @@ export function criarMidiaUrlExterna(params: {
 }
 
 export function substituirMidiaPrincipal(midias: FichaTecnicaMidia[], novaMidia?: FichaTecnicaMidia): FichaTecnicaMidia[] {
-  const semPrincipal = midias.filter((item) => item.passo_id !== undefined || item.tipo !== "FOTO");
+  // Remove qualquer mídia principal (foto ou vídeo), preserva mídias ligadas a passos.
+  const semPrincipal = midias.filter((item) => item.passo_id !== undefined);
   if (!novaMidia) return clonarDefensivo(semPrincipal);
-  return clonarDefensivo([...semPrincipal, novaMidia]);
+  if (novaMidia.passo_id !== undefined) {
+    throw new Error("Mídia principal não pode estar associada a um passo.");
+  }
+  return clonarDefensivo([...semPrincipal, { ...novaMidia, passo_id: undefined }]);
 }
 
 export function substituirMidiaDoPasso(

@@ -1,4 +1,5 @@
 import { obterCodigoCanonico } from "./boletos";
+import { statusDocumentoFiscalEfetivo } from "./pagamento-documento-fiscal";
 import type { Boleto, DB, DocumentoBoleto, HistoricoPagamentoBoleto, StatusBoleto } from "../types";
 
 export type MotivoBloqueioPagamentoBoleto =
@@ -98,9 +99,27 @@ export function obterCodigoCanonicoConfirmadoDoDocumento(documento?: DocumentoBo
   );
 }
 
+function ehPagamentoPixSemNota(boleto: Boleto): boolean {
+  return (
+    boleto.meio_pagamento_esperado === "pix" &&
+    statusDocumentoFiscalEfetivo(boleto) === "aguardando_nfse"
+  );
+}
+
+/**
+ * Só entra em Pagamentos (A vencer / hoje / atrasados) depois do pareamento
+ * (ou PIX sem NFS-e, que já nasce na agenda). Parcelas `aguardando_documento`
+ * ficam só na Conferência.
+ */
+export function boletoProntoParaAgendaPagamentos(boleto: Boleto): boolean {
+  if (ehPagamentoPixSemNota(boleto)) return true;
+  return boleto.status_conferencia === "conferido";
+}
+
 /**
  * Resolve o código de barras (44) para exibir na agenda.
- * 1) Documento confirmado; 2) boleto já conferido com linha/código gravados.
+ * 1) Documento confirmado; 2) boleto já conferido com linha/código gravados;
+ * 3) PIX sem NFS-e com código/copia-e-cola na linha.
  */
 export function resolverCodigoCanonicoParaPagamento(
   boleto: Boleto,
@@ -108,6 +127,11 @@ export function resolverCodigoCanonicoParaPagamento(
 ): string | undefined {
   const doDocumento = obterCodigoCanonicoConfirmadoDoDocumento(documento);
   if (doDocumento) return doDocumento;
+
+  if (ehPagamentoPixSemNota(boleto) && limparTexto(boleto.linha_digitavel)) {
+    // PIX copia-e-cola não é ITF-44; devolve o texto para exibir/copiar.
+    return limparTexto(boleto.linha_digitavel);
+  }
 
   if (boleto.status !== "liberado" || boleto.status_conferencia !== "conferido") {
     return undefined;
@@ -143,6 +167,36 @@ export function montarEstadoAgendaPagamentoBoleto(boleto: Boleto, documento?: Do
       podeInformarPagamento: false,
       mostrarImportarBoleto: false,
       motivoBloqueio: motivosPorStatus[boleto.status] ?? `Boleto em status ${rotuloStatus(boleto.status)}.`,
+    };
+  }
+
+  if (ehPagamentoPixSemNota(boleto)) {
+    const codigoPix = limparTexto(boleto.linha_digitavel);
+    if (!codigoPix) {
+      return {
+        podeExibirCodigo: false,
+        podeCopiarLinha: false,
+        podeInformarPagamento: false,
+        mostrarImportarBoleto: false,
+        motivoBloqueio: "Cobrança PIX sem código. Cole o PIX copia-e-cola antes de pagar.",
+      };
+    }
+    const elegibilidadePix = avaliarElegibilidadePagamentoBoleto(boleto);
+    if (!elegibilidadePix.permitido) {
+      return {
+        podeExibirCodigo: false,
+        podeCopiarLinha: false,
+        podeInformarPagamento: false,
+        mostrarImportarBoleto: false,
+        motivoBloqueio: elegibilidadePix.mensagem,
+      };
+    }
+    return {
+      podeExibirCodigo: true,
+      podeCopiarLinha: true,
+      podeInformarPagamento: true,
+      mostrarImportarBoleto: false,
+      codigoCanonico: codigoPix,
     };
   }
 
@@ -250,7 +304,17 @@ export function avaliarElegibilidadePagamentoBoleto(boleto: Boleto): Elegibilida
     return {
       permitido: false,
       motivoBloqueio: "sem_linha_digitavel",
-      mensagem: "Boleto sem linha digitável/código de barras para pagamento.",
+      mensagem: ehPagamentoPixSemNota(boleto)
+        ? "Cobrança PIX sem código copia-e-cola para pagamento."
+        : "Boleto sem linha digitável/código de barras para pagamento.",
+    };
+  }
+
+  // PIX/serviço sem NFS-e: pode pagar; nota fiscal chega depois.
+  if (ehPagamentoPixSemNota(boleto)) {
+    return {
+      permitido: true,
+      mensagem: "PIX apto para informar pagamento (NFS-e pode ser anexada depois).",
     };
   }
 
@@ -364,6 +428,10 @@ export function informarPagamentoBoleto(
   const observacao = limparTexto(dados.observacao) || undefined;
   const statusAnterior = boleto.status;
 
+  if (!Array.isArray(db.boleto_pagamentos_historico)) {
+    db.boleto_pagamentos_historico = [];
+  }
+
   boleto.status = "aguardando_conciliacao";
   boleto.pagamento_data = dados.dataPagamento;
   boleto.pagamento_valor = Number(dados.valorPago.toFixed(2));
@@ -395,6 +463,125 @@ export function informarPagamentoBoleto(
     historico,
     erros: [],
   };
+}
+
+export interface DadosConciliarBoleto {
+  confirmouDataEBanco: boolean;
+  responsavel?: string;
+  observacao?: string;
+}
+
+export interface ResultadoConciliarBoleto {
+  sucesso: boolean;
+  boleto?: Boleto;
+  historico?: HistoricoPagamentoBoleto;
+  erros: string[];
+}
+
+export interface OpcoesConciliarBoleto {
+  agora?: string;
+  responsavelPadrao?: string;
+  gerarIdHistorico?: () => string;
+}
+
+/**
+ * Confirma no extrato/banco: boleto em aguardando_conciliacao → pago.
+ * Exige que data e banco/conta já tenham sido informados no pagamento.
+ */
+export function conciliarBoleto(
+  db: DB,
+  boletoId: string,
+  dados: DadosConciliarBoleto,
+  opcoes: OpcoesConciliarBoleto = {}
+): ResultadoConciliarBoleto {
+  const boleto = db.boletos.find((item) => item.id === boletoId);
+  if (!boleto) {
+    return { sucesso: false, erros: ["Boleto não encontrado."] };
+  }
+
+  if (boleto.status !== "aguardando_conciliacao") {
+    return {
+      sucesso: false,
+      erros: [
+        boleto.status === "pago"
+          ? "Este boleto já está conciliado (pago)."
+          : "Só é possível conciliar boletos com pagamento já informado.",
+      ],
+    };
+  }
+
+  if (!dataIsoValida(boleto.pagamento_data ?? "")) {
+    return {
+      sucesso: false,
+      erros: ["Falta a data de pagamento informada. Reabra Informar pagamento."],
+    };
+  }
+
+  if (!limparTexto(boleto.pagamento_banco_conta)) {
+    return {
+      sucesso: false,
+      erros: ["Falta o banco/conta do pagamento. Reabra Informar pagamento."],
+    };
+  }
+
+  if (!dados.confirmouDataEBanco) {
+    return {
+      sucesso: false,
+      erros: ["Confirme a data de pagamento e o banco/conta usados antes de conciliar."],
+    };
+  }
+
+  if (!Array.isArray(db.boleto_pagamentos_historico)) {
+    db.boleto_pagamentos_historico = [];
+  }
+
+  const agora = opcoes.agora ?? new Date().toISOString();
+  const responsavel = limparTexto(dados.responsavel) || opcoes.responsavelPadrao || "usuário local";
+  const observacao = limparTexto(dados.observacao) || undefined;
+  const statusAnterior = boleto.status;
+
+  boleto.status = "pago";
+
+  const historico: HistoricoPagamentoBoleto = {
+    id: opcoes.gerarIdHistorico ? opcoes.gerarIdHistorico() : `bph-${Date.now().toString(36)}`,
+    boleto_id: boleto.id,
+    nota_id: boleto.nota_id,
+    acao: "conciliado",
+    status_anterior: statusAnterior,
+    status_novo: "pago",
+    data_pagamento: boleto.pagamento_data!,
+    valor_pago: Number((boleto.pagamento_valor ?? boleto.valor).toFixed(2)),
+    banco_conta: boleto.pagamento_banco_conta!,
+    responsavel,
+    observado_em: agora,
+    observacao,
+  };
+
+  db.boleto_pagamentos_historico.push(historico);
+
+  return { sucesso: true, boleto, historico, erros: [] };
+}
+
+/** Bancos/contas já usados em pagamentos informados (para o seletor). */
+export function listarBancosContasUsados(db: DB): string[] {
+  const vistos = new Set<string>();
+  const lista: string[] = [];
+
+  for (const boleto of db.boletos ?? []) {
+    const banco = limparTexto(boleto.pagamento_banco_conta);
+    if (!banco || vistos.has(banco.toLowerCase())) continue;
+    vistos.add(banco.toLowerCase());
+    lista.push(banco);
+  }
+
+  for (const hist of db.boleto_pagamentos_historico ?? []) {
+    const banco = limparTexto(hist.banco_conta);
+    if (!banco || vistos.has(banco.toLowerCase())) continue;
+    vistos.add(banco.toLowerCase());
+    lista.push(banco);
+  }
+
+  return lista.sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
 const PADRAO_DIGITO_ITF: Record<string, string> = {

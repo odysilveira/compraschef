@@ -73,7 +73,7 @@ function bancoOperacao(): DB {
     eventos_box_operacional: [],
     precos_historico: [],
     integracao_eventos: [],
-  } as DB;
+  } as unknown as DB;
 }
 
 describe("operação diária dos boxes", () => {

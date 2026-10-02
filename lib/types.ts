@@ -3,6 +3,212 @@
 
 export type Papel = "dono" | "gerente" | "lider" | "caixa";
 
+/** Vínculo jurídico/operacional no módulo RH (fase 1). */
+export type TipoPessoaRH = "colaborador" | "intermitente" | "entregador" | "prestador_eventual";
+
+export type FuncaoOperacional =
+  | "administrador"
+  | "gerente"
+  | "cozinha"
+  | "balcao"
+  | "caixa"
+  | "salao"
+  | "entregador"
+  | "custom";
+
+export type ModuloAcesso =
+  | "painel"
+  | "recebimento"
+  | "estoque"
+  | "lista_compras"
+  | "cotacoes"
+  | "pedidos"
+  | "financeiro"
+  | "relatorios"
+  | "cadastros"
+  | "rh";
+
+export type PermissoesModulos = Record<ModuloAcesso, boolean>;
+
+/** Arquivo de contrato assinado guardado no perfil (demo local). */
+export interface ContratoArquivoPessoa {
+  nome_arquivo: string;
+  tipo_arquivo: string;
+  tamanho_bytes: number;
+  enviado_em: string;
+  /** Data URL (base64) para abrir/baixar no navegador. */
+  data_url: string;
+}
+
+export type TipoDocumentoPessoa =
+  | "contrato"
+  | "esocial"
+  | "aso"
+  | "rg"
+  | "ctps"
+  | "cnh"
+  | "outro";
+
+export type StatusDocumentoPessoa = "presente" | "ausente" | "vencido" | "a_vencer";
+
+export interface DocumentoPessoa {
+  id: string;
+  tipo: TipoDocumentoPessoa;
+  rotulo: string;
+  presente: boolean;
+  /** Validade YYYY-MM-DD (ASO, CNH…). */
+  validade?: string;
+  arquivo?: ContratoArquivoPessoa;
+  atualizado_em?: string;
+}
+
+export interface PessoaRH {
+  id: string;
+  nome: string;
+  tipo: TipoPessoaRH;
+  funcao: FuncaoOperacional;
+  /** Preenchido quando funcao === "custom". */
+  funcao_custom?: string;
+  cargo?: string;
+  telefone?: string;
+  cpf?: string;
+  observacao?: string;
+  data_admissao?: string;
+  valor_hora?: number;
+  salario?: number;
+  /** Valor fixo de adiantamento mensal (CLT). Não pode passar de 50% do salário. */
+  adiantamento_valor?: number;
+  chave_pix?: string;
+  contrato_assinado?: boolean;
+  esocial_ok?: boolean;
+  /** Cópia do contrato assinado (PDF ou imagem) — demo em localStorage. */
+  contrato_arquivo?: ContratoArquivoPessoa;
+  /** Checklist de documentos (contrato, ASO, CNH…). */
+  documentos?: DocumentoPessoa[];
+  tem_acesso_sistema: boolean;
+  login?: string;
+  /** Demo local — trocar por hash quando Auth/Supabase existir. */
+  senha?: string;
+  /** Liga ao seletor de papel atual (db.perfis). */
+  perfil_id?: string;
+  papel_sistema?: Papel;
+  permissoes: PermissoesModulos;
+  ativo: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type TipoPagamentoPessoa =
+  | "salario"
+  | "adiantamento"
+  | "vale"
+  | "intermitente_periodo"
+  | "freela_hora"
+  | "freela_servico"
+  | "outro";
+
+export type StatusPagamentoPessoa = "previsto" | "liberado" | "aguardando_conciliacao" | "pago";
+
+export interface PagamentoPessoa {
+  id: string;
+  pessoa_id: string;
+  tipo: TipoPagamentoPessoa;
+  descricao?: string;
+  /** Competência no formato YYYY-MM. */
+  competencia?: string;
+  vencimento: string;
+  valor: number;
+  /** Valor antes de descontos (salário bruto ou diária bruta). */
+  valor_bruto?: number;
+  desconto_consumo?: number;
+  desconto_adiantamento?: number;
+  /** Consumos abatidos neste pagamento. */
+  consumo_ids?: string[];
+  /** Vínculo com convocação intermitente (quando gerado pelo aceite). */
+  convocacao_id?: string;
+  horas?: number;
+  valor_hora?: number;
+  status: StatusPagamentoPessoa;
+  pagamento_data?: string;
+  pagamento_valor?: number;
+  pagamento_banco_conta?: string;
+  pagamento_responsavel?: string;
+  pagamento_observacao?: string;
+  pagamento_informado_em?: string;
+  conciliado_em?: string;
+  conciliado_por?: string;
+  conciliacao_divergente?: boolean;
+  conciliacao_divergencia_motivo?: string;
+  conciliacao_divergencia_em?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type StatusConsumoPessoa = "pendente" | "descontado";
+
+/** Consumo do restaurante pelo funcionário (item a item, com desconto). */
+export interface ConsumoPessoa {
+  id: string;
+  pessoa_id: string;
+  /** Data do consumo YYYY-MM-DD. */
+  data: string;
+  /** Competência YYYY-MM. */
+  competencia: string;
+  descricao: string;
+  quantidade: number;
+  preco_unitario: number;
+  desconto_percentual: number;
+  valor_bruto: number;
+  valor_liquido: number;
+  status: StatusConsumoPessoa;
+  pagamento_id?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface EscalaSlot {
+  id: string;
+  pessoa_id: string;
+  /** Data do plantão YYYY-MM-DD. */
+  data: string;
+  /** HH:MM */
+  hora_inicio: string;
+  /** HH:MM */
+  hora_fim: string;
+  intervalo_min: number;
+  funcao?: string;
+  local?: string;
+  observacao?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type StatusConvocacao =
+  | "rascunho"
+  | "enviada"
+  | "aceita"
+  | "recusada"
+  | "silencio";
+
+export interface ConvocacaoIntermitente {
+  id: string;
+  escala_slot_id: string;
+  pessoa_id: string;
+  /** ISO datetime da convocação. */
+  convocada_em: string;
+  status: StatusConvocacao;
+  respondida_em?: string;
+  texto_mensagem: string;
+  valor_hora: number;
+  horas_brutas: number;
+  horas_pagas: number;
+  valor_estimado: number;
+  antecedencia_ok: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+
 export type TipoBox = "NAO_CLASSIFICADO" | "RESERVA" | "OPERACIONAL" | "QUARENTENA";
 
 export type PosicaoFisicaBox = "FRENTE" | "TRAS" | "ISOLADA" | "OUTRA" | "NAO_INFORMADA";
@@ -61,6 +267,10 @@ export interface Produto {
   unidade_compra_id?: string;
   unidade_uso_id: string;
   fator_conversao: number; // 1 unid. de compra = X unid. de uso
+  /** Unidade do conteúdo da embalagem (peça, ml…) — só orçamento/informação. */
+  subunidade_id?: string;
+  /** Quantas subunidades há em 1 unidade de uso (ex.: 1 pacote = 10000 peças). */
+  quantidade_subunidade?: number;
   fator_correcao?: number;
   rendimento?: number;
   codigo_barras?: string;
@@ -77,6 +287,13 @@ export interface Produto {
   origem_mercadoria?: string;
   cfop_padrao?: string;
   custo_unitario?: number;
+  /** Conta do DRE gerencial (padrão na conferência de NF). */
+  conta_dre_id?: string;
+  /**
+   * Se true, compras deste produto entram no CMV food.
+   * Limpeza/embalagem operacional devem ficar false (vão para custo fixo de operação).
+   */
+  entra_no_cmv?: boolean;
   alergenicos?: FichaTecnicaAlergenicos;
   ativo: boolean;
 }
@@ -100,16 +317,29 @@ export interface FornecedorProduto {
   unidade_compra_id?: string;
   /** 1 unidade do fornecedor = X unidades de uso do ComprasChef. */
   fator_conversao?: number;
+  /** Última conta DRE escolhida neste vínculo (memória da conferência). */
+  conta_dre_id?: string;
   ultimo_preco?: number;
   ultimo_preco_unidade_id?: string;
   atualizado_em?: string;
 }
 
-export type TipoLocal = "freezer" | "geladeira" | "prateleira" | "despensa";
+/** Código do tipo de local (ex.: freezer, geladeira, ou customizado). */
+export type TipoLocal = string;
+
+/** Tipos de local cadastráveis (Cadastros → Locais → Gerenciar tipos). */
+export interface TipoLocalCadastro {
+  id: string;
+  nome: string;
+  /** Identificador estável usado em `Local.tipo`. */
+  codigo: string;
+  ativo: boolean;
+}
 
 export interface Local {
   id: string;
   nome: string;
+  /** Código de um `TipoLocalCadastro`. */
   tipo: TipoLocal;
 }
 
@@ -260,7 +490,12 @@ export interface HistoricoCorrecaoFornecedorNfe {
 /** NF-e mercadoria (55) vs NFS-e serviço municipal. */
 export type TipoNotaFiscal = "nfe" | "nfse";
 
-export type MeioPagamentoNota = "boleto" | "pix";
+/**
+ * Meio esperado/realizado do título.
+ * `plataforma` = já debitado (iFood, Anota AI, etc.).
+ * `dinheiro` / `cartao` = pago à vista no estabelecimento.
+ */
+export type MeioPagamentoNota = "boleto" | "pix" | "plataforma" | "dinheiro" | "cartao";
 
 export interface NotaFiscal {
   id: string;
@@ -296,9 +531,21 @@ export type FormatoBoleto = "codigo_barras_bancario_44" | "linha_digitavel_banca
 
 export type StatusBoleto = "travado" | "liberado" | "aguardando_conciliacao" | "pago" | "suspeito";
 
+/**
+ * Documento fiscal (NF-e/NFS-e) ligado ao pagamento.
+ * PIX/serviço pode existir sem nota (`aguardando_nfse`) e vincular depois.
+ */
+export type StatusDocumentoFiscalPagamento =
+  | "nao_aplicavel"
+  | "aguardando_nfse"
+  | "vinculado";
+
 export interface Boleto {
   id: string;
-  nota_id: string;
+  /** Ausente em cobrança PIX/serviço sem NFS-e ainda. */
+  nota_id?: string;
+  /** Fornecedor direto quando ainda não há nota vinculada. */
+  fornecedor_id?: string;
   numero_parcela?: string;
   valor: number;
   vencimento: string; // ISO date
@@ -309,11 +556,15 @@ export interface Boleto {
   meio_pagamento_esperado?: MeioPagamentoNota;
   documento_boleto_id?: string;
   status_conferencia?: "aguardando_documento" | "conferido" | "em_analise";
+  /** Padrão implícito: vinculado se tem nota_id; aguardando_nfse se PIX sem nota. */
+  status_documento_fiscal?: StatusDocumentoFiscalPagamento;
   conferido_em?: string;
   conferido_por?: string;
   pagamento_data?: string;
   pagamento_valor?: number;
   pagamento_banco_conta?: string;
+  /** Nome/final do cartão quando meio = cartao (ex.: “Visa final 1234”). */
+  pagamento_cartao?: string;
   pagamento_responsavel?: string;
   pagamento_observacao?: string;
   pagamento_informado_em?: string;
@@ -323,8 +574,8 @@ export interface Boleto {
 export interface HistoricoPagamentoBoleto {
   id: string;
   boleto_id: string;
-  nota_id: string;
-  acao: "pagamento_informado";
+  nota_id?: string;
+  acao: "pagamento_informado" | "conciliado";
   status_anterior: StatusBoleto;
   status_novo: StatusBoleto;
   data_pagamento: string;
@@ -361,6 +612,8 @@ export interface ContaPagar {
   origem: OrigemContaPagar;
   documento_id?: string;
   categoria: string;
+  /** Conta do DRE gerencial (despesas fixas / serviços). */
+  conta_dre_id?: string;
   centro_custo?: string;
   data_emissao: string;
   data_vencimento: string;
@@ -394,6 +647,8 @@ export interface DocumentoBoleto {
   tipo_arquivo: string;
   tamanho_bytes: number;
   hash_sha256: string;
+  /** Página do PDF quando o arquivo tem vários boletos (ex.: DANFE + 3 boletos). */
+  pagina_pdf?: number;
   linha_informada?: string;
   codigo_canonico?: string;
   formato_boleto?: Exclude<FormatoBoleto, "invalido">;
@@ -429,6 +684,8 @@ export interface RecebimentoItem {
   qtd_recebida_origem?: number;
   unidade_origem_id?: string;
   fator_conversao_aplicado?: number;
+  /** Conta DRE confirmada na conferência (pode diferir do padrão do produto). */
+  conta_dre_id?: string;
   validade?: string;
   divergencia?: string;
   foto_url?: string;
@@ -543,16 +800,274 @@ export interface IntegracaoEvento {
   criado_em: string;
 }
 
+/** Conta bancária do restaurante (origem dos pagamentos). */
+export type TipoContaBancaria = "corrente" | "poupanca" | "pagamento";
+
+export interface ContaBancariaRestaurante {
+  id: string;
+  /** Nome do banco, ex.: Itaú, Bradesco */
+  banco: string;
+  tipo: TipoContaBancaria;
+  /** Apelido opcional, ex.: “conta principal” */
+  apelido?: string;
+  agencia?: string;
+  /** Número da conta (pode ser só final) */
+  numero?: string;
+  ativa: boolean;
+  /** Preferida ao informar pagamento */
+  padrao?: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+/** Origem do arquivo de extrato bancário. */
+export type OrigemExtrato = "ofx" | "csv";
+
+/** Status da linha persistida do extrato. */
+export type StatusExtratoLinha = "aberta" | "conciliada" | "ignorada";
+
+/** Alvo de conciliação a partir de um débito do extrato. */
+export type AlvoExtratoLinha = "boleto" | "rh";
+
+/** Lote de importação de extrato (OFX/CSV). */
+export interface ExtratoImportacao {
+  id: string;
+  conta_bancaria_id?: string;
+  origem: OrigemExtrato;
+  arquivo_nome: string;
+  importado_em: string;
+  importado_por: string;
+  linhas_total: number;
+  debitos: number;
+}
+
+/** Movimentação persistida do extrato (não efêmera). */
+export interface ExtratoLinha {
+  id: string;
+  importacao_id: string;
+  conta_bancaria_id?: string;
+  /** YYYY-MM-DD */
+  data: string;
+  /** Valor com sinal: negativo = débito (saída). */
+  valor: number;
+  tipo: "debito" | "credito" | "outro";
+  descricao: string;
+  /** ID estável do OFX — usado para dedupe. */
+  fitid?: string;
+  status: StatusExtratoLinha;
+  alvo?: AlvoExtratoLinha;
+  alvo_id?: string;
+  conciliado_em?: string;
+  conciliado_por?: string;
+  observacao?: string;
+}
+
+/** Parâmetros de RH aplicados só após confirmar uma norma. */
+export type ParametroNormaRh = "antecedencia_minima_dias";
+
+export type StatusNormaRh = "pendente" | "aplicada" | "ignorada";
+
+/** Configuração vigente do RH (escala, ponto, normas). */
+export interface ConfigRh {
+  /** Dias corridos mínimos entre convocação e serviço (padrão legal/demo: 3). */
+  antecedencia_minima_dias: number;
+  /** Horas após o fim do plantão para avisar falta de batida (padrão: 24). */
+  aviso_ponto_horas: number;
+  /**
+   * Minutos de folga no espelho antes de marcar atraso / saída antecipada (padrão: 10).
+   * Ex.: entrada 5 min depois do previsto com tolerância 10 → OK.
+   */
+  tolerancia_atraso_minutos: number;
+  /** Conexão com REP Control iD (rede local do restaurante). */
+  control_id?: ConfigControlId;
+  atualizado_em: string;
+}
+
+/** Credenciais / host do REP iDClass (API HTTPS local). */
+export interface ConfigControlId {
+  /** IP ou hostname, sem protocolo (ex.: 192.168.0.129). */
+  host: string;
+  login: string;
+  /** Senha do painel do relógio (mock local — não usar em produção compartilhada). */
+  password: string;
+  /** Usar mode=671 na exportação AFD (recomendado). */
+  mode_671: boolean;
+  ultima_sync_em?: string;
+  /** Último NSR sincronizado (sync incremental). */
+  ultimo_nsr?: number;
+}
+
+/**
+ * Norma/publicação detectada para revisão humana.
+ * Na demo, a “varredura” usa um catálogo interno; em produção viria de DOU/eSocial.
+ */
+export interface NormaRh {
+  id: string;
+  /** Chave estável da publicação (evita duplicar na verificação). */
+  chave_fonte: string;
+  titulo: string;
+  resumo: string;
+  /** Órgão ou fonte (ex.: DOU, eSocial, MTE). */
+  fonte: string;
+  /** URL oficial quando houver. */
+  url_fonte?: string;
+  /** Data da publicação YYYY-MM-DD. */
+  publicado_em: string;
+  /** Vigência sugerida YYYY-MM-DD. */
+  vigencia_em?: string;
+  relevancia: "alta" | "media" | "baixa";
+  status: StatusNormaRh;
+  /** Se preenchido, Confirmar aplica esse parâmetro no config_rh. */
+  parametro?: ParametroNormaRh;
+  valor_proposto?: number | string;
+  valor_anterior?: number | string;
+  detectado_em: string;
+  revisado_em?: string;
+  revisado_por?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type TipoBatidaPonto = "entrada" | "saida" | "intervalo_inicio" | "intervalo_fim";
+
+export type OrigemBatidaPonto = "relogio" | "manual" | "aprovacao";
+
+/** Batida de ponto (relógio, manual ou após aprovação da pendência). */
+export interface BatidaPonto {
+  id: string;
+  pessoa_id: string;
+  /** YYYY-MM-DD */
+  data: string;
+  /** HH:MM */
+  hora: string;
+  tipo: TipoBatidaPonto;
+  origem: OrigemBatidaPonto;
+  /** Vínculo com pendência que gerou a batida (se origem aprovacao). */
+  pendencia_id?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export type TipoFaltaPonto = "entrada" | "saida" | "ambos";
+
+export type StatusPendenciaPonto =
+  | "aguardando_aviso"
+  | "aguardando_funcionario"
+  | "proposta"
+  | "aprovada"
+  | "recusada"
+  | "cancelada";
+
+/**
+ * Falta de digital detectada após o prazo (ex.: 24h).
+ * Funcionário propõe horário; gestor confirma antes de gravar no espelho.
+ */
+export interface PendenciaPonto {
+  id: string;
+  pessoa_id: string;
+  escala_slot_id?: string;
+  /** Dia do plantão YYYY-MM-DD */
+  data: string;
+  tipo_falta: TipoFaltaPonto;
+  horario_previsto_entrada?: string;
+  horario_previsto_saida?: string;
+  status: StatusPendenciaPonto;
+  texto_aviso?: string;
+  aviso_em?: string;
+  proposta_entrada?: string;
+  proposta_saida?: string;
+  proposta_motivo?: string;
+  proposta_em?: string;
+  revisado_em?: string;
+  revisado_por?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+/** Categoria da anotação livre no perfil. */
+export type TipoAnotacaoPessoaRh = "elogio" | "aviso" | "observacao";
+
+/** Nota livre no histórico da pessoa (faltas leves, elogios, observações). */
+export interface AnotacaoPessoaRh {
+  id: string;
+  pessoa_id: string;
+  /** Data de referência YYYY-MM-DD. */
+  data: string;
+  tipo: TipoAnotacaoPessoaRh;
+  texto: string;
+  autor?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+/** Nota formal 1–5 em avaliação periódica. */
+export type NotaAvaliacaoPessoaRh = 1 | 2 | 3 | 4 | 5;
+
+/** Avaliação formal no perfil (ciclos mensais; distinto de anotações livres). */
+export interface AvaliacaoPessoaRh {
+  id: string;
+  pessoa_id: string;
+  /** Competência YYYY-MM. */
+  competencia: string;
+  nota: NotaAvaliacaoPessoaRh;
+  comentario?: string;
+  avaliador?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+
 // Banco completo em memória (camada mock)
 export interface DB {
   perfis: Perfil[];
+  pessoas: PessoaRH[];
+  pagamentos_pessoas: PagamentoPessoa[];
+  consumos_pessoas: ConsumoPessoa[];
+  /** Histórico livre no perfil (anotações). */
+  anotacoes_pessoas?: AnotacaoPessoaRh[];
+  /** Avaliações formais (nota 1–5 por competência). */
+  avaliacoes_pessoas?: AvaliacaoPessoaRh[];
+  escala_slots: EscalaSlot[];
+  convocacoes: ConvocacaoIntermitente[];
+  /** Contas de onde o restaurante paga (origem). */
+  contas_bancarias: ContaBancariaRestaurante[];
+  /** Lotes de importação de extrato bancário. */
+  extrato_importacoes?: ExtratoImportacao[];
+  /** Linhas persistidas do extrato (débitos/créditos). */
+  extrato_linhas?: ExtratoLinha[];
+  /** Parâmetros RH vigentes (normas + ponto). */
+  config_rh?: ConfigRh;
+  /** Fila de normas detectadas para revisão. */
+  normas_rh?: NormaRh[];
+  /** Batidas importadas do relógio ou aprovadas. */
+  batidas_ponto?: BatidaPonto[];
+  /** Faltas de ponto aguardando aviso / proposta / confirmação. */
+  pendencias_ponto?: PendenciaPonto[];
   unidades: Unidade[];
   fornecedores: Fornecedor[];
   categorias_produtos: CategoriaProduto[];
   produtos: Produto[];
+  /**
+   * Uma vez true, a limpeza automática de produtos com nome em
+   * título/minúsculas (mantendo CAIXA ALTA da NF) já foi aplicada.
+   * v2 inclui também produzidos/porcionados (ex.: "4 Queijos G").
+   */
+  produtos_limpeza_nome_titulo_v1?: boolean;
+  produtos_limpeza_nome_titulo_v2?: boolean;
+  /** Uma vez true, reativou produtos desativados pela limpeza de nomes em título. */
+  produtos_restauracao_nome_titulo_v1?: boolean;
+  /**
+   * Uma vez true, reaplicou a limpeza (Title Case fora; CAIXA ALTA fica)
+   * após a restauração indevida.
+   */
+  produtos_limpeza_nome_titulo_v3?: boolean;
+  /** Uma vez true, já sugeriu conta DRE nos produtos que estavam sem classificação. */
+  produtos_sugestao_conta_dre_v1?: boolean;
   produto_codigos_barras: ProdutoCodigoBarras[];
   fornecedor_produtos: FornecedorProduto[];
   locais: Local[];
+  /** Tipos de local cadastráveis (freezer, geladeira, customizados…). */
+  tipos_local?: TipoLocalCadastro[];
   caixas: Caixa[];
   lotes_estoque: LoteEstoque[];
   alocacoes_caixa: AlocacaoCaixa[];
@@ -580,6 +1095,134 @@ export interface DB {
   fichas_tecnicas_versoes?: ReceitaFichaTecnicaVersao[];
   fichas_tecnicas?: FichaTecnica[];
   ficha_tecnica_custo_snapshots?: FichaTecnicaCustoSnapshot[];
+  /** Ids de fichas excluídas pelo usuário (impede reinserção do seed Italian). */
+  fichas_tecnicas_excluidas_ids?: string[];
+  /** Promoção Tour Londrina (CMV de combo separado dos canais). */
+  tour_londrina?: ConfigTourLondrina;
+  /** Fechamentos diários (CMV ponderado, Prime Cost, sobra). */
+  fechamentos_dia?: FechamentoDia[];
+  /** Plano de contas do DRE gerencial. */
+  contas_dre?: ContaDre[];
+  /** Equipamentos / imobilizado (depreciação mensal no DRE). */
+  equipamentos?: Equipamento[];
+}
+
+/** Grupos do DRE gerencial (ordem de apresentação). */
+export type GrupoContaDre =
+  | "receitas"
+  | "deducoes"
+  | "custos_variaveis"
+  | "fixo_operacao"
+  | "fixo_ocupacao"
+  | "fixo_pessoal"
+  | "pessoal_variavel";
+
+export interface ContaDre {
+  id: string;
+  grupo: GrupoContaDre;
+  codigo: string;
+  nome: string;
+  ordem: number;
+  ativo: boolean;
+}
+
+/** Imobilizado: compra não vira despesa; entra a depreciação mensal. */
+export interface Equipamento {
+  id: string;
+  nome: string;
+  valor_aquisicao: number;
+  /** YYYY-MM-DD — início da depreciação. */
+  data_inicio: string;
+  /** Vida útil em meses (depreciação linear = valor ÷ meses). */
+  vida_util_meses: number;
+  /** Conta DRE da depreciação (padrão: operação / depreciação). */
+  conta_dre_id?: string;
+  observacao?: string;
+  ativo: boolean;
+}
+
+export interface LinhaDrePeriodo {
+  conta_id: string;
+  grupo: GrupoContaDre;
+  codigo: string;
+  nome: string;
+  valor: number;
+}
+
+export interface ResultadoDrePeriodo {
+  ano_mes: string;
+  linhas: LinhaDrePeriodo[];
+  totais_por_grupo: Partial<Record<GrupoContaDre, number>>;
+  receita_bruta: number;
+  deducoes: number;
+  receita_liquida: number;
+  custos_variaveis: number;
+  fixo_operacao: number;
+  fixo_ocupacao: number;
+  fixo_pessoal: number;
+  pessoal_variavel: number;
+  depreciacao_mes: number;
+  resultado: number;
+  /** CMV teórico dos fechamentos (vendas × custo da ficha). */
+  cmv_fichas: number;
+  /** Compras do mês de produtos com entra_no_cmv (food). */
+  cmv_compras_food: number;
+}
+
+export type CanalFechamentoDia = "balcao" | "ifood" | "delivery_99";
+
+export interface VendaPratoFechamentoDia {
+  id: string;
+  receita_id: string;
+  nome: string;
+  canal: CanalFechamentoDia;
+  quantidade: number;
+  /** Preço unitário praticado no canal (snapshot). */
+  preco_unitario: number;
+  /** Custo unitário da ficha (snapshot). */
+  custo_unitario: number;
+  /** Taxa % do canal no momento do lançamento. */
+  taxa_percentual: number;
+  /** Taxa fixa por unidade (se houver). */
+  taxa_fixa: number;
+}
+
+export interface MaoObraFechamentoDia {
+  id: string;
+  pessoa_id: string;
+  nome: string;
+  tipo: "fixo_rateado" | "freela";
+  valor: number;
+  horas?: number;
+}
+
+/** Lançamento do dia: vendas + mão de obra + motoboy → índices. */
+export interface FechamentoDia {
+  id: string;
+  /** YYYY-MM-DD */
+  data: string;
+  vendas: VendaPratoFechamentoDia[];
+  mao_obra: MaoObraFechamentoDia[];
+  /** Custo de motoboys / delivery próprio no dia. */
+  custo_motoboy: number;
+  /** Divisor para ratear salário mensal no dia (padrão 30). */
+  dias_rateio_folha: number;
+  observacao?: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface AdicionalTourLondrina {
+  id: string;
+  nome: string;
+  preco_venda: number;
+  custo: number;
+}
+
+export interface ConfigTourLondrina {
+  pratos_elegiveis_ids: string[];
+  adicionais_padrao: AdicionalTourLondrina[];
+  atualizado_em?: string;
 }
 
 export type FichaTecnicaStatus = "rascunho" | "publicada" | "arquivada";
@@ -588,7 +1231,16 @@ export type TipoReceitaFichaTecnica = "prato" | "sub_receita";
 
 export type DificuldadeReceitaFichaTecnica = "facil" | "media" | "dificil";
 
-export type CanalVendaFichaTecnica = "salao" | "balcao" | "delivery_proprio" | "ifood";
+/**
+ * Canais ativos: balcao (= loja/Saipos/salão), ifood, delivery_99.
+ * `salao` e `delivery_proprio` permanecem só por compatibilidade com fichas antigas.
+ */
+export type CanalVendaFichaTecnica =
+  | "balcao"
+  | "ifood"
+  | "delivery_99"
+  | "salao"
+  | "delivery_proprio";
 
 export type TipoMidiaFichaTecnica = "FOTO" | "VIDEO";
 

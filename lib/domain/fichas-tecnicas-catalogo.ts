@@ -110,7 +110,8 @@ export function listarItensCatalogoFichasTecnicas(
         atualizado_em: versaoAtual?.atualizado_em ?? receita.atualizado_em,
       } satisfies ItemCatalogoFichaTecnica;
     })
-    .sort((a, b) => b.atualizado_em.localeCompare(a.atualizado_em) || a.nome.localeCompare(b.nome, "pt-BR"))
+    // Nome primeiro: ordem estável entre SSR e cliente (atualizado_em varia no localStorage).
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR") || b.atualizado_em.localeCompare(a.atualizado_em))
     .map(clonarDefensivo);
 }
 
@@ -134,7 +135,7 @@ export function filtrarItensCatalogoFichasTecnicas(
 }
 
 export function rotuloTipoReceitaFichaTecnica(tipo: TipoReceitaFichaTecnica): string {
-  return tipo === "sub_receita" ? "Sub-receita" : "Prato";
+  return tipo === "sub_receita" ? "Porcionamento" : "Prato finalizado";
 }
 
 export function rotuloStatusFichaTecnica(status: FichaTecnicaStatus): string {

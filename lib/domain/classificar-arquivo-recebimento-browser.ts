@@ -6,10 +6,14 @@ import {
   type TipoArquivoRecebimento,
 } from "./classificar-arquivo-recebimento";
 import {
+  contarPaginasPdf,
   ocrImagemTextoCompleto,
   renderizarPaginaPdfParaCanvas,
 } from "./danfe-captura-browser";
 import { extrairTextoPdfBrowser } from "./folha-recibo-pdf-browser";
+import { identificarCodigoBoletoNoArquivoLocal } from "./identificacao-boleto-browser";
+
+const MAX_PAGINAS_OCR = 3;
 
 export interface ItemLoteClassificado {
   id: string;
@@ -40,13 +44,23 @@ function ehImagem(arquivo: File): boolean {
   return arquivo.type.startsWith("image/") || /\.(jpe?g|png|webp|gif)$/i.test(nome);
 }
 
-async function ocrPdfPrimeiraPagina(buffer: ArrayBuffer): Promise<string> {
-  const canvas = await renderizarPaginaPdfParaCanvas(buffer, 1);
-  return ocrImagemTextoCompleto(canvas);
+async function ocrPdfPaginas(buffer: ArrayBuffer, maxPaginas = MAX_PAGINAS_OCR): Promise<string> {
+  const total = Math.min(Math.max(1, await contarPaginasPdf(buffer)), maxPaginas);
+  const blocos: string[] = [];
+  for (let pagina = 1; pagina <= total; pagina += 1) {
+    try {
+      const canvas = await renderizarPaginaPdfParaCanvas(buffer, pagina, 2.5);
+      const texto = await ocrImagemTextoCompleto(canvas);
+      if (texto.trim()) blocos.push(texto.trim());
+    } catch {
+      // tenta próxima página
+    }
+  }
+  return blocos.join("\n\n");
 }
 
 /**
- * Extrai texto de PDF (camada de texto → OCR se vazio/fraco) para classificação.
+ * Extrai texto de PDF (camada de texto → OCR multi-página se vazio/fraco) para classificação.
  */
 export async function extrairTextoParaClassificacao(
   arquivo: File
@@ -69,10 +83,9 @@ export async function extrairTextoParaClassificacao(
     try {
       texto = await extrairTextoPdfBrowser(buffer);
     } catch (erro) {
-      // segue para OCR
       const msg = erro instanceof Error ? erro.message : "Falha ao ler o PDF.";
       try {
-        const ocr = await ocrPdfPrimeiraPagina(buffer);
+        const ocr = await ocrPdfPaginas(buffer);
         if (ocr.trim()) return { texto: ocr, origem: "ocr" };
         return { texto: "", origem: "vazio", erro: msg };
       } catch (erroOcr) {
@@ -90,12 +103,12 @@ export async function extrairTextoParaClassificacao(
       texto,
     });
 
-    if (preliminar.tipo !== "desconhecido" && texto.trim().length >= 40) {
+    if (preliminar.tipo !== "desconhecido" && preliminar.confianca !== "baixa" && texto.trim().length >= 40) {
       return { texto, origem: "texto" };
     }
 
     try {
-      const ocr = await ocrPdfPrimeiraPagina(buffer);
+      const ocr = await ocrPdfPaginas(buffer);
       const melhor = ocr.trim().length > texto.trim().length ? ocr : texto;
       if (!melhor.trim()) return { texto: "", origem: "vazio" };
       return {
@@ -167,9 +180,57 @@ function montarItemClassificado(
   };
 }
 
+async function tentarBarcodeComoBoleto(
+  arquivo: File,
+  item: ItemLoteClassificado
+): Promise<ItemLoteClassificado> {
+  if (!ehPdf(arquivo) && !ehImagem(arquivo)) return item;
+  if (item.classificacao.tipo === "pdf_boleto" && item.classificacao.confianca === "alta") {
+    return item;
+  }
+  if (
+    item.classificacao.tipo !== "desconhecido" &&
+    item.classificacao.tipo !== "imagem" &&
+    item.classificacao.confianca !== "baixa"
+  ) {
+    return item;
+  }
+
+  try {
+    const resultado = await identificarCodigoBoletoNoArquivoLocal(arquivo, () => false);
+    const valido = resultado.validos[0];
+    if (!valido) return item;
+
+    const classificacao: ResultadoClassificacaoArquivo = {
+      tipo: "pdf_boleto",
+      confianca: "alta",
+      rotulo: "Boleto",
+      detalhe: `Código de barras/linha detectado (${valido.formato.replace(/_/g, " ")}).`,
+      sinais: {
+        pareceXmlNfe: false,
+        temBoletoValido: true,
+        temChaveDanfe: item.classificacao.sinais.temChaveDanfe,
+        pareceNfse: false,
+      },
+      resumo: {
+        ...item.classificacao.resumo,
+        numeroBoleto: valido.valorNormalizado,
+      },
+    };
+
+    return {
+      ...item,
+      classificacao,
+      tipoEscolhido: "pdf_boleto",
+    };
+  } catch {
+    return item;
+  }
+}
+
 /**
  * Lê e classifica vários arquivos em sequência (evita saturar o worker PDF/OCR).
- * PDFs sem texto selecionável passam automaticamente por OCR da 1ª página.
+ * PDFs sem texto passam por OCR (até 3 páginas) e, se ainda fraco, por código de barras.
  */
 export async function classificarArquivosRecebimentoBrowser(
   arquivos: File[],
@@ -185,7 +246,9 @@ export async function classificarArquivosRecebimentoBrowser(
     opcoes?.onProgresso?.(i, total, arquivo.name);
 
     const { texto, origem, erro } = await extrairTextoParaClassificacao(arquivo);
-    itens.push(montarItemClassificado(arquivo, i, texto, origem, erro));
+    let item = montarItemClassificado(arquivo, i, texto, origem, erro);
+    item = await tentarBarcodeComoBoleto(arquivo, item);
+    itens.push(item);
   }
 
   opcoes?.onProgresso?.(total, total, "");
@@ -197,5 +260,7 @@ export async function reclassificarArquivoRecebimentoBrowser(
   arquivo: File
 ): Promise<ItemLoteClassificado> {
   const { texto, origem, erro } = await extrairTextoParaClassificacao(arquivo);
-  return montarItemClassificado(arquivo, Date.now(), texto, origem, erro);
+  let item = montarItemClassificado(arquivo, Date.now(), texto, origem, erro);
+  item = await tentarBarcodeComoBoleto(arquivo, item);
+  return item;
 }

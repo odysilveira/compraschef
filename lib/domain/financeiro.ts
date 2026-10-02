@@ -1,4 +1,4 @@
-import type { ContaPagar, StatusContaPagar } from "../types";
+import type { ContaPagar, StatusContaPagar, StatusPagamentoPessoa } from "../types";
 
 export type FiltroVencimentoConta = "todas" | "hoje" | "proximos_7_dias" | "atrasadas";
 
@@ -130,4 +130,98 @@ export function filtrarContasPagar(contas: ContaPagar[], filtros: FiltrosContaPa
   });
 
   return ordenarContasPagar(filtradas, hoje);
+}
+
+export type AbaFinanceiro = "boletos" | "contas" | "notas" | "extrato";
+
+/** Seção da agenda de boletos (deep link a partir do RH / Painel). */
+export type FilaAgendaFinanceiro = "aguardando" | "pagos" | "liberados" | "suspeitos";
+
+/** Prefixo de observação quando o dono confirma golpe (mesmo critério da agenda). */
+export const MARCA_GOLPE_BOLETO = "GOLPE CONFIRMADO";
+
+export function boletoSuspeitoAtivo(boleto: {
+  status: string;
+  observacao?: string;
+}): boolean {
+  return boleto.status === "suspeito" && !boleto.observacao?.startsWith(MARCA_GOLPE_BOLETO);
+}
+
+export function parseAbaFinanceiro(valor: string | null | undefined): AbaFinanceiro {
+  if (valor === "contas" || valor === "notas" || valor === "boletos" || valor === "extrato") {
+    return valor;
+  }
+  return "boletos";
+}
+
+export function parseFilaAgendaFinanceiro(
+  valor: string | null | undefined
+): FilaAgendaFinanceiro | undefined {
+  if (
+    valor === "aguardando" ||
+    valor === "pagos" ||
+    valor === "liberados" ||
+    valor === "suspeitos"
+  ) {
+    return valor;
+  }
+  return undefined;
+}
+
+/**
+ * Mapeia status de pagamento de RH para a fila da agenda Financeiro.
+ * Previsto (e demais) não têm fila dedicada.
+ */
+export function filaAgendaFinanceiroDeStatusPagamento(
+  status: StatusPagamentoPessoa
+): FilaAgendaFinanceiro | undefined {
+  if (status === "liberado") return "liberados";
+  if (status === "aguardando_conciliacao") return "aguardando";
+  if (status === "pago") return "pagos";
+  return undefined;
+}
+
+/**
+ * Deep link do Financeiro (`?aba=` + `fila` da agenda).
+ * Defaults omitidos da query (aba boletos).
+ */
+export function hrefFinanceiro(opts?: {
+  aba?: AbaFinanceiro;
+  vencimento?: FiltroVencimentoConta;
+  status?: StatusContaPagar | "todos";
+  fila?: FilaAgendaFinanceiro;
+  completude?: string;
+  extratoStatus?: "abertas" | "conciliadas" | "ignoradas" | "todas";
+}): string {
+  const params = new URLSearchParams();
+  const aba = opts?.aba ?? "boletos";
+  if (aba !== "boletos") params.set("aba", aba);
+  if (aba === "contas") {
+    if (opts?.vencimento && opts.vencimento !== "todas") {
+      params.set("vencimento", opts.vencimento);
+    }
+    if (opts?.status && opts.status !== "todos") {
+      params.set("status", opts.status);
+    }
+  }
+  if (aba === "boletos") {
+    if (opts?.vencimento && opts.vencimento !== "todas") {
+      params.set("vencimento", opts.vencimento);
+    }
+    if (opts?.fila) {
+      params.set("fila", opts.fila);
+    }
+  }
+  if (aba === "notas") {
+    if (opts?.completude && opts.completude !== "todas") {
+      params.set("completude", opts.completude);
+    }
+  }
+  if (aba === "extrato") {
+    if (opts?.extratoStatus && opts.extratoStatus !== "abertas") {
+      params.set("status", opts.extratoStatus);
+    }
+  }
+  const q = params.toString();
+  return q ? `/financeiro?${q}` : "/financeiro";
 }

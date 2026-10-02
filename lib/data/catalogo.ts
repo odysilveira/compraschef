@@ -7,6 +7,9 @@ import type { Local, Produto, Unidade } from "@/lib/types";
 
 export const UNIDADE_SACO: Unidade = { id: "un-saco", codigo_externo: "SC", nome: "saco (porção)", sigla: "sc" };
 export const UNIDADE_PACOTE: Unidade = { id: "un-pct", codigo_externo: "PCT", nome: "pacote", sigla: "pct" };
+export const UNIDADE_FRASCO: Unidade = { id: "un-frasco", codigo_externo: "FR", nome: "frasco", sigla: "fr" };
+export const UNIDADE_PECA: Unidade = { id: "un-peca", codigo_externo: "PC", nome: "peça", sigla: "pc" };
+export const UNIDADE_ML: Unidade = { id: "un-ml", codigo_externo: "ML", nome: "mililitro", sigla: "ml" };
 
 export const LOCAL_ESTOQUE_SECO: Local = { id: "loc-estoque-seco", nome: "Estoque seco", tipo: "despensa" };
 export const LOCAL_GELADEIRA_2: Local = { id: "loc-geladeira2", nome: "Geladeira 2", tipo: "geladeira" };

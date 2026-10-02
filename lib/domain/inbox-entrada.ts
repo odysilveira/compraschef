@@ -37,7 +37,7 @@ const ROTULOS: Record<TipoDestinoInbox, string> = {
   xml_nfe: "XML NF-e → Recebimento",
   pdf_danfe: "DANFE → Recebimento",
   pdf_nfse: "NFS-e → Recebimento",
-  pdf_boleto: "Boleto → Financeiro",
+  pdf_boleto: "Boleto → Conferência",
   foto_restaurante: "Foto → OneDrive (restaurante/fotos)",
   documento_restaurante: "Documento → OneDrive (restaurante/documentos)",
   pessoal: "Pessoal → OneDrive (pessoal)",
@@ -92,13 +92,22 @@ export function taxonomiaPastasInbox(): readonly PastaRelativaInbox[] {
 
 /**
  * Mapeia a classificação do lote/recebimento para o destino da inbox.
- * Heurística modesta: imagem → foto; PDF genérico (desconhecido) → documento;
+ * Heurística: imagem → foto; office/PDF genérico → documentos; CNH/RG → pessoal;
  * resto desconhecido → a identificar. Compra preserva o tipo.
  */
 export function mapearTipoRecebimentoParaInbox(
   tipo: TipoArquivoRecebimento,
   opcoes?: { mimeType?: string; nomeArquivo?: string }
 ): TipoDestinoInbox {
+  const mime = (opcoes?.mimeType ?? "").toLowerCase();
+  const nome = opcoes?.nomeArquivo ?? "";
+
+  // Mesmo se a classificação antiga vier como compra, nome pessoal/office vence na inbox.
+  if (pareceDocumentoPessoalNome(nome)) return "pessoal";
+  if (pareceArquivoOfficeNome(nome, mime) && tipo !== "xml_nfe") {
+    return "documento_restaurante";
+  }
+
   switch (tipo) {
     case "xml_nfe":
     case "pdf_danfe":
@@ -108,14 +117,32 @@ export function mapearTipoRecebimentoParaInbox(
     case "imagem":
       return "foto_restaurante";
     case "desconhecido": {
-      const mime = (opcoes?.mimeType ?? "").toLowerCase();
-      const nome = (opcoes?.nomeArquivo ?? "").toLowerCase();
-      const ehPdf = mime.includes("pdf") || nome.endsWith(".pdf");
-      return ehPdf ? "documento_restaurante" : "desconhecido";
+      const ehPdf = mime.includes("pdf") || nome.toLowerCase().endsWith(".pdf");
+      if (ehPdf) return "documento_restaurante";
+      return "desconhecido";
     }
     default:
       return "desconhecido";
   }
+}
+
+function pareceDocumentoPessoalNome(nomeArquivo: string): boolean {
+  const nome = (nomeArquivo || "").toLowerCase();
+  return (
+    /\b(cnh|rg\b|cpf|identidade|habilita|passaporte|titulo[_\s-]?eleitor)/i.test(nome) ||
+    /cnh-?e/.test(nome)
+  );
+}
+
+function pareceArquivoOfficeNome(nomeArquivo: string, mime: string): boolean {
+  const n = (nomeArquivo || "").toLowerCase();
+  if (/\.(docx?|xlsx?|pptx?|odt|ods|rtf|csv)$/i.test(n)) return true;
+  return (
+    mime.includes("officedocument") ||
+    mime.includes("msword") ||
+    mime.includes("ms-excel") ||
+    mime.includes("ms-powerpoint")
+  );
 }
 
 /** Tipo de arquivo de compra compatível com a fila do lote. */
@@ -140,7 +167,7 @@ export function montarSugestaoInbox(tipo: TipoDestinoInbox): SugestaoAcaoInbox {
       canal: "compra",
       fluxoCompra: "financeiro",
       rotulo: ROTULOS[tipo],
-      detalhe: "Leva o PDF ao Financeiro para vincular à parcela.",
+      detalhe: "Leva o PDF à Conferência (boletos sem NF) para parear com a nota.",
     };
   }
   if (tipo === "xml_nfe" || tipo === "pdf_danfe" || tipo === "pdf_nfse") {
@@ -170,4 +197,19 @@ export function sugerirAcaoInboxDeClassificacao(
   opcoes?: { mimeType?: string; nomeArquivo?: string }
 ): SugestaoAcaoInbox {
   return montarSugestaoInbox(mapearTipoRecebimentoParaInbox(tipoRecebimento, opcoes));
+}
+
+/** Ordena a fila da inbox por data de entrada. */
+export function ordenarFilaInboxPorData<T extends { adicionadoEm?: number; id: string }>(
+  itens: T[],
+  recentesPrimeiro: boolean
+): T[] {
+  const copia = [...itens];
+  copia.sort((a, b) => {
+    const ta = a.adicionadoEm ?? 0;
+    const tb = b.adicionadoEm ?? 0;
+    if (ta !== tb) return recentesPrimeiro ? tb - ta : ta - tb;
+    return recentesPrimeiro ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id);
+  });
+  return copia;
 }

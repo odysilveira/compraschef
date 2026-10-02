@@ -2,11 +2,30 @@ import { describe, expect, it } from "vitest";
 import {
   mapearTipoRecebimentoParaInbox,
   montarSugestaoInbox,
+  ordenarFilaInboxPorData,
   sugerirAcaoInboxDeClassificacao,
   taxonomiaPastasInbox,
   tipoRecebimentoDaCompra,
 } from "./inbox-entrada";
+import {
+  faseFilaInbox,
+  itemInboxAberto,
+  rotuloStatusItemInbox,
+} from "./inbox-entrada-idb";
 import { NOME_PASTA_INBOX, PASTAS_INBOX, nomeArquivoSeguro } from "./onedrive-pasta-local";
+
+describe("status da fila na caixa", () => {
+  it("pendente = a classificar; a_conferir fica aberto até concluir", () => {
+    expect(itemInboxAberto("pendente")).toBe(true);
+    expect(itemInboxAberto("a_conferir")).toBe(true);
+    expect(itemInboxAberto("em_andamento")).toBe(true);
+    expect(itemInboxAberto("concluido")).toBe(false);
+    expect(faseFilaInbox("pendente")).toBe("a_classificar");
+    expect(faseFilaInbox("a_conferir")).toBe("a_conferir");
+    expect(rotuloStatusItemInbox("pendente")).toBe("A classificar");
+    expect(rotuloStatusItemInbox("a_conferir")).toBe("A conferir");
+  });
+});
 
 describe("taxonomia OneDrive inbox", () => {
   it("expõe pastas padrão sob ComprasChef-Inbox", () => {
@@ -30,6 +49,7 @@ describe("sugestão caixa de entrada", () => {
       canal: "compra",
       fluxoCompra: "financeiro",
     });
+    expect(montarSugestaoInbox("pdf_boleto").rotulo).toMatch(/Conferência/i);
     expect(montarSugestaoInbox("xml_nfe")).toMatchObject({
       canal: "compra",
       fluxoCompra: "recebimento",
@@ -72,6 +92,17 @@ describe("sugestão caixa de entrada", () => {
       })
     ).toBe("desconhecido");
     expect(mapearTipoRecebimentoParaInbox("pdf_boleto")).toBe("pdf_boleto");
+    expect(
+      mapearTipoRecebimentoParaInbox("pdf_danfe", {
+        nomeArquivo: "CNH-e.pdf.pdf",
+      })
+    ).toBe("pessoal");
+    expect(
+      mapearTipoRecebimentoParaInbox("desconhecido", {
+        nomeArquivo: "Producao_diaria.docx",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      })
+    ).toBe("documento_restaurante");
   });
 
   it("sugerirAcaoInboxDeClassificacao amarra classificação → ação", () => {
@@ -92,5 +123,15 @@ describe("sugestão caixa de entrada", () => {
     const { pastaPadraoEnvioOneDrive } = await import("./inbox-entrada");
     expect(pastaPadraoEnvioOneDrive("pdf_boleto")).toBe("_a-identificar");
     expect(pastaPadraoEnvioOneDrive("foto_restaurante")).toBe("restaurante/fotos");
+  });
+
+  it("ordenarFilaInboxPorData respeita recentes/antigos", () => {
+    const itens = [
+      { id: "a", adicionadoEm: 100 },
+      { id: "b", adicionadoEm: 300 },
+      { id: "c", adicionadoEm: 200 },
+    ];
+    expect(ordenarFilaInboxPorData(itens, true).map((i) => i.id)).toEqual(["b", "c", "a"]);
+    expect(ordenarFilaInboxPorData(itens, false).map((i) => i.id)).toEqual(["a", "c", "b"]);
   });
 });

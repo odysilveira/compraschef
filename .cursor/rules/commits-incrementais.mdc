@@ -1,0 +1,14 @@
+---
+description: Commitar cada modificação importante em commits pequenos e focados
+alwaysApply: true
+---
+
+# Commits incrementais
+
+Ao concluir uma mudança importante e utilizável (feature, correção, salvaguarda), **criar um commit na hora** — não acumular várias frentes num único commit no fim.
+
+- Um tema por commit (ex.: DRE, PIX equipe, CMV, inbox).
+- Mensagem no estilo do repo: `feat(escopo): …` / `fix(escopo): …` (1–2 frases no “porquê”).
+- Só commit sem pedido explícito quando a mudança estiver estável e o usuário já pediu esse ritmo; se houver dúvida, perguntar.
+- Não incluir `.env`, credenciais nem artefatos `.next`.
+- Push só quando o usuário pedir.

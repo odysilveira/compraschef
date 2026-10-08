@@ -214,6 +214,123 @@ export function registrarPagamentoAvistaNota(
   return { sucesso: true, boletos, historicos, erros: [] };
 }
 
+/**
+ * Tira a nota da fila “Notas sem boleto conferido” quando o pagamento já
+ * aconteceu fora do ComprasChef e o meio não é conhecido (ou não importa).
+ * Cria parcela 001 se a nota ainda não tiver título; marca tudo como pago.
+ */
+export function marcarNotaComoJaQuitadaFora(
+  db: DB,
+  notaId: string,
+  opcoes: {
+    dataPagamento?: string;
+    responsavel?: string;
+    observacao?: string;
+    agora?: string;
+    gerarIdParcela?: () => string;
+    gerarIdHistorico?: () => string;
+  } = {}
+): ResultadoPagamentoAvistaNota {
+  const nota = db.notas_fiscais.find((n) => n.id === notaId);
+  if (!nota) {
+    return { sucesso: false, boletos: [], historicos: [], erros: ["Nota fiscal não encontrada."] };
+  }
+
+  if (!listarNotasComBoletoPendente(db).some((n) => n.nota.id === notaId)) {
+    return {
+      sucesso: false,
+      boletos: [],
+      historicos: [],
+      erros: ["Esta nota já não está na fila de conferência."],
+    };
+  }
+
+  const agora = opcoes.agora ?? new Date().toISOString();
+  const dataPagamento =
+    opcoes.dataPagamento && /^\d{4}-\d{2}-\d{2}$/.test(opcoes.dataPagamento)
+      ? opcoes.dataPagamento
+      : agora.slice(0, 10);
+  const responsavel = limparTexto(opcoes.responsavel) || "usuário local";
+  const observacao =
+    limparTexto(opcoes.observacao) ||
+    "Já quitada fora do ComprasChef — meio de pagamento não informado";
+  const bancoConta = "Pago fora do ComprasChef";
+
+  if (!Array.isArray(db.boleto_pagamentos_historico)) {
+    db.boleto_pagamentos_historico = [];
+  }
+
+  let alvos = parcelasPendentesDaNota(db, notaId);
+
+  if (alvos.length === 0) {
+    const valorNota = Number.isFinite(nota.valor_total) && nota.valor_total > 0 ? nota.valor_total : 0;
+    if (!(valorNota > 0)) {
+      return {
+        sucesso: false,
+        boletos: [],
+        historicos: [],
+        erros: ["Nota sem valor — não dá para registrar a quitação."],
+      };
+    }
+    const parcela = criarParcelaAguardandoDocumento(db, {
+      id: opcoes.gerarIdParcela ? opcoes.gerarIdParcela() : `bol-quitada-${Date.now().toString(36)}`,
+      nota_id: nota.id,
+      valor: Number(valorNota.toFixed(2)),
+      vencimento: dataPagamento,
+      cnpj_beneficiario: nota.cnpj_emitente,
+      numero_parcela: "001",
+      meio_pagamento_esperado: "boleto",
+      status: "liberado",
+    });
+    alvos = [parcela];
+  }
+
+  const boletos: Boleto[] = [];
+  const historicos: HistoricoPagamentoBoleto[] = [];
+
+  for (const boleto of alvos) {
+    const statusAnterior = boleto.status;
+    const valorPago =
+      Number.isFinite(boleto.valor) && boleto.valor > 0
+        ? Number(boleto.valor.toFixed(2))
+        : Number((nota.valor_total || 0).toFixed(2));
+
+    boleto.status = "pago";
+    boleto.status_conferencia = "conferido";
+    boleto.status_documento_fiscal = "vinculado";
+    boleto.conferido_em = agora;
+    boleto.conferido_por = responsavel;
+    boleto.pagamento_data = dataPagamento;
+    boleto.pagamento_valor = valorPago;
+    boleto.pagamento_banco_conta = boleto.pagamento_banco_conta || bancoConta;
+    boleto.pagamento_responsavel = responsavel;
+    boleto.pagamento_observacao = observacao;
+    boleto.pagamento_informado_em = agora;
+
+    const historico: HistoricoPagamentoBoleto = {
+      id: opcoes.gerarIdHistorico
+        ? opcoes.gerarIdHistorico()
+        : `bph-quitada-${Date.now().toString(36)}-${boleto.id}`,
+      boleto_id: boleto.id,
+      nota_id: nota.id,
+      acao: "pagamento_informado",
+      status_anterior: statusAnterior,
+      status_novo: "pago",
+      data_pagamento: dataPagamento,
+      valor_pago: valorPago,
+      banco_conta: bancoConta,
+      responsavel,
+      observado_em: agora,
+      observacao,
+    };
+    db.boleto_pagamentos_historico.push(historico);
+    boletos.push(boleto);
+    historicos.push(historico);
+  }
+
+  return { sucesso: true, boletos, historicos, erros: [] };
+}
+
 export function notaAindaPendenteNaConferencia(db: DB, notaId: string): boolean {
   return listarNotasComBoletoPendente(db).some((n) => n.nota.id === notaId);
 }

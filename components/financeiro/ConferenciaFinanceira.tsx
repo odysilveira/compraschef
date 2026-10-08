@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Archive,
   CircleCheckBig,
   Eye,
   FileText,
@@ -54,6 +55,7 @@ import {
 } from "@/lib/domain/pagamento-documento-fiscal";
 import {
   MEIOS_PAGAMENTO_AVISTA,
+  marcarNotaComoJaQuitadaFora,
   registrarPagamentoAvistaNota,
   resumoNotaParaExibicao,
   rotuloMeioPagamentoAvista,
@@ -480,6 +482,36 @@ export default function ConferenciaFinanceira({ onIrParaPagamentos, onImportarBo
     setAvistaCartao("");
     setAvistaObs("");
     setAvistaErro(null);
+  }
+
+  function marcarNotaJaQuitada(notaId: string) {
+    const item = notasPendentes.find((n) => n.nota.id === notaId);
+    if (!item) return;
+    const ok = window.confirm(
+      `Marcar a nota ${item.nota.numero || "—"} (${moeda(item.valorPendente)}) como já quitada fora do ComprasChef?\n\nEla sai desta fila e continua em Notas fiscais. Use quando o pagamento já foi feito e o meio não importa (ou não é conhecido).`
+    );
+    if (!ok) return;
+    setErro(null);
+    setMensagem(null);
+    let falhou: string | null = null;
+    mutate((atual) => {
+      const r = marcarNotaComoJaQuitadaFora(atual, notaId, {
+        gerarIdParcela: () => uid("bol"),
+        gerarIdHistorico: () => uid("bph"),
+      });
+      if (!r.sucesso) falhou = r.erros[0] ?? "Não foi possível marcar a nota como quitada.";
+    });
+    if (falhou) {
+      setErro(falhou);
+      return;
+    }
+    if (notaPareamentoId === notaId) {
+      setNotaPareamentoId(null);
+      setDocumentosPareamentoIds([]);
+    }
+    if (notaDetalheId === notaId) setNotaDetalheId(null);
+    if (notaAvistaId === notaId) setNotaAvistaId(null);
+    setMensagem("Nota marcada como já quitada fora do ComprasChef. Saiu da fila de conferência.");
   }
 
   function fecharPagamentoAvista() {
@@ -1008,6 +1040,13 @@ export default function ConferenciaFinanceira({ onIrParaPagamentos, onImportarBo
                       onClick={() => abrirPagamentoAvista(item.nota.id)}
                     >
                       <Wallet size={14} /> Pago à vista
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secundario inline-flex items-center gap-1 text-xs"
+                      onClick={() => marcarNotaJaQuitada(item.nota.id)}
+                    >
+                      <Archive size={14} /> Já quitada
                     </button>
                   </div>
                 </li>
@@ -1571,6 +1610,13 @@ export default function ConferenciaFinanceira({ onIrParaPagamentos, onImportarBo
                   <PackagePlus size={14} /> Conferir estoque
                 </button>
               )}
+              <button
+                type="button"
+                className="btn-secundario inline-flex items-center gap-1"
+                onClick={() => marcarNotaJaQuitada(notaDetalhe.id)}
+              >
+                <Archive size={14} /> Já quitada
+              </button>
               <button
                 type="button"
                 className="btn-primario inline-flex items-center gap-1"

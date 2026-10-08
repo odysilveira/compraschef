@@ -3,6 +3,7 @@ import type { Boleto, DB, NotaFiscal } from "../types";
 import { seedDB } from "../data/seed";
 import { listarNotasComBoletoPendente } from "./conferencia-nfe-boleto";
 import {
+  marcarNotaComoJaQuitadaFora,
   registrarPagamentoAvistaNota,
   validarDadosPagamentoAvistaNota,
 } from "./pagamento-avista-nota";
@@ -161,6 +162,57 @@ describe("registrarPagamentoAvistaNota", () => {
     expect(r.sucesso).toBe(true);
     expect(r.boletos).toHaveLength(2);
     expect(r.boletos.map((b) => b.pagamento_valor).sort()).toEqual([100, 200]);
+    expect(listarNotasComBoletoPendente(db)).toHaveLength(0);
+  });
+});
+
+describe("marcarNotaComoJaQuitadaFora", () => {
+  it("cria parcela e tira nota sem título da fila", () => {
+    const db = dbBase();
+    db.notas_fiscais = [notaMuffato()];
+
+    const r = marcarNotaComoJaQuitadaFora(db, "nota-muffato", {
+      agora: "2026-09-20T18:00:00.000Z",
+      gerarIdParcela: () => "bol-quitada-1",
+    });
+
+    expect(r.sucesso).toBe(true);
+    expect(r.boletos).toHaveLength(1);
+    expect(r.boletos[0].status).toBe("pago");
+    expect(r.boletos[0].status_conferencia).toBe("conferido");
+    expect(r.boletos[0].pagamento_banco_conta).toBe("Pago fora do ComprasChef");
+    expect(r.boletos[0].pagamento_observacao).toMatch(/meio de pagamento não informado/i);
+    expect(listarNotasComBoletoPendente(db).map((n) => n.nota.id)).not.toContain("nota-muffato");
+  });
+
+  it("quita todas as parcelas pendentes da nota", () => {
+    const db = dbBase();
+    db.notas_fiscais = [notaMuffato({ id: "nota-parc", valor_total: 300 })];
+    db.boletos = [
+      {
+        id: "bol-1",
+        nota_id: "nota-parc",
+        numero_parcela: "001",
+        valor: 100,
+        vencimento: "2026-10-01",
+        status: "liberado",
+        status_conferencia: "aguardando_documento",
+      },
+      {
+        id: "bol-2",
+        nota_id: "nota-parc",
+        numero_parcela: "002",
+        valor: 200,
+        vencimento: "2026-11-01",
+        status: "liberado",
+        status_conferencia: "aguardando_documento",
+      },
+    ];
+
+    const r = marcarNotaComoJaQuitadaFora(db, "nota-parc");
+    expect(r.sucesso).toBe(true);
+    expect(r.boletos).toHaveLength(2);
+    expect(r.boletos.every((b) => b.status === "pago")).toBe(true);
     expect(listarNotasComBoletoPendente(db)).toHaveLength(0);
   });
 });

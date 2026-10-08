@@ -31,7 +31,13 @@ import { VistaNotaEstiloDanfe } from "@/components/financeiro/VistaNotaEstiloDan
 import { calcularValorFinal, criarContaManual, getDB, limparNotasEBoletos, mutate, nomeFornecedor, uid, useDB } from "@/lib/data";
 import { identificarFormatoBoleto, normalizarLinhaBoleto } from "@/lib/domain/boletos";
 import { calcularHashSHA256, receberBoletoContaPagar, validarArquivoDocumentoBoleto } from "@/lib/domain/documentos-boleto";
+import {
+  limitesMesCorrente,
+  limitesProximosMeses,
+  somarBoletosAPagarNoPeriodo,
+} from "@/lib/domain/caixa-pagamentos-periodo";
 import { filtrarContasPagar, resumirContasPagar, type FiltroVencimentoConta } from "@/lib/domain/financeiro";
+import { hojeIsoLocal } from "@/lib/domain/pix-copia-cola";
 import {
   combinarTextosPdfFragmentados,
   identificarCodigoBoletoNoArquivoLocal,
@@ -544,6 +550,8 @@ export default function FinanceiroPage() {
   const [boletoDestaqueId, setBoletoDestaqueId] = useState<string | null>(null);
   const [boletoConciliandoId, setBoletoConciliandoId] = useState<string | null>(null);
   const [confirmouDataBancoConciliacao, setConfirmouDataBancoConciliacao] = useState(false);
+  const [periodoCaixaInicio, setPeriodoCaixaInicio] = useState(() => limitesProximosMeses(3).inicio);
+  const [periodoCaixaFim, setPeriodoCaixaFim] = useState(() => limitesProximosMeses(3).fim);
   const [erroConciliacaoBoleto, setErroConciliacaoBoleto] = useState<string | null>(null);
   const [processandoConciliacaoBoleto, setProcessandoConciliacaoBoleto] = useState(false);
   const inputLinhaRef = useRef<HTMLInputElement | null>(null);
@@ -964,6 +972,23 @@ export default function FinanceiroPage() {
       totais[b.status] += b.valor;
     }
   });
+
+  const mesCorrenteCaixa = useMemo(() => {
+    const { inicio, fim } = limitesMesCorrente();
+    // Mesma base da agenda (Atrasados / Hoje / A vencer), não os travados só da Conferência.
+    return { ...somarBoletosAPagarNoPeriodo(boletosPendentesAgenda, inicio, fim), inicio, fim };
+  }, [boletosPendentesAgenda]);
+
+  const periodoCaixa = useMemo(
+    () => somarBoletosAPagarNoPeriodo(boletosPendentesAgenda, periodoCaixaInicio, periodoCaixaFim),
+    [boletosPendentesAgenda, periodoCaixaInicio, periodoCaixaFim]
+  );
+
+  function aplicarProximosTresMesesCaixa() {
+    const { inicio, fim } = limitesProximosMeses(3);
+    setPeriodoCaixaInicio(inicio);
+    setPeriodoCaixaFim(fim);
+  }
 
   function rotuloDia(iso: string): string {
     const dias = diasAte(iso);
@@ -2141,7 +2166,7 @@ export default function FinanceiroPage() {
             </div>
           ))}
 
-          {/* Totais da semana */}
+          {/* Totais por status */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
             <Card className="py-3">
               <p className="rotulo flex items-center gap-1">
@@ -2172,6 +2197,81 @@ export default function FinanceiroPage() {
                 <TriangleAlert size={13} /> Suspeitos
               </p>
               <p className="text-xl font-bold text-erro">{moeda(totais.suspeito)}</p>
+            </Card>
+          </div>
+
+          {/* Visão de caixa: mesma base da agenda (conferidos), não os travados da Conferência */}
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <Card className="space-y-1 py-3">
+              <p className="rotulo flex items-center gap-1">
+                <CalendarDays size={13} /> A pagar neste mês
+              </p>
+              <p className="text-2xl font-bold text-primaria-escura">{moeda(mesCorrenteCaixa.total)}</p>
+              <p className="text-xs text-slate-500">
+                {mesCorrenteCaixa.quantidade === 0
+                  ? "Nenhum título da agenda com vencimento neste mês"
+                  : [
+                      `${mesCorrenteCaixa.quantidade} título(s)`,
+                      mesCorrenteCaixa.atrasados > 0 ? `${mesCorrenteCaixa.atrasados} atrasado(s)` : null,
+                      mesCorrenteCaixa.vencendoHoje > 0 ? `${mesCorrenteCaixa.vencendoHoje} hoje` : null,
+                      mesCorrenteCaixa.aVencer > 0 ? `${mesCorrenteCaixa.aVencer} a vencer` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Soma da agenda no mês: atrasados (mesmo de mês anterior) + hoje + a vencer até o fim
+                do mês. Títulos só na Conferência não entram.
+              </p>
+            </Card>
+            <Card className="space-y-2 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="rotulo flex items-center gap-1">
+                  <CalendarDays size={13} /> A pagar no período
+                </p>
+                <button
+                  type="button"
+                  className="btn-secundario px-2 py-1 text-xs"
+                  onClick={aplicarProximosTresMesesCaixa}
+                >
+                  Próximos 3 meses
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="mb-0.5 block text-[11px] text-slate-500">De</span>
+                  <input
+                    type="date"
+                    className="campo"
+                    value={periodoCaixaInicio}
+                    max={periodoCaixaFim || undefined}
+                    onChange={(e) => setPeriodoCaixaInicio(e.target.value || hojeIsoLocal())}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-0.5 block text-[11px] text-slate-500">Até</span>
+                  <input
+                    type="date"
+                    className="campo"
+                    value={periodoCaixaFim}
+                    min={periodoCaixaInicio || undefined}
+                    onChange={(e) => setPeriodoCaixaFim(e.target.value || hojeIsoLocal())}
+                  />
+                </label>
+              </div>
+              <p className="text-2xl font-bold text-primaria-escura">{moeda(periodoCaixa.total)}</p>
+              <p className="text-xs text-slate-500">
+                {periodoCaixa.quantidade === 0
+                  ? "Nenhum título da agenda neste intervalo"
+                  : [
+                      `${periodoCaixa.quantidade} título(s)`,
+                      periodoCaixa.atrasados > 0 ? `${periodoCaixa.atrasados} atrasado(s)` : null,
+                      periodoCaixa.vencendoHoje > 0 ? `${periodoCaixa.vencendoHoje} hoje` : null,
+                      periodoCaixa.aVencer > 0 ? `${periodoCaixa.aVencer} a vencer` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+              </p>
             </Card>
           </div>
 

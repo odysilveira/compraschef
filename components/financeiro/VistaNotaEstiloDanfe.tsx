@@ -53,15 +53,6 @@ export function VistaNotaEstiloDanfe({ nota, fornecedorNome }: Props) {
         </div>
       </div>
 
-      {nota.chave_acesso ? (
-        <div className="border-b border-slate-300 px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase text-slate-500">Chave de acesso</p>
-          <p className="break-all font-mono text-[11px] leading-relaxed tracking-wide text-slate-800">
-            {nota.chave_acesso}
-          </p>
-        </div>
-      ) : null}
-
       {nota.tipo === "nfse" && nota.descricao_servico ? (
         <div className="border-b border-slate-300 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase text-slate-500">Descrição do serviço</p>
@@ -129,6 +120,15 @@ export function VistaNotaEstiloDanfe({ nota, fornecedorNome }: Props) {
           ) : null}
         </table>
       </div>
+
+      {nota.chave_acesso ? (
+        <div className="border-t border-slate-300 px-3 py-1.5">
+          <p className="text-[10px] font-semibold uppercase text-slate-400">Chave de acesso</p>
+          <p className="break-all font-mono text-[10px] leading-relaxed text-slate-500">
+            {nota.chave_acesso}
+          </p>
+        </div>
+      ) : null}
 
       <p className="border-t border-slate-300 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-950">
         Esta é uma reconstituição dos dados importados no ComprasChef — não substitui o DANFE/PDF

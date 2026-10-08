@@ -24,7 +24,10 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Badge, Card, Modal } from "@/components/ui";
+import { VistaNotaEstiloDanfe } from "@/components/financeiro/VistaNotaEstiloDanfe";
 import { useDB } from "@/lib/data";
+import { lerNFe, notaFiscalApartirDaNFeLida } from "@/lib/domain/ler-nfe-xml";
+import { moeda } from "@/lib/format";
 import { classificarArquivosRecebimentoBrowser } from "@/lib/domain/classificar-arquivo-recebimento-browser";
 import type { ResultadoClassificacaoArquivo } from "@/lib/domain/classificar-arquivo-recebimento";
 import { calcularHashSHA256 } from "@/lib/domain/documentos-boleto";
@@ -215,12 +218,28 @@ function MiniaturaPreview({ preview }: { preview: PreviewArquivo | undefined }) 
     );
   }
   if (preview.textoXml !== undefined) {
+    const lida = lerNFe(preview.textoXml);
+    if (lida) {
+      return (
+        <div className="flex h-36 w-full flex-col justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-2 sm:h-40 sm:w-36">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">NF-e</p>
+          <p className="truncate text-xs font-semibold text-slate-800" title={lida.emitNome}>
+            {lida.emitNome || "Emitente"}
+          </p>
+          <p className="text-xs text-slate-600">
+            {lida.itens.length} {lida.itens.length === 1 ? "item" : "itens"}
+          </p>
+          <p className="text-sm font-semibold tabular-nums text-slate-900">{moeda(lida.valorTotal)}</p>
+          {lida.numero ? (
+            <p className="text-[10px] text-slate-500">nº {lida.numero}</p>
+          ) : null}
+        </div>
+      );
+    }
     return (
-      <div className="h-36 w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-2 sm:h-40 sm:w-36">
-        <pre className="text-[9px] leading-tight text-slate-600 whitespace-pre-wrap break-all">
-          {preview.textoXml.slice(0, 400)}
-          {preview.textoXml.length > 400 ? "…" : ""}
-        </pre>
+      <div className="flex h-36 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-500 sm:h-40 sm:w-36">
+        <FileText size={28} />
+        <span className="px-2 text-center text-[11px]">XML (não lido)</span>
       </div>
     );
   }
@@ -1361,16 +1380,47 @@ export default function CaixaEntrada() {
 
       <Modal
         aberto={previewModal !== null}
-        titulo={previewModal?.nome ?? "Pré-visualização"}
+        titulo={
+          previewModal?.textoXml !== undefined
+            ? (() => {
+                const lida = lerNFe(previewModal.textoXml);
+                return lida?.numero ? `NF-e nº ${lida.numero}` : "Produtos da nota";
+              })()
+            : (previewModal?.nome ?? "Pré-visualização")
+        }
         onFechar={fecharPreviewModal}
+        tamanho="lg"
       >
         {previewModal && (
           <div className="space-y-3">
             {previewModal.textoXml !== undefined ? (
-              <pre className="max-h-[70vh] overflow-auto rounded-card bg-slate-50 p-3 text-xs text-slate-800">
-                {previewModal.textoXml.slice(0, 80_000)}
-                {previewModal.textoXml.length > 80_000 ? "\n… (truncado)" : ""}
-              </pre>
+              (() => {
+                const lida = lerNFe(previewModal.textoXml);
+                if (!lida) {
+                  return (
+                    <p className="rounded-card border border-destaque bg-destaque-clara px-3 py-2 text-sm text-destaque">
+                      Não consegui ler os produtos deste XML. Confira se é o XML da NF-e.
+                    </p>
+                  );
+                }
+                return (
+                  <>
+                    <VistaNotaEstiloDanfe
+                      nota={notaFiscalApartirDaNFeLida(lida)}
+                      fornecedorNome={lida.emitNome}
+                    />
+                    <details className="rounded-card border border-slate-200 bg-slate-50 px-3 py-2">
+                      <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                        Ver XML bruto
+                      </summary>
+                      <pre className="mt-2 max-h-[40vh] overflow-auto text-xs text-slate-700">
+                        {previewModal.textoXml.slice(0, 80_000)}
+                        {previewModal.textoXml.length > 80_000 ? "\n… (truncado)" : ""}
+                      </pre>
+                    </details>
+                  </>
+                );
+              })()
             ) : ehImagemPreview(previewModal.mime, previewModal.nome) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img

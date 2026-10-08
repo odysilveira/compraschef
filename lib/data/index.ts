@@ -10,7 +10,10 @@ import { seedDB } from "./seed";
 import {
   LOCAL_ESTOQUE_SECO,
   LOCAL_GELADEIRA_2,
+  LOCAL_FREEZER_HORIZONTAL,
+  LOCAL_BALCAO,
   produtosReais,
+  UNIDADE_BAG,
   UNIDADE_FRASCO,
   UNIDADE_ML,
   UNIDADE_PACOTE,
@@ -636,7 +639,14 @@ export function atualizarComNovidades(db: DB): boolean {
       mudou = true;
     }
   }
-  for (const unidadePadrao of [UNIDADE_SACO, UNIDADE_PACOTE, UNIDADE_FRASCO, UNIDADE_PECA, UNIDADE_ML]) {
+  for (const unidadePadrao of [
+    UNIDADE_SACO,
+    UNIDADE_PACOTE,
+    UNIDADE_BAG,
+    UNIDADE_FRASCO,
+    UNIDADE_PECA,
+    UNIDADE_ML,
+  ]) {
     if (!db.unidades.some((u) => u.id === unidadePadrao.id)) {
       db.unidades.push({ ...unidadePadrao });
       mudou = true;
@@ -655,6 +665,18 @@ export function atualizarComNovidades(db: DB): boolean {
   );
   if (!jaTemGeladeira2) {
     db.locais.push({ ...LOCAL_GELADEIRA_2 });
+    mudou = true;
+  }
+  if (!db.locais.some((l) => l.id === LOCAL_FREEZER_HORIZONTAL.id)) {
+    db.locais.push({ ...LOCAL_FREEZER_HORIZONTAL });
+    mudou = true;
+  }
+  if (!db.locais.some((l) => l.id === LOCAL_BALCAO.id)) {
+    db.locais.push({ ...LOCAL_BALCAO });
+    mudou = true;
+  }
+  if (Array.isArray(db.tipos_local) && !db.tipos_local.some((t) => t.codigo === "balcao")) {
+    db.tipos_local.push({ id: "tl-balcao", nome: "Balcão", codigo: "balcao", ativo: true });
     mudou = true;
   }
   for (const produto of produtosReais()) {

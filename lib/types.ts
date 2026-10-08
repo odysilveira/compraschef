@@ -266,11 +266,23 @@ export interface Produto {
   tipo: TipoProduto;
   unidade_compra_id?: string;
   unidade_uso_id: string;
-  fator_conversao: number; // 1 unid. de compra = X unid. de uso
-  /** Unidade do conteúdo da embalagem (peça, ml…) — só orçamento/informação. */
+  /** 1 embalagem de compra = X unidades de uso (CMV/estoque). Ex.: 1 cx = 9 kg. */
+  fator_conversao: number;
+  /**
+   * Unidade interna da embalagem de compra (ex.: bag dentro da caixa).
+   * Com quantidade_subunidade e conteudo_por_subunidade, o fator vira qtd × cada.
+   */
   subunidade_id?: string;
-  /** Quantas subunidades há em 1 unidade de uso (ex.: 1 pacote = 10000 peças). */
+  /**
+   * Quantas unidades internas há em 1 embalagem de compra.
+   * Ex.: caixa com 6 bags → 6.
+   */
   quantidade_subunidade?: number;
+  /**
+   * Quanto de unidade de uso há em 1 unidade interna.
+   * Ex.: 1 bag = 1,5 kg → 1,5.
+   */
+  conteudo_por_subunidade?: number;
   fator_correcao?: number;
   rendimento?: number;
   codigo_barras?: string;
@@ -282,6 +294,8 @@ export interface Produto {
   controla_validade?: boolean;
   validade_padrao_dias?: number;
   fornecedor_padrao_id?: string;
+  /** Local físico sugerido ao encher caixa (freezer, seco, balcão…). */
+  local_padrao_id?: string;
   ncm?: string;
   cest?: string;
   origem_mercadoria?: string;

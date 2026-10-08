@@ -2,7 +2,10 @@ import type { DB } from "@/lib/types";
 import {
   LOCAL_ESTOQUE_SECO,
   LOCAL_GELADEIRA_2,
+  LOCAL_FREEZER_HORIZONTAL,
+  LOCAL_BALCAO,
   produtosReais,
+  UNIDADE_BAG,
   UNIDADE_FRASCO,
   UNIDADE_ML,
   UNIDADE_PACOTE,
@@ -771,6 +774,7 @@ export const seedDB: DB = {
     { id: "un-fd", codigo_externo: "FD", nome: "fardo", sigla: "fd" },
     UNIDADE_SACO,
     UNIDADE_PACOTE,
+    UNIDADE_BAG,
     UNIDADE_FRASCO,
     UNIDADE_PECA,
     UNIDADE_ML,
@@ -907,16 +911,19 @@ export const seedDB: DB = {
     { id: "tl-geladeira", nome: "Geladeira", codigo: "geladeira", ativo: true },
     { id: "tl-prateleira", nome: "Prateleira", codigo: "prateleira", ativo: true },
     { id: "tl-despensa", nome: "Despensa", codigo: "despensa", ativo: true },
+    { id: "tl-balcao", nome: "Balcão", codigo: "balcao", ativo: true },
   ],
 
   locais: [
+    LOCAL_ESTOQUE_SECO,
     { id: "loc-freezer1", nome: "Freezer 1", tipo: "freezer" },
     { id: "loc-freezer2", nome: "Freezer 2", tipo: "freezer" },
+    LOCAL_FREEZER_HORIZONTAL,
     { id: "loc-geladeira1", nome: "Geladeira 1", tipo: "geladeira" },
     LOCAL_GELADEIRA_2,
+    LOCAL_BALCAO,
     { id: "loc-prateleira", nome: "Prateleira seca", tipo: "prateleira" },
     { id: "loc-despensa", nome: "Despensa", tipo: "despensa" },
-    LOCAL_ESTOQUE_SECO,
   ],
 
   caixas: [

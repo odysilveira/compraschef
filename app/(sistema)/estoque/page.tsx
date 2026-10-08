@@ -40,11 +40,17 @@ import {
   lotesPendentesDeAlocacao,
   quantidadePendenteLote,
 } from "@/lib/domain/estoque";
+import {
+  aguardandoCaixaPorProduto,
+  locaisOrdenadosParaVisao,
+  produtosNoLocal,
+  resumoEstoquePorProdutos,
+} from "@/lib/domain/estoque-por-local";
 import { usePapel } from "@/lib/roles";
 import { dataBR, diasAte, qtd, rotuloValidade } from "@/lib/format";
 import type { Caixa, DB, StatusCaixa } from "@/lib/types";
 
-type Aba = "estoque" | "balanco";
+type Aba = "estoque" | "visao" | "balanco";
 
 const ROTULO_STATUS_CAIXA: Record<StatusCaixa, string> = {
   vazia: "vazia",
@@ -95,6 +101,14 @@ function FormEncher({
   const lotesPendentes = lotesPendentesDeAlocacao(db);
   const saldoPendenteSelecionado = lotePendenteId ? quantidadePendenteLote(db, lotePendenteId) : undefined;
 
+  function aplicarLocalPadraoDoProduto(produtoIdEscolhido: string, ajustarValidade: boolean) {
+    const produto = db.produtos.find((p) => p.id === produtoIdEscolhido);
+    const padrao = produto?.local_padrao_id;
+    if (!padrao || !db.locais.some((l) => l.id === padrao)) return;
+    if (ajustarValidade) escolherLocal(padrao);
+    else setLocalId(padrao);
+  }
+
   function escolherLote(id: string) {
     setLotePendenteId(id);
     const lote = db.lotes_estoque.find((l) => l.id === id);
@@ -103,6 +117,8 @@ function FormEncher({
     setQuantidade(quantidadePendenteLote(db, lote.id));
     setEnvase(lote.data_entrada);
     setValidade(lote.validade ?? "");
+    // Mantém validade do lote; só sugere o local padrão do produto.
+    aplicarLocalPadraoDoProduto(lote.produto_id, false);
   }
 
   function escolherProduto(id: string) {
@@ -112,6 +128,7 @@ function FormEncher({
     if (produto?.validade_padrao_dias !== undefined) {
       setValidade(hojeMais(produto.validade_padrao_dias));
     }
+    aplicarLocalPadraoDoProduto(id, true);
   }
 
   function aoLerProduto(codigo: string) {
@@ -409,6 +426,8 @@ export default function EstoquePage() {
   const [filtroTexto, setFiltroTexto] = useState("");
   const [filtroLocal, setFiltroLocal] = useState("");
   const [registrandoProducao, setRegistrandoProducao] = useState(false);
+  const [visaoModo, setVisaoModo] = useState<"geral" | "local">("geral");
+  const [visaoLocalId, setVisaoLocalId] = useState("");
 
   // Balanço
   const [tipoNovoBalanco, setTipoNovoBalanco] = useState<"insumos" | "produzidos">("insumos");
@@ -632,6 +651,19 @@ export default function EstoquePage() {
   const diferencasBalanco = itensBalanco.filter((i) => i.qtd_encontrada !== i.qtd_esperada);
   const caixaConferindo = db.caixas.find((c) => c.id === conferindoCaixaId);
   const lotesPendentes = lotesPendentesDeAlocacao(db);
+  const resumoVisaoGeral = useMemo(() => resumoEstoquePorProdutos(db), [db]);
+  const locaisVisao = useMemo(() => locaisOrdenadosParaVisao(db), [db]);
+  const localVisaoEfetivo = visaoLocalId || locaisVisao[0]?.id || "";
+  const produtosLocalVisao = useMemo(
+    () => (localVisaoEfetivo ? produtosNoLocal(db, localVisaoEfetivo) : []),
+    [db, localVisaoEfetivo]
+  );
+  const aguardandoVisao = useMemo(() => {
+    const mapa = aguardandoCaixaPorProduto(db);
+    return [...mapa.entries()]
+      .map(([produto_id, quantidade]) => ({ produto_id, quantidade }))
+      .sort((a, b) => b.quantidade - a.quantidade);
+  }, [db]);
 
   const resumoBalanco = resumoBalancoId ? db.balancos.find((b) => b.id === resumoBalancoId) : undefined;
   const resumoDiferencas = resumoBalancoId
@@ -643,12 +675,18 @@ export default function EstoquePage() {
       <TituloPagina titulo="Estoque por caixas" />
 
       {/* Abas */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           className={aba === "estoque" ? "btn-primario flex-1" : "btn-secundario flex-1"}
           onClick={() => setAba("estoque")}
         >
-          <Boxes size={18} /> Estoque
+          <Boxes size={18} /> Caixas
+        </button>
+        <button
+          className={aba === "visao" ? "btn-primario flex-1" : "btn-secundario flex-1"}
+          onClick={() => setAba("visao")}
+        >
+          <MapPin size={18} /> Por local
         </button>
         <button
           className={aba === "balanco" ? "btn-primario flex-1" : "btn-secundario flex-1"}
@@ -658,6 +696,137 @@ export default function EstoquePage() {
           {balancoAtivo && <Badge cor="laranja">em andamento</Badge>}
         </button>
       </div>
+
+      {aba === "visao" && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={visaoModo === "geral" ? "btn-primario" : "btn-secundario"}
+              onClick={() => setVisaoModo("geral")}
+            >
+              Visão geral
+            </button>
+            <button
+              type="button"
+              className={visaoModo === "local" ? "btn-primario" : "btn-secundario"}
+              onClick={() => setVisaoModo("local")}
+            >
+              Por local
+            </button>
+          </div>
+
+          {visaoModo === "geral" && (
+            <Card className="space-y-3">
+              <p className="text-sm text-stone-600">
+                Total por produto (lotes) e onde está nas caixas. Saldo aguardando caixa ainda não tem local
+                físico.
+              </p>
+              {resumoVisaoGeral.length === 0 ? (
+                <Vazio mensagem="Nenhum produto com estoque." />
+              ) : (
+                <div className="overflow-x-auto rounded-card border border-stone-200">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
+                      <tr>
+                        <th className="px-3 py-2">Produto</th>
+                        <th className="px-3 py-2">Total</th>
+                        <th className="px-3 py-2">Onde está</th>
+                        <th className="px-3 py-2">Aguardando caixa</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {resumoVisaoGeral.map((r) => (
+                        <tr key={r.produto_id}>
+                          <td className="px-3 py-2 font-medium">{nomeProduto(db, r.produto_id)}</td>
+                          <td className="px-3 py-2 tabular-nums">
+                            {qtd(r.total, siglaUnidadeUso(db, r.produto_id))}
+                          </td>
+                          <td className="px-3 py-2 text-stone-600">
+                            {r.por_local.length === 0
+                              ? "—"
+                              : r.por_local
+                                  .map(
+                                    (l) =>
+                                      `${l.local_nome}: ${qtd(l.quantidade, siglaUnidadeUso(db, r.produto_id))}`
+                                  )
+                                  .join(" · ")}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums">
+                            {r.aguardando_caixa > 0
+                              ? qtd(r.aguardando_caixa, siglaUnidadeUso(db, r.produto_id))
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {visaoModo === "local" && (
+            <>
+              <div className="flex gap-1 overflow-x-auto rounded-card bg-stone-100 p-1">
+                {locaisVisao.map((local) => (
+                  <button
+                    key={local.id}
+                    type="button"
+                    onClick={() => setVisaoLocalId(local.id)}
+                    className={`whitespace-nowrap rounded-card px-3 py-1.5 text-sm font-semibold ${
+                      localVisaoEfetivo === local.id
+                        ? "bg-superficie text-primaria-escura shadow-card"
+                        : "text-stone-600 hover:bg-white"
+                    }`}
+                  >
+                    {local.nome}
+                  </button>
+                ))}
+              </div>
+              <Card className="space-y-3">
+                <p className="font-bold text-primaria-escura">
+                  {nomeLocal(db, localVisaoEfetivo) || "Local"}
+                </p>
+                {produtosLocalVisao.length === 0 ? (
+                  <Vazio mensagem="Nenhum produto neste local." />
+                ) : (
+                  <ul className="divide-y divide-stone-100">
+                    {produtosLocalVisao.map((item) => (
+                      <li key={item.produto_id} className="flex justify-between gap-2 py-2 text-sm">
+                        <span className="font-medium">{nomeProduto(db, item.produto_id)}</span>
+                        <span className="tabular-nums font-semibold">
+                          {qtd(item.quantidade, siglaUnidadeUso(db, item.produto_id))}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+              <Card className="space-y-2">
+                <p className="font-bold text-destaque">Aguardando caixa</p>
+                <p className="text-xs text-stone-500">
+                  Saldo já no estoque (recebimento/produção) sem localização física ainda.
+                </p>
+                {aguardandoVisao.length === 0 ? (
+                  <Vazio mensagem="Nada aguardando distribuição em caixa." />
+                ) : (
+                  <ul className="divide-y divide-stone-100">
+                    {aguardandoVisao.map((item) => (
+                      <li key={item.produto_id} className="flex justify-between gap-2 py-2 text-sm">
+                        <span className="font-medium">{nomeProduto(db, item.produto_id)}</span>
+                        <span className="tabular-nums font-semibold">
+                          {qtd(item.quantidade, siglaUnidadeUso(db, item.produto_id))}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </>
+          )}
+        </div>
+      )}
 
       {aba === "estoque" && (
         <div className="flex flex-wrap gap-2">
@@ -682,19 +851,21 @@ export default function EstoquePage() {
         </Card>
       )}
 
-      {/* Scanner — sempre visível */}
-      <Card>
-        <CodeScanner
-          rotulo={aba === "balanco" && balancoAtivo ? "Escanear caixa do balanço" : "Escanear caixa"}
-          onLeitura={aoLerCodigo}
-        />
-        {qrDesconhecido && (
-          <p className="mt-2 rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
-            Não conheço o código &quot;{qrDesconhecido}&quot;. Confira se é o QR de uma caixa do restaurante
-            (ex.: CXCHEF-003) ou cadastre a caixa primeiro.
-          </p>
-        )}
-      </Card>
+      {/* Scanner — caixas e balanço */}
+      {aba !== "visao" && (
+        <Card>
+          <CodeScanner
+            rotulo={aba === "balanco" && balancoAtivo ? "Escanear caixa do balanço" : "Escanear caixa"}
+            onLeitura={aoLerCodigo}
+          />
+          {qrDesconhecido && (
+            <p className="mt-2 rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
+              Não conheço o código &quot;{qrDesconhecido}&quot;. Confira se é o QR de uma caixa do restaurante
+              (ex.: CXCHEF-003) ou cadastre a caixa primeiro.
+            </p>
+          )}
+        </Card>
+      )}
 
       {aba === "estoque" && (
         <>

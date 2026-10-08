@@ -38,6 +38,7 @@ import {
 } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
 import { converterParaUnidadeUso, precoPorUnidadeUso } from "@/lib/domain/produtos";
+import { aplicarPrecoNotaNoProduto } from "@/lib/domain/produto-precos";
 import { criarLote } from "@/lib/domain/estoque";
 import {
   avaliarCompletudeNotaFiscal,
@@ -425,7 +426,7 @@ export default function RecebimentoPage() {
             criado_em: agora,
             sincronizado: false,
           });
-          // Registra o preço pago no histórico (requisito 34)
+          // Registra o preço pago no histórico (requisito 34) e no cadastro do produto.
           if (item.preco_unitario > 0) {
             d.precos_historico.push({
               id: uid("ph"),
@@ -438,6 +439,14 @@ export default function RecebimentoPage() {
               origem: "nota",
               data: agora.slice(0, 10),
             });
+            const produtoPreco = d.produtos.find((p) => p.id === item.produto_id);
+            if (produtoPreco) {
+              aplicarPrecoNotaNoProduto(
+                produtoPreco,
+                item.preco_unitario,
+                recebidaConvertida.fator > 0 ? recebidaConvertida.fator : produtoPreco.fator_conversao
+              );
+            }
           }
         }
       });

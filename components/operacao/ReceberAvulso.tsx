@@ -14,6 +14,7 @@ import CampoMoeda from "@/components/operacao/CampoMoeda";
 import { estoqueAtual, mutate, nomeFornecedor, nomeProduto, siglaUnidadeUso, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
 import { criarLote } from "@/lib/domain/estoque";
+import { precoEmbalagemDeCustoUso } from "@/lib/domain/produto-precos";
 import {
   identificarDanfeDeArquivo,
   type OrigemIdentificacaoDanfe,
@@ -310,6 +311,15 @@ export default function ReceberAvulso({
             origem: "nota",
             data: hoje,
           });
+          const produtoPreco = d.produtos.find((p) => p.id === item.produtoId);
+          if (produtoPreco) {
+            // No avulso o preço informado já é por unidade de uso.
+            produtoPreco.custo_unitario = item.preco;
+            produtoPreco.preco_embalagem_compra = precoEmbalagemDeCustoUso(
+              item.preco,
+              produtoPreco.fator_conversao
+            );
+          }
         }
       }
 

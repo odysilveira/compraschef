@@ -1,77 +1,31 @@
 "use client";
 
-// Aba Produtos — requisitos 2 e 3 (vínculo fornecedor × produto).
+// Aba Produtos — lista + abre o cadastro completo (ModalCadastroProduto).
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Eraser, Link2, Plus, X } from "lucide-react";
-import CodeScanner from "@/components/scanner/CodeScanner";
-import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
-import { estoqueAtual, mutate, nomeFornecedor, precoMedioHistorico, siglaUnidadeUso, uid, useDB } from "@/lib/data";
-import { podeVerValores, usePapel } from "@/lib/roles";
-import { dataBR, moeda, qtd } from "@/lib/format";
-import type { CategoriaProduto, Produto, TipoProduto, ProdutoCodigoBarras } from "@/lib/types";
-import { associarCategoriasProdutos } from "@/lib/domain/produtos";
+import { useEffect, useRef, useState } from "react";
+import { Eraser, Plus } from "lucide-react";
+import { Badge, Tabela, Vazio } from "@/components/ui";
+import { estoqueAtual, mutate, siglaUnidadeUso, useDB } from "@/lib/data";
+import { qtd } from "@/lib/format";
+import type { Produto } from "@/lib/types";
 import {
   desativarProdutosNomeTitulo,
   listarProdutosNomeTitulo,
 } from "@/lib/domain/produtos-limpeza-nome";
-import { inferirEntraNoCmv } from "@/lib/domain/produto-cmv";
-import {
-  custoUsoDeEmbalagem,
-  precoEmbalagemDeCustoUso,
-} from "@/lib/domain/produto-precos";
 import {
   aplicarSugestaoContaDreProdutos,
   listarProdutosSemContaDre,
   nomeContaSugerida,
   sugerirContaDrePorNome,
 } from "@/lib/domain/sugerir-conta-dre-nome";
-import { SelectContaDre } from "@/components/cadastros/SelectContaDre";
-import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
-
-function produtoVazio(unidadePadraoId: string): Produto {
-  return {
-    id: "",
-    nome: "",
-    tipo: "comprado",
-    unidade_uso_id: unidadePadraoId,
-    fator_conversao: 1,
-    estoque_minimo: 0,
-    controla_lote: false,
-    controla_validade: false,
-    validade_padrao_dias: 30,
-    entra_no_cmv: true,
-    ativo: true,
-  };
-}
+import { BarraBusca, contem } from "./comum";
+import { ModalCadastroProduto, produtoVazio } from "./ModalCadastroProduto";
 
 export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: string } = {}) {
   const db = useDB();
-  const { papel } = usePapel();
-  const mostrarPrecos = podeVerValores(papel);
   const [busca, setBusca] = useState("");
   const [form, setForm] = useState<Produto | null>(null);
-  const [codigoBarrasForm, setCodigoBarrasForm] = useState<ProdutoCodigoBarras[]>([]);
-  const [novoCodigoBarras, setNovoCodigoBarras] = useState("");
-  const [fornecedorParaVincular, setFornecedorParaVincular] = useState("");
-  const [mensagemVinculo, setMensagemVinculo] = useState<string | null>(null);
-  /** Se marcado, o preço digitado vira custo das fichas; senão mantém a média histórica. */
-  const [assumirPrecoComoCusto, setAssumirPrecoComoCusto] = useState(false);
   const produtoAbertoPorUrl = useRef<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (!produtoParaAbrirId) {
-      produtoAbertoPorUrl.current = undefined;
-      return;
-    }
-    // Evita reabrir (e zerar o select de vínculo) a cada atualização do DB.
-    if (produtoAbertoPorUrl.current === produtoParaAbrirId) return;
-    const produto = db.produtos.find((p) => p.id === produtoParaAbrirId);
-    if (produto) {
-      produtoAbertoPorUrl.current = produtoParaAbrirId;
-      abrir(produto);
-    }
-  }, [produtoParaAbrirId, db.produtos]);
 
   const categorias = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
   const candidatosLimpezaNome = listarProdutosNomeTitulo(db);
@@ -86,6 +40,19 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
       return contem(busca, p.nome, p.categoria, p.codigo_externo, p.codigo_barras, codigos);
     })
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+  useEffect(() => {
+    if (!produtoParaAbrirId) {
+      produtoAbertoPorUrl.current = undefined;
+      return;
+    }
+    if (produtoAbertoPorUrl.current === produtoParaAbrirId) return;
+    const produto = db.produtos.find((p) => p.id === produtoParaAbrirId);
+    if (produto) {
+      produtoAbertoPorUrl.current = produtoParaAbrirId;
+      setForm(produto);
+    }
+  }, [produtoParaAbrirId, db.produtos]);
 
   function limparNomesTitulo() {
     const qtde = candidatosLimpezaNome.length;
@@ -135,170 +102,14 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
     setForm(null);
   }
 
-  function alterar(mudanca: Partial<Produto>) {
-    setForm((atual) => (atual ? { ...atual, ...mudanca } : atual));
-  }
-
   function abrir(p: Produto | null) {
-    setAssumirPrecoComoCusto(false);
     if (!p) {
       const categoriaPadrao = categorias.find((c) => c.codigo === "sem-categoria")?.id;
       setForm({ ...produtoVazio(db.unidades[0]?.id ?? ""), categoria_id: categoriaPadrao });
-      setCodigoBarrasForm([]);
-      setNovoCodigoBarras("");
-      setFornecedorParaVincular("");
-      setMensagemVinculo(null);
       return;
     }
-    const codigos = (Array.isArray(db.produto_codigos_barras) ? db.produto_codigos_barras : []).filter((c) => c.produto_id === p.id);
-    const codigoPadrao = codigos.length
-      ? codigos
-      : p.codigo_barras
-      ? [{ id: `pcb-${p.id}`, produto_id: p.id, codigo_barras: p.codigo_barras, principal: true }]
-      : [];
-    const principalCodigo = codigoPadrao.find((c) => c.principal)?.codigo_barras;
-    setFornecedorParaVincular("");
-    setMensagemVinculo(null);
-    // Legado: se só há custo e fator=1, espelha na embalagem; se fator>1 e embalagem vazia,
-    // assume custo antigo era preço da embalagem (caso canudo com uso=pacote).
-    let precoEmbalagem = p.preco_embalagem_compra;
-    let custoUso = p.custo_unitario;
-    const fator = p.fator_conversao > 0 ? p.fator_conversao : 1;
-    if ((precoEmbalagem == null || precoEmbalagem <= 0) && custoUso != null && custoUso > 0) {
-      if (fator === 1) {
-        precoEmbalagem = custoUso;
-      } else {
-        precoEmbalagem = custoUso;
-        custoUso = custoUsoDeEmbalagem(precoEmbalagem, fator);
-      }
-    }
-    setForm({
-      ...p,
-      codigo_barras: principalCodigo ?? p.codigo_barras,
-      preco_embalagem_compra: precoEmbalagem,
-      custo_unitario: custoUso,
-    });
-    setCodigoBarrasForm(codigoPadrao);
-    setNovoCodigoBarras("");
+    setForm(p);
   }
-
-  function salvar(e: FormEvent) {
-    e.preventDefault();
-    if (!form) return;
-    const eraNovo = !form.id;
-    let produtoIdSalvo = form.id || "";
-    let custoSalvo = form.custo_unitario;
-    mutate((banco) => {
-      const categoriaSelecionada = form.categoria_id
-        ? banco.categorias_produtos.find((c) => c.id === form.categoria_id)
-        : undefined;
-      const produtoId = form.id || uid("prod");
-      produtoIdSalvo = produtoId;
-      const codigos = codigoBarrasForm.length
-        ? codigoBarrasForm
-        : form.codigo_barras
-        ? [{ id: `pcb-${produtoId}-${Date.now()}`, produto_id: produtoId, codigo_barras: form.codigo_barras, principal: true }]
-        : [];
-      const principalCodigo = codigos.find((c) => c.principal)?.codigo_barras ?? form.codigo_barras;
-
-      const mediaHistorica = precoMedioHistorico(banco, produtoId);
-      let custoUnitario = form.custo_unitario;
-      // Sem marcar: custo das fichas fica na média histórica (promoção / pico temporário).
-      // Sem histórico, usa o valor digitado normalmente.
-      if (!assumirPrecoComoCusto && mediaHistorica !== undefined) {
-        custoUnitario = Number(mediaHistorica.toFixed(4));
-      }
-      custoSalvo = custoUnitario;
-
-      const produtoParaSalvar = {
-        ...form,
-        categoria: undefined,
-        categoria_id: categoriaSelecionada ? categoriaSelecionada.id : undefined,
-        codigo_barras: principalCodigo,
-        id: produtoId,
-        custo_unitario: custoUnitario,
-      } as Produto;
-      if (form.id) {
-        const i = banco.produtos.findIndex((p) => p.id === form.id);
-        if (i >= 0) banco.produtos[i] = produtoParaSalvar;
-      } else {
-        banco.produtos.push(produtoParaSalvar);
-      }
-
-      if (!Array.isArray(banco.produto_codigos_barras)) banco.produto_codigos_barras = [];
-      banco.produto_codigos_barras = banco.produto_codigos_barras.filter((c) => c.produto_id !== produtoId);
-      if (codigos.length > 0) {
-        const principalExists = codigos.some((c) => c.principal);
-        if (!principalExists) codigos[0].principal = true;
-        for (const codigo of codigos) {
-          banco.produto_codigos_barras.push({
-            id: codigo.id || uid("pcb"),
-            produto_id: produtoId,
-            codigo_barras: codigo.codigo_barras,
-            principal: codigo.principal,
-          });
-        }
-      }
-
-      associarCategoriasProdutos(banco);
-    });
-    // Após salvar (novo ou edição), mantém o modal aberto para vincular fornecedor.
-    setForm({
-      ...form,
-      id: produtoIdSalvo,
-      codigo_barras: form.codigo_barras,
-      custo_unitario: custoSalvo,
-    });
-    setAssumirPrecoComoCusto(false);
-    if (eraNovo) setMensagemVinculo("Produto salvo. Agora você pode vincular o fornecedor.");
-  }
-
-  function excluir() {
-    if (!form?.id) return;
-    if (!window.confirm(`Desativar o produto "${form.nome}"? Ele sai das listas, mas o histórico é mantido.`)) return;
-    mutate((banco) => {
-      const p = banco.produtos.find((x) => x.id === form.id);
-      if (p) p.ativo = false;
-    });
-    setForm(null);
-  }
-
-  function vincularFornecedor(fornecedorIdEscolhido?: string) {
-    const fornecedorId = fornecedorIdEscolhido || fornecedorParaVincular;
-    if (!form?.id || !fornecedorId) return;
-    const produtoId = form.id;
-    mutate((banco) => {
-      if (!Array.isArray(banco.fornecedor_produtos)) banco.fornecedor_produtos = [];
-      const jaExiste = banco.fornecedor_produtos.some(
-        (fp) => fp.produto_id === produtoId && fp.fornecedor_id === fornecedorId
-      );
-      if (!jaExiste) {
-        banco.fornecedor_produtos.push({ id: uid("fp"), fornecedor_id: fornecedorId, produto_id: produtoId });
-      }
-    });
-    setFornecedorParaVincular("");
-    setMensagemVinculo("Fornecedor vinculado.");
-  }
-
-  function desvincularFornecedor(fpId: string, nome: string) {
-    if (!window.confirm(`Desvincular o fornecedor "${nome}" deste produto?`)) return;
-    mutate((banco) => {
-      if (!Array.isArray(banco.fornecedor_produtos)) banco.fornecedor_produtos = [];
-      banco.fornecedor_produtos = banco.fornecedor_produtos.filter((fp) => fp.id !== fpId);
-    });
-  }
-
-  const vinculos = form?.id
-    ? (Array.isArray(db.fornecedor_produtos) ? db.fornecedor_produtos : []).filter(
-        (fp) => fp.produto_id === form.id
-      )
-    : [];
-  const idsJaVinculados = new Set(vinculos.map((fp) => fp.fornecedor_id));
-  const fornecedoresDisponiveis = form?.id
-    ? db.fornecedores
-        .filter((f) => f.ativo !== false && !idsJaVinculados.has(f.id))
-        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
-    : [];
 
   return (
     <div>
@@ -347,13 +158,21 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
                   onClick={() => abrir(p)}
                 >
                   <td className="px-3 py-2.5 font-medium">{p.nome}</td>
-                  <td className="px-3 py-2.5">{categorias.find((c) => c.id === p.categoria_id)?.nome ?? p.categoria ?? "—"}</td>
                   <td className="px-3 py-2.5">
-                    {p.tipo === "comprado" ? <Badge cor="azul">Comprado</Badge> : <Badge cor="verde">Produzido</Badge>}
+                    {categorias.find((c) => c.id === p.categoria_id)?.nome ?? p.categoria ?? "—"}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {p.tipo === "comprado" ? (
+                      <Badge cor="azul">Comprado</Badge>
+                    ) : (
+                      <Badge cor="verde">Produzido</Badge>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2.5">
                     {abaixo ? (
-                      <Badge cor="laranja">{qtd(estoque, sigla)} · abaixo do mínimo</Badge>
+                      <Badge cor="laranja">
+                        {qtd(estoque, sigla)} · abaixo do mínimo
+                      </Badge>
                     ) : (
                       qtd(estoque, sigla)
                     )}
@@ -366,634 +185,11 @@ export function AbaProdutos({ produtoParaAbrirId }: { produtoParaAbrirId?: strin
         </div>
       )}
 
-      <Modal
+      <ModalCadastroProduto
         aberto={form !== null}
-        titulo={form?.id ? "Editar produto" : "Novo produto"}
+        produtoInicial={form}
         onFechar={() => setForm(null)}
-      >
-        {form && (
-          <form onSubmit={salvar} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <Campo rotulo="Nome *">
-                <input
-                  className="campo"
-                  required
-                  value={form.nome}
-                  onChange={(e) => {
-                    const nome = e.target.value;
-                    if (!form.id) {
-                      const contaId = sugerirContaDrePorNome(nome);
-                      alterar({
-                        nome,
-                        conta_dre_id: contaId || undefined,
-                        entra_no_cmv: inferirEntraNoCmv({
-                          nome,
-                          contaDreId: contaId || form.conta_dre_id,
-                          contasDre: db.contas_dre,
-                        }),
-                      });
-                    } else {
-                      alterar({ nome });
-                    }
-                  }}
-                />
-              </Campo>
-            </div>
-            <Campo rotulo="Código no ERP parceiro">
-              <input
-                className="campo"
-                placeholder="ex.: P101"
-                value={form.codigo_externo ?? ""}
-                onChange={(e) => alterar({ codigo_externo: e.target.value || undefined })}
-              />
-            </Campo>
-            <Campo rotulo="Categoria">
-              <select
-                className="campo"
-                value={form.categoria_id ?? ""}
-                onChange={(e) => alterar({ categoria_id: e.target.value || undefined, categoria: undefined })}
-              >
-                {categorias.map((categoria) => (
-                  <option key={categoria.id} value={categoria.id}>
-                    {categoria.nome}
-                  </option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Tipo *">
-              <select
-                className="campo"
-                value={form.tipo}
-                onChange={(e) => alterar({ tipo: e.target.value as TipoProduto })}
-              >
-                <option value="comprado">Comprado</option>
-                <option value="produzido">Produzido na casa</option>
-              </select>
-            </Campo>
-            <Campo rotulo="Código de barras principal">
-              <input
-                className="campo"
-                value={form.codigo_barras ?? ""}
-                onChange={(e) => alterar({ codigo_barras: e.target.value || undefined })}
-              />
-            </Campo>
-            <Campo rotulo="Códigos de barras adicionais">
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,auto]">
-                  <input
-                    className="campo"
-                    placeholder="Adicionar código"
-                    value={novoCodigoBarras}
-                    onChange={(e) => setNovoCodigoBarras(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="btn-secundario"
-                    onClick={() => {
-                      const codigo = novoCodigoBarras.trim();
-                      if (!codigo) return;
-                      setCodigoBarrasForm((atual) =>
-                        atual.some((item) => item.codigo_barras === codigo)
-                          ? atual
-                          : [...atual, { id: uid("pcb"), produto_id: form.id, codigo_barras: codigo, principal: false }]
-                      );
-                      setNovoCodigoBarras("");
-                    }}
-                  >
-                    Adicionar
-                  </button>
-                </div>
-                <CodeScanner
-                  rotulo="Ler código de barras"
-                  onLeitura={(codigo) => {
-                    if (!codigo) return;
-                    setCodigoBarrasForm((atual) =>
-                      atual.some((item) => item.codigo_barras === codigo)
-                        ? atual
-                        : [...atual, { id: uid("pcb"), produto_id: form.id, codigo_barras: codigo, principal: false }]
-                    );
-                  }}
-                />
-                <div className="space-y-2">
-                  {codigoBarrasForm.map((codigo) => (
-                    <div key={codigo.id} className="flex items-center gap-2 rounded-card border border-slate-200 p-2">
-                      <input
-                        type="radio"
-                        name="principal-codigo"
-                        checked={codigo.principal}
-                        onChange={() =>
-                          setCodigoBarrasForm((atual) =>
-                            atual.map((item) => ({ ...item, principal: item.id === codigo.id }))
-                          )
-                        }
-                      />
-                      <span className="flex-1 text-sm">{codigo.codigo_barras}</span>
-                      <button
-                        type="button"
-                        className="btn-perigo px-2 py-1 text-xs"
-                        onClick={() =>
-                          setCodigoBarrasForm((atual) => atual.filter((item) => item.id !== codigo.id))
-                        }
-                      >
-                        Remover
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </Campo>
-            <Campo rotulo="Unidade de compra">
-              <select
-                className="campo"
-                value={form.unidade_compra_id ?? ""}
-                onChange={(e) => alterar({ unidade_compra_id: e.target.value || undefined })}
-              >
-                <option value="">— nenhuma —</option>
-                {db.unidades.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.nome} ({u.sigla})
-                  </option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Unidade de uso *">
-              <select
-                className="campo"
-                required
-                value={form.unidade_uso_id}
-                onChange={(e) => alterar({ unidade_uso_id: e.target.value })}
-              >
-                {db.unidades.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.nome} ({u.sigla})
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-slate-500">
-                Como você consome no dia a dia: canudo = unidade; detergente = frasco (não ml).
-              </p>
-            </Campo>
-            <Campo rotulo="Fator de conversão (compra → uso) *">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                required
-                className="campo"
-                value={form.fator_conversao}
-                onChange={(e) => {
-                  const fator = numOpcional(e.target.value) ?? 1;
-                  const embalagem = form.preco_embalagem_compra;
-                  if (embalagem != null && embalagem > 0 && fator > 0) {
-                    alterar({
-                      fator_conversao: fator,
-                      custo_unitario: custoUsoDeEmbalagem(embalagem, fator),
-                    });
-                  } else if (form.custo_unitario != null && form.custo_unitario > 0 && fator > 0) {
-                    alterar({
-                      fator_conversao: fator,
-                      preco_embalagem_compra: precoEmbalagemDeCustoUso(form.custo_unitario, fator),
-                    });
-                  } else {
-                    alterar({ fator_conversao: fator });
-                  }
-                }}
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                1 embalagem de compra = quantas unidades de uso (ex.: 1 pct = 100 canudos).
-              </p>
-            </Campo>
-            <Campo rotulo="Subunidade (conteúdo)">
-              <select
-                className="campo"
-                value={form.subunidade_id ?? ""}
-                onChange={(e) => {
-                  const id = e.target.value || undefined;
-                  alterar(
-                    id
-                      ? { subunidade_id: id }
-                      : { subunidade_id: undefined, quantidade_subunidade: undefined }
-                  );
-                }}
-              >
-                <option value="">— nenhuma —</option>
-                {db.unidades.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.nome} ({u.sigla})
-                  </option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Qtd. por unidade de uso">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                className="campo"
-                placeholder="ex.: 10000"
-                disabled={!form.subunidade_id}
-                value={form.quantidade_subunidade ?? ""}
-                onChange={(e) => alterar({ quantidade_subunidade: numOpcional(e.target.value) })}
-              />
-            </Campo>
-            <Campo rotulo="Conta DRE">
-              <SelectContaDre
-                db={db}
-                value={form.conta_dre_id}
-                onChange={(id) => {
-                  const entra = inferirEntraNoCmv({
-                    nome: form.nome,
-                    contaDreId: id,
-                    contasDre: db.contas_dre,
-                  });
-                  alterar({ conta_dre_id: id, entra_no_cmv: entra });
-                }}
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                Usada na conferência da NF e no DRE (ex.: Carnes — costela, Material de limpeza).
-              </p>
-            </Campo>
-            <Campo rotulo="Entra no CMV">
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.entra_no_cmv !== false}
-                  onChange={(e) => alterar({ entra_no_cmv: e.target.checked })}
-                />
-                Sim — compras deste produto contam no CMV food
-              </label>
-              <p className="mt-1 text-xs text-slate-500">
-                Desmarque material de limpeza. Descartáveis de venda (canudo, embalagem) podem ficar
-                marcados.
-              </p>
-            </Campo>
-            <Campo rotulo="Fator de correção">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                className="campo"
-                value={form.fator_correcao ?? ""}
-                onChange={(e) => alterar({ fator_correcao: numOpcional(e.target.value) })}
-              />
-            </Campo>
-            <Campo rotulo="Rendimento (%)">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                className="campo"
-                value={form.rendimento ?? ""}
-                onChange={(e) => alterar({ rendimento: numOpcional(e.target.value) })}
-              />
-            </Campo>
-            {mostrarPrecos ? (
-              <>
-                <Campo rotulo="Preço da embalagem (compra / cotação)">
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    className="campo"
-                    placeholder="ex.: 4,90 o pacote"
-                    value={form.preco_embalagem_compra ?? ""}
-                    onChange={(e) => {
-                      const preco = numOpcional(e.target.value);
-                      const fator = form.fator_conversao > 0 ? form.fator_conversao : 1;
-                      if (preco != null && preco > 0) {
-                        alterar({
-                          preco_embalagem_compra: preco,
-                          custo_unitario: custoUsoDeEmbalagem(preco, fator),
-                        });
-                      } else {
-                        alterar({ preco_embalagem_compra: preco });
-                      }
-                    }}
-                  />
-                  <p className="mt-1 text-xs text-slate-500">
-                    Referência da NF e pesquisa de preço na unidade de compra
-                    {form.unidade_compra_id
-                      ? ` (${db.unidades.find((u) => u.id === form.unidade_compra_id)?.sigla ?? "compra"})`
-                      : ""}
-                    .
-                  </p>
-                </Campo>
-                <Campo rotulo="Custo por unidade de uso (CMV / fichas)">
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    className="campo"
-                    placeholder="ex.: 0,049 por canudo"
-                    value={form.custo_unitario ?? ""}
-                    onChange={(e) => {
-                      const custo = numOpcional(e.target.value);
-                      const fator = form.fator_conversao > 0 ? form.fator_conversao : 1;
-                      if (custo != null && custo > 0) {
-                        alterar({
-                          custo_unitario: custo,
-                          preco_embalagem_compra: precoEmbalagemDeCustoUso(custo, fator),
-                        });
-                      } else {
-                        alterar({ custo_unitario: custo });
-                      }
-                    }}
-                  />
-                  <p className="mt-1 text-xs text-slate-500">
-                    Valor usado no CMV e nas fichas, na unidade de uso
-                    {form.unidade_uso_id
-                      ? ` (${db.unidades.find((u) => u.id === form.unidade_uso_id)?.sigla ?? "uso"})`
-                      : ""}
-                    . Calculado automaticamente: embalagem ÷ fator.
-                  </p>
-                </Campo>
-              </>
-            ) : (
-              <Campo rotulo="Preços">
-                <div className="campo h-11 leading-11 text-slate-500">Visível para dono/gerente</div>
-              </Campo>
-            )}
-            <Campo rotulo="Saldo atual">
-              <div className="campo h-11 leading-11 text-slate-700">
-                {form.id ? qtd(estoqueAtual(db, form.id), siglaUnidadeUso(db, form.id)) : "—"}
-              </div>
-            </Campo>
-            <Campo rotulo="Preço médio histórico">
-              <div className="campo h-11 leading-11 text-slate-700">
-                {form.id && precoMedioHistorico(db, form.id) !== undefined
-                  ? moeda(precoMedioHistorico(db, form.id) ?? 0)
-                  : "—"}
-              </div>
-            </Campo>
-            <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-              <label className="flex items-start gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={assumirPrecoComoCusto}
-                  onChange={(e) => setAssumirPrecoComoCusto(e.target.checked)}
-                />
-                <span className="text-sm text-slate-700">
-                  <span className="font-medium">
-                    Assumir o custo por unidade de uso como custo atual das fichas
-                  </span>
-                  <span className="block text-slate-500 mt-0.5">
-                    {assumirPrecoComoCusto
-                      ? "O custo por unidade de uso será gravado nas fichas técnicas (útil em pico ou promoção)."
-                      : form.id && precoMedioHistorico(db, form.id) !== undefined
-                        ? `Desmarcado: o custo das fichas fica na média histórica (${moeda(precoMedioHistorico(db, form.id) ?? 0)}).`
-                        : "Desmarcado: mantém o custo atual / média histórica, sem trocar pelo valor digitado."}
-                  </span>
-                </span>
-              </label>
-            </div>
-            <Campo rotulo="Estoque mínimo (na unid. de uso) *">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                required
-                className="campo"
-                value={form.estoque_minimo}
-                onChange={(e) => alterar({ estoque_minimo: numOpcional(e.target.value) ?? 0 })}
-              />
-            </Campo>
-            <Campo rotulo="Validade padrão (dias)">
-              <input
-                type="number"
-                min={0}
-                className="campo"
-                value={form.validade_padrao_dias ?? ""}
-                onChange={(e) => alterar({ validade_padrao_dias: numOpcional(e.target.value) })}
-              />
-            </Campo>
-            <Campo rotulo="Controla lote">
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.controla_lote ?? false}
-                  onChange={(e) => alterar({ controla_lote: e.target.checked })}
-                />
-                Sim
-              </label>
-            </Campo>
-            <Campo rotulo="Controla validade">
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.controla_validade ?? false}
-                  onChange={(e) => alterar({ controla_validade: e.target.checked })}
-                />
-                Sim
-              </label>
-            </Campo>
-            <Campo rotulo="Ponto de pedido">
-              <input
-                type="number"
-                min={0}
-                className="campo"
-                value={form.ponto_pedido ?? ""}
-                onChange={(e) => alterar({ ponto_pedido: numOpcional(e.target.value) })}
-              />
-            </Campo>
-            <Campo rotulo="Estoque máximo">
-              <input
-                type="number"
-                min={0}
-                className="campo"
-                value={form.estoque_maximo ?? ""}
-                onChange={(e) => alterar({ estoque_maximo: numOpcional(e.target.value) })}
-              />
-            </Campo>
-            <Campo rotulo="Consumo médio mensal">
-              <input
-                type="number"
-                min={0}
-                className="campo"
-                value={form.consumo_medio_mensal ?? ""}
-                onChange={(e) => alterar({ consumo_medio_mensal: numOpcional(e.target.value) })}
-              />
-            </Campo>
-            <Campo rotulo="Fornecedor padrão">
-              <select
-                className="campo"
-                value={form.fornecedor_padrao_id ?? ""}
-                onChange={(e) => alterar({ fornecedor_padrao_id: e.target.value || undefined })}
-              >
-                <option value="">— nenhum —</option>
-                {db.fornecedores.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.nome}
-                  </option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Dados fiscais">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input
-                  className="campo"
-                  placeholder="NCM"
-                  value={form.ncm ?? ""}
-                  onChange={(e) => alterar({ ncm: e.target.value || undefined })}
-                />
-                <input
-                  className="campo"
-                  placeholder="CEST"
-                  value={form.cest ?? ""}
-                  onChange={(e) => alterar({ cest: e.target.value || undefined })}
-                />
-                <input
-                  className="campo"
-                  placeholder="Origem da mercadoria"
-                  value={form.origem_mercadoria ?? ""}
-                  onChange={(e) => alterar({ origem_mercadoria: e.target.value || undefined })}
-                />
-                <input
-                  className="campo"
-                  placeholder="CFOP padrão"
-                  value={form.cfop_padrao ?? ""}
-                  onChange={(e) => alterar({ cfop_padrao: e.target.value || undefined })}
-                />
-              </div>
-            </Campo>
-            <div className="space-y-1 text-xs text-slate-500 sm:col-span-2">
-              {form.unidade_compra_id ? (
-                <p>
-                  1{" "}
-                  {db.unidades.find((u) => u.id === form.unidade_compra_id)?.sigla ?? "compra"} ={" "}
-                  {form.fator_conversao || "?"}{" "}
-                  {db.unidades.find((u) => u.id === form.unidade_uso_id)?.sigla ?? "uso"}
-                  {" "}(compra → uso / estoque).
-                  {mostrarPrecos &&
-                  form.preco_embalagem_compra != null &&
-                  form.preco_embalagem_compra > 0 &&
-                  form.custo_unitario != null
-                    ? ` · ${moeda(form.preco_embalagem_compra)} a embalagem → ${moeda(form.custo_unitario)} por unidade de uso.`
-                    : ""}
-                </p>
-              ) : (
-                <p>Sem unidade de compra: o estoque e o consumo usam só a unidade de uso.</p>
-              )}
-              <p>
-                Ex.: canudo — compra pacote, uso unidade, fator 100, embalagem R$ 4,90 → custo uso R$
-                0,049. Detergente — use frasco (não ml por lavagem); se compra caixa com 12, fator 12.
-              </p>
-              {form.subunidade_id && form.quantidade_subunidade && form.quantidade_subunidade > 0 ? (
-                <p>
-                  1 {db.unidades.find((u) => u.id === form.unidade_uso_id)?.sigla ?? "uso"} ={" "}
-                  {form.quantidade_subunidade.toLocaleString("pt-BR", { maximumFractionDigits: 4 })}{" "}
-                  {db.unidades.find((u) => u.id === form.subunidade_id)?.sigla ?? "sub"}
-                  {mostrarPrecos && form.custo_unitario != null && form.custo_unitario > 0
-                    ? ` · ≈ ${moeda(form.custo_unitario / form.quantidade_subunidade)} por ${
-                        db.unidades.find((u) => u.id === form.subunidade_id)?.sigla ?? "sub"
-                      }`
-                    : ""}
-                  {" "}(conteúdo informativo; CMV/fichas usam a unidade de uso).
-                </p>
-              ) : form.subunidade_id ? (
-                <p>
-                  Informe a quantidade de subunidades em 1 unidade de uso (ex.: 1 frasco = 500 ml —
-                  só rótulo).
-                </p>
-              ) : null}
-            </div>
-
-            {form.id ? (
-              <div className="rounded-card border border-slate-200 p-3 sm:col-span-2">
-                <h2 className="mb-2 text-base">Quem vende este produto</h2>
-                {vinculos.length === 0 ? (
-                  <p className="mb-3 text-sm text-slate-500">Nenhum fornecedor vinculado ainda.</p>
-                ) : (
-                  <ul className="mb-3 divide-y divide-slate-100">
-                    {vinculos.map((fp) => (
-                      <li key={fp.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                        <span className="font-medium">{nomeFornecedor(db, fp.fornecedor_id)}</span>
-                        <span className="flex items-center gap-2">
-                          {mostrarPrecos && (
-                            <span className="text-slate-600">
-                              {fp.ultimo_preco !== undefined ? (
-                                <>
-                                  {moeda(fp.ultimo_preco)}
-                                  {fp.atualizado_em ? (
-                                    <span className="text-xs text-slate-400"> em {dataBR(fp.atualizado_em)}</span>
-                                  ) : null}
-                                </>
-                              ) : (
-                                "sem preço"
-                              )}
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            className="rounded-full p-1 text-slate-400 hover:bg-erro-clara hover:text-erro"
-                            title="Desvincular fornecedor"
-                            aria-label="Desvincular fornecedor"
-                            onClick={() => desvincularFornecedor(fp.id, nomeFornecedor(db, fp.fornecedor_id))}
-                          >
-                            <X size={16} />
-                          </button>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {mensagemVinculo && (
-                  <p className="mb-2 text-sm text-primaria-escura">{mensagemVinculo}</p>
-                )}
-                {fornecedoresDisponiveis.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <select
-                      className="campo flex-1"
-                      value={fornecedorParaVincular}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setFornecedorParaVincular(id);
-                        if (id) vincularFornecedor(id);
-                      }}
-                    >
-                      <option value="">Escolher fornecedor…</option>
-                      {fornecedoresDisponiveis.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.nome}
-                          {f.cnpj ? ` · ${f.cnpj}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn-secundario"
-                      disabled={!fornecedorParaVincular}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        vincularFornecedor();
-                      }}
-                    >
-                      <Link2 size={16} /> Vincular
-                    </button>
-                  </div>
-                )}
-                {fornecedoresDisponiveis.length === 0 && (
-                  <p className="text-xs text-slate-500">
-                    {vinculos.length > 0
-                      ? "Todos os fornecedores ativos já estão vinculados. Cadastre um novo em Cadastros → Fornecedores."
-                      : "Nenhum fornecedor cadastrado ainda. Cadastre em Cadastros → Fornecedores."}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 sm:col-span-2">
-                Salve o produto (botão Salvar) para liberar o vínculo com fornecedores — o formulário
-                permanece aberto.
-              </p>
-            )}
-
-            <div className="sm:col-span-2">
-              <RodapeFormulario onExcluir={form.id ? excluir : undefined} rotuloExcluir="Desativar" />
-            </div>
-          </form>
-        )}
-      </Modal>
+      />
     </div>
   );
 }

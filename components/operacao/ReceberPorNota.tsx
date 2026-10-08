@@ -6,16 +6,15 @@
 // financeiro (boletos liberados se tudo OK) e vínculo com o pedido do fornecedor.
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { ArrowLeft, Building2, CircleCheck, CircleX, FileUp, FlaskConical, PackagePlus, ReceiptText } from "lucide-react";
 import { Badge, Campo, Card, Modal, Vazio } from "@/components/ui";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
-import CodeScanner from "@/components/scanner/CodeScanner";
+import { ResumoProdutoCasado } from "@/components/operacao/ResumoProdutoCasado";
 import { SelectContaDre } from "@/components/cadastros/SelectContaDre";
-import { estoqueAtual, mutate, nomeFornecedor, uid } from "@/lib/data";
+import { ModalCadastroProduto, produtoVazio } from "@/components/cadastros/ModalCadastroProduto";
+import { estoqueAtual, getDB, mutate, nomeFornecedor, uid } from "@/lib/data";
 import { enviarEstoqueTotal } from "@/lib/integracao";
 import { memorizarContaDre, sugerirContaDre } from "@/lib/domain/dre";
-import { inferirEntraNoCmv } from "@/lib/domain/produto-cmv";
 import {
   converterParaUnidadeUso,
   codigoDeBarrasValido,
@@ -24,35 +23,19 @@ import {
   registrarVinculoDaNota,
   unidadePorSigla,
 } from "@/lib/domain/produtos";
+import { aplicarPrecoNotaNoProduto } from "@/lib/domain/produto-precos";
 import {
   localizarNotaFiscalPorChave,
-  normalizarDuplicatasLidas,
   registrarNotaEParcelasIdempotente,
 } from "@/lib/domain/nfe-parcelas";
 import { avaliarCompletudeNfeEntrada } from "@/lib/domain/nfe-completude";
 import { criarLote } from "@/lib/domain/estoque";
+import { lerNFe, type ItemNFeLido, type NotaNFeLida } from "@/lib/domain/ler-nfe-xml";
 import { moeda, dataBR, qtd } from "@/lib/format";
-import type { DB, DuplicataNotaTemporaria, Fornecedor, StatusRecebimento } from "@/lib/types";
+import type { DB, Fornecedor, Produto, StatusRecebimento } from "@/lib/types";
 
-interface ItemNota {
-  indice: number;
-  cProd: string;
-  cEAN: string;
-  xProd: string;
-  uCom: string;
-  qCom: number;
-  vUnCom: number;
-}
-
-interface NotaLida {
-  emitCnpj: string;
-  emitNome: string;
-  numero: string;
-  chave: string;
-  valorTotal: number;
-  duplicatas: DuplicataNotaTemporaria[];
-  itens: ItemNota[];
-}
+type ItemNota = ItemNFeLido;
+type NotaLida = NotaNFeLida;
 
 interface DecisaoItem {
   decisao: "pendente" | "confirmado" | "recusado";
@@ -60,29 +43,6 @@ interface DecisaoItem {
   validade: string;
   produtoId: string; // "" = não reconhecido / ignorar
   contaDreId: string;
-}
-
-interface CadastroProdutoNota {
-  indice: number;
-  nome: string;
-  codigoExterno: string;
-  categoriaId?: string;
-  categoria: string;
-  codigoBarras: string;
-  unidadeCompraId: string;
-  unidadeUsoId: string;
-  fatorConversao: number | "";
-  estoqueMinimo: number | "";
-  validadePadraoDias: number | "";
-  controla_lote?: boolean;
-  controla_validade?: boolean;
-  ncm?: string;
-  cest?: string;
-  origemMercadoria?: string;
-  cfopPadrao?: string;
-  pontoPedido?: number | "";
-  estoqueMaximo?: number | "";
-  consumoMedioMensal?: number | "";
 }
 
 export interface ResultadoNota {
@@ -95,13 +55,13 @@ export interface ResultadoNota {
   avisoRetrabalho?: boolean;
 }
 
-function somenteDigitos(s: string): string {
-  return s.replace(/\D/g, "");
+function somenteDigitos(s?: string | null): string {
+  return String(s ?? "").replace(/\D/g, "");
 }
 
-function formatarCnpj(valor: string): string {
+function formatarCnpj(valor?: string | null): string {
   const n = somenteDigitos(valor).slice(0, 14);
-  if (n.length !== 14) return valor;
+  if (n.length !== 14) return valor ?? "";
   return n.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
 }
 
@@ -118,53 +78,6 @@ function hojeMais(dias: number): string {
   const d = new Date();
   d.setDate(d.getDate() + dias);
   return d.toISOString().slice(0, 10);
-}
-
-/** Lê o XML da NF-e no navegador (DOMParser) e extrai o essencial. */
-function lerNFe(xmlTexto: string): NotaLida | null {
-  try {
-    const doc = new DOMParser().parseFromString(xmlTexto, "text/xml");
-    if (doc.querySelector("parsererror")) return null;
-    const texto = (seletor: string, base: Element | Document = doc) =>
-      base.querySelector(seletor)?.textContent?.trim() ?? "";
-
-    const emit = doc.querySelector("emit");
-    if (!emit) return null;
-
-    const infNFe = doc.querySelector("infNFe");
-    const chave = (infNFe?.getAttribute("Id") ?? "").replace(/^NFe/, "");
-
-    const itens: ItemNota[] = Array.from(doc.querySelectorAll("det")).map((det, indice) => ({
-      indice,
-      cProd: texto("prod > cProd", det),
-      cEAN: texto("prod > cEAN", det),
-      xProd: texto("prod > xProd", det),
-      uCom: texto("prod > uCom", det),
-      qCom: Number(texto("prod > qCom", det)) || 0,
-      vUnCom: Number(texto("prod > vUnCom", det)) || 0,
-    }));
-    if (itens.length === 0) return null;
-
-    const duplicatas = normalizarDuplicatasLidas(
-      Array.from(doc.querySelectorAll("dup")).map((dup) => ({
-        numero_parcela: texto("nDup", dup) || undefined,
-        vencimento: texto("dVenc", dup),
-        valor: Number(texto("vDup", dup)) || 0,
-      }))
-    );
-
-    return {
-      emitCnpj: texto("CNPJ", emit),
-      emitNome: texto("xNome", emit),
-      numero: texto("ide > nNF"),
-      chave,
-      valorTotal: Number(texto("ICMSTot > vNF")) || 0,
-      duplicatas,
-      itens,
-    };
-  } catch {
-    return null;
-  }
 }
 
 /** Identifica sem confundir o cProd do fornecedor com o código do EaseEat. */
@@ -268,9 +181,12 @@ export default function ReceberPorNota({
   const [erro, setErro] = useState<string | null>(null);
   const [alertaCompletude, setAlertaCompletude] = useState<string | null>(null);
   const [fornecedorForm, setFornecedorForm] = useState<Fornecedor | null>(null);
-  const [produtoForm, setProdutoForm] = useState<CadastroProdutoNota | null>(null);
+  const [produtoNota, setProdutoNota] = useState<{
+    indice: number;
+    produto: Produto;
+    modo: "criar" | "editar";
+  } | null>(null);
   const [confirmacaoSemDuplicatas, setConfirmacaoSemDuplicatas] = useState<boolean>(inicial?.semDuplicatasConfirmado ?? false);
-  const router = useRouter();
 
   const fornecedor = nota
     ? db.fornecedores.find((f) => somenteDigitos(f.cnpj) === somenteDigitos(nota.emitCnpj))
@@ -374,135 +290,52 @@ export default function ReceberPorNota({
     const unidadePadrao = unidadeXml?.id ?? db.unidades[0]?.id ?? "";
     const categorias = Array.isArray(db.categorias_produtos) ? db.categorias_produtos : [];
     const categoriaPadrao = categorias.find((c) => c.codigo === "sem-categoria")?.id;
-    setProdutoForm({
+    const ean = codigoDeBarrasValido(item.cEAN) ?? undefined;
+    setProdutoNota({
       indice: item.indice,
-      nome: item.xProd,
-      codigoExterno: "",
-      categoriaId: categoriaPadrao,
-      categoria: "",
-      codigoBarras: codigoDeBarrasValido(item.cEAN) ?? "",
-      unidadeCompraId: unidadePadrao,
-      unidadeUsoId: unidadePadrao,
-      fatorConversao: 1,
-      estoqueMinimo: 0,
-      validadePadraoDias: 30,
-      controla_lote: false,
-      controla_validade: false,
-      ncm: undefined,
-      cest: undefined,
-      origemMercadoria: undefined,
-      cfopPadrao: undefined,
-      pontoPedido: "",
-      estoqueMaximo: "",
-      consumoMedioMensal: "",
+      modo: "criar",
+      produto: {
+        ...produtoVazio(unidadePadrao),
+        nome: item.xProd,
+        categoria_id: categoriaPadrao,
+        codigo_barras: ean,
+        unidade_compra_id: unidadePadrao || undefined,
+        unidade_uso_id: unidadePadrao,
+        conteudo_por_subunidade: 1,
+        preco_embalagem_compra: item.vUnCom > 0 ? item.vUnCom : undefined,
+        fornecedor_padrao_id: fornecedor?.id,
+      },
     });
   }
 
-  function salvarProdutoInterno(): string | undefined {
-    if (!nota || !produtoForm) return undefined;
-    const item = nota.itens.find((i) => i.indice === produtoForm.indice);
-    if (!item) return undefined;
-    const produtoId = uid("prod");
-    const agora = new Date().toISOString();
-    const fatorConversao = typeof produtoForm.fatorConversao === "number" ? produtoForm.fatorConversao : 0;
-    const estoqueMinimo = typeof produtoForm.estoqueMinimo === "number" ? produtoForm.estoqueMinimo : 0;
-    const validadePadraoDias = typeof produtoForm.validadePadraoDias === "number" ? produtoForm.validadePadraoDias : 0;
-    mutate((d) => {
-      d.produtos.push({
-        id: produtoId,
-        codigo_externo: produtoForm.codigoExterno.trim() || undefined,
-        nome: produtoForm.nome.trim(),
-        categoria: undefined,
-        categoria_id: produtoForm.categoriaId || undefined,
-        tipo: "comprado",
-        unidade_compra_id: produtoForm.unidadeCompraId || undefined,
-        unidade_uso_id: produtoForm.unidadeUsoId,
-        fator_conversao: fatorConversao,
-        codigo_barras: produtoForm.codigoBarras.trim() || undefined,
-        estoque_minimo: estoqueMinimo,
-        validade_padrao_dias: validadePadraoDias,
-        controla_lote: produtoForm.controla_lote,
-        controla_validade: produtoForm.controla_validade,
-        ncm: produtoForm.ncm?.trim() || undefined,
-        cest: produtoForm.cest?.trim() || undefined,
-        origem_mercadoria: produtoForm.origemMercadoria?.trim() || undefined,
-        cfop_padrao: produtoForm.cfopPadrao?.trim() || undefined,
-        ponto_pedido: typeof produtoForm.pontoPedido === "number" ? produtoForm.pontoPedido : undefined,
-        estoque_maximo: typeof produtoForm.estoqueMaximo === "number" ? produtoForm.estoqueMaximo : undefined,
-        consumo_medio_mensal:
-          typeof produtoForm.consumoMedioMensal === "number" ? produtoForm.consumoMedioMensal : undefined,
-        entra_no_cmv: inferirEntraNoCmv({
-          nome: produtoForm.nome,
-          contaDreId: produtoForm.contaDreId,
-          contasDre: d.contas_dre,
-        }),
-        ativo: true,
-      });
-      if (!Array.isArray(d.produto_codigos_barras)) {
-        d.produto_codigos_barras = [];
-      }
-      if (produtoForm.codigoBarras.trim()) {
-        d.produto_codigos_barras.push({
-          id: uid("pcb"),
-          produto_id: produtoId,
-          codigo_barras: produtoForm.codigoBarras.trim(),
-          principal: true,
-        });
-      }
-      const fornecedorAtual = d.fornecedores.find(
-        (f) => somenteDigitos(f.cnpj) === somenteDigitos(nota.emitCnpj)
-      );
-      if (fornecedorAtual) {
-        registrarVinculoDaNota(d, {
-          idNovo: uid("fp"),
-          fornecedorId: fornecedorAtual.id,
-          produtoId,
-          codigoFornecedor: item.cProd,
-          ean: item.cEAN,
-          unidadeCompraId: produtoForm.unidadeCompraId || undefined,
-          fatorConversao,
-          ultimoPreco: item.vUnCom,
-          atualizadoEm: agora,
-        });
-      }
+  function abrirEdicaoProduto(item: ItemNota, produtoId: string) {
+    const produto = db.produtos.find((p) => p.id === produtoId);
+    if (!produto) return;
+    setProdutoNota({
+      indice: item.indice,
+      modo: "editar",
+      produto: { ...produto },
     });
-    alterar(item.indice, {
+  }
+
+  function aoSalvarProdutoNota(produtoId: string) {
+    if (!produtoNota) return;
+    const banco = getDB();
+    const produto = banco.produtos.find((p) => p.id === produtoId);
+    const contaAtual = decisoes[produtoNota.indice]?.contaDreId;
+    alterar(produtoNota.indice, {
       produtoId,
-      validade: hojeMais(validadePadraoDias),
-      decisao: "pendente",
-      contaDreId: "",
+      validade: hojeMais(produto?.validade_padrao_dias ?? 30),
+      contaDreId:
+        produto?.conta_dre_id ||
+        contaAtual ||
+        sugerirContaDre(banco, {
+          produtoId,
+          fornecedorId: fornecedor?.id,
+          nomeHint: produto?.nome,
+        }),
     });
-    setProdutoForm(null);
-    return produtoId;
-  }
-
-  function salvarProduto(e: FormEvent) {
-    e.preventDefault();
-    if (!nota || !produtoForm) return;
-    const form = e.currentTarget as HTMLFormElement;
-    if (!form.checkValidity()) {
-      form.reportValidity();
-      return;
-    }
-    salvarProdutoInterno();
-  }
-
-  function salvarECompletarCadastro() {
-    if (!nota || !produtoForm) return;
-    if (
-      !produtoForm.nome.trim() ||
-      !produtoForm.unidadeCompraId ||
-      !produtoForm.unidadeUsoId ||
-      produtoForm.fatorConversao === "" ||
-      produtoForm.estoqueMinimo === "" ||
-      produtoForm.validadePadraoDias === ""
-    ) {
-      return;
-    }
-    const produtoId = salvarProdutoInterno();
-    if (produtoId) {
-      router.push(`/cadastros?aba=produtos&produtoId=${produtoId}`);
-    }
+    setProdutoNota(null);
   }
 
   function finalizar() {
@@ -736,6 +569,14 @@ export default function ReceberPorNota({
               origem: "nota",
               data: hoje,
             });
+            const produtoPreco = d.produtos.find((p) => p.id === dec.produtoId);
+            if (produtoPreco) {
+              aplicarPrecoNotaNoProduto(
+                produtoPreco,
+                item.vUnCom,
+                recebidaConvertida.fator > 0 ? recebidaConvertida.fator : produtoPreco.fator_conversao
+              );
+            }
           }
         }
       }
@@ -931,6 +772,20 @@ export default function ReceberPorNota({
                 </button>
               )}
 
+              {dec.produtoId && !recusado
+                ? (() => {
+                    const produtoCasado = db.produtos.find((p) => p.id === dec.produtoId);
+                    if (!produtoCasado) return null;
+                    return (
+                      <ResumoProdutoCasado
+                        db={db}
+                        produto={produtoCasado}
+                        onEditar={() => abrirEdicaoProduto(item, dec.produtoId)}
+                      />
+                    );
+                  })()
+                : null}
+
               {!recusado && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {dec.produtoId ? (
@@ -1076,250 +931,30 @@ export default function ReceberPorNota({
         )}
       </Modal>
 
-      <Modal aberto={produtoForm !== null} titulo="Cadastrar produto da nota" onFechar={() => setProdutoForm(null)} fecharAoClicarFundo={false}>
-        {produtoForm && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              salvarProduto(e);
-            }}
-            onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-          >
-            <div className="sm:col-span-2">
-              <Campo rotulo="Nome *">
-                <input
-                  className="campo"
-                  required
-                  value={produtoForm.nome}
-                  onChange={(e) => setProdutoForm({ ...produtoForm, nome: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-                />
-              </Campo>
-            </div>
-            <Campo rotulo="Categoria">
-              <select
-                className="campo"
-                value={produtoForm.categoriaId ?? ""}
-                onChange={(e) => setProdutoForm({ ...produtoForm, categoriaId: e.target.value || undefined, categoria: "" })}
-              >
-                {(Array.isArray(db.categorias_produtos) ? db.categorias_produtos : []).map((categoria) => (
-                  <option key={categoria.id} value={categoria.id}>
-                    {categoria.nome}
-                  </option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Código no EaseEat">
-              <input
-                className="campo"
-                placeholder="opcional"
-                value={produtoForm.codigoExterno}
-                onChange={(e) => setProdutoForm({ ...produtoForm, codigoExterno: e.target.value })}
-                onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-              />
-            </Campo>
-            <Campo rotulo="Código de barras">
-              <input
-                className="campo"
-                value={produtoForm.codigoBarras}
-                onChange={(e) => setProdutoForm({ ...produtoForm, codigoBarras: e.target.value })}
-                onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-              />
-            </Campo>
-            {!produtoForm.codigoBarras && (
-              <div className="sm:col-span-2 rounded-card border border-dashed border-slate-300 p-3">
-                <p className="mb-2 text-sm text-slate-600">Se o XML não trouxe um EAN válido, você pode ler o código de barras agora.</p>
-                <CodeScanner
-                  rotulo="Ler código de barras"
-                  onLeitura={(codigo) => setProdutoForm({ ...produtoForm, codigoBarras: codigo })}
-                />
-              </div>
-            )}
-            <Campo rotulo={`Unidade de compra (XML: ${nota.itens.find((i) => i.indice === produtoForm.indice)?.uCom || "—"}) *`}>
-              <select
-                className="campo"
-                required
-                value={produtoForm.unidadeCompraId}
-                onChange={(e) => setProdutoForm({ ...produtoForm, unidadeCompraId: e.target.value })}
-                onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-              >
-                {db.unidades.map((u) => (
-                  <option key={u.id} value={u.id}>{u.nome} ({u.sigla})</option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Unidade de uso no estoque *">
-              <select
-                className="campo"
-                required
-                value={produtoForm.unidadeUsoId}
-                onChange={(e) => setProdutoForm({ ...produtoForm, unidadeUsoId: e.target.value })}
-              >
-                {db.unidades.map((u) => (
-                  <option key={u.id} value={u.id}>{u.nome} ({u.sigla})</option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Fator de conversão *">
-              <input
-                type="number"
-                min="0.000001"
-                step="any"
-                required
-                className="campo"
-                value={produtoForm.fatorConversao}
-                onChange={(e) =>
-                  setProdutoForm({
-                    ...produtoForm,
-                    fatorConversao: e.target.value === "" ? "" : Number(e.target.value),
-                  })
+      {produtoNota && nota && (
+        <ModalCadastroProduto
+          key={`${produtoNota.modo}-${produtoNota.indice}-${produtoNota.produto.id || "novo"}`}
+          aberto
+          produtoInicial={produtoNota.produto}
+          titulo={
+            produtoNota.modo === "editar" ? "Editar produto da nota" : "Cadastrar produto da nota"
+          }
+          onFechar={() => setProdutoNota(null)}
+          onSalvo={aoSalvarProdutoNota}
+          fecharAoSalvar
+          ocultarExcluir
+          vinculoNota={
+            fornecedor
+              ? {
+                  fornecedorId: fornecedor.id,
+                  codigoFornecedor: nota.itens.find((i) => i.indice === produtoNota.indice)?.cProd,
+                  ean: nota.itens.find((i) => i.indice === produtoNota.indice)?.cEAN,
+                  ultimoPreco: nota.itens.find((i) => i.indice === produtoNota.indice)?.vUnCom,
                 }
-              />
-            </Campo>
-            <Campo rotulo="Estoque mínimo *">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                required
-                className="campo"
-                value={produtoForm.estoqueMinimo}
-                onChange={(e) =>
-                  setProdutoForm({
-                    ...produtoForm,
-                    estoqueMinimo: e.target.value === "" ? "" : Number(e.target.value),
-                  })
-                }
-              />
-            </Campo>
-            <Campo rotulo="Validade padrão (dias) *">
-              <input
-                type="number"
-                min={0}
-                required
-                className="campo"
-                value={produtoForm.validadePadraoDias}
-                onChange={(e) =>
-                  setProdutoForm({
-                    ...produtoForm,
-                    validadePadraoDias: e.target.value === "" ? "" : Number(e.target.value),
-                  })
-                }
-              />
-            </Campo>
-            <Campo rotulo="Dados fiscais">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input
-                  className="campo"
-                  placeholder="NCM"
-                  value={produtoForm.ncm ?? ""}
-                  onChange={(e) => setProdutoForm({ ...produtoForm, ncm: e.target.value || undefined })}
-                />
-                <input
-                  className="campo"
-                  placeholder="CEST"
-                  value={produtoForm.cest ?? ""}
-                  onChange={(e) => setProdutoForm({ ...produtoForm, cest: e.target.value || undefined })}
-                />
-                <input
-                  className="campo"
-                  placeholder="Origem da mercadoria"
-                  value={produtoForm.origemMercadoria ?? ""}
-                  onChange={(e) => setProdutoForm({ ...produtoForm, origemMercadoria: e.target.value || undefined })}
-                />
-                <input
-                  className="campo"
-                  placeholder="CFOP padrão"
-                  value={produtoForm.cfopPadrao ?? ""}
-                  onChange={(e) => setProdutoForm({ ...produtoForm, cfopPadrao: e.target.value || undefined })}
-                />
-              </div>
-            </Campo>
-            <Campo rotulo="Controle de lote e validade">
-              <div className="space-y-2">
-                <label className="inline-flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={produtoForm.controla_lote ?? false}
-                    onChange={(e) => setProdutoForm({ ...produtoForm, controla_lote: e.target.checked })}
-                  />
-                  Controla lote
-                </label>
-                <label className="inline-flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={produtoForm.controla_validade ?? false}
-                    onChange={(e) => setProdutoForm({ ...produtoForm, controla_validade: e.target.checked })}
-                  />
-                  Controla validade
-                </label>
-              </div>
-            </Campo>
-            <Campo rotulo="Ponto de pedido">
-              <input
-                type="number"
-                min={0}
-                className="campo"
-                value={produtoForm.pontoPedido ?? ""}
-                onChange={(e) =>
-                  setProdutoForm({
-                    ...produtoForm,
-                    pontoPedido: e.target.value === "" ? "" : Number(e.target.value),
-                  })
-                }
-              />
-            </Campo>
-            <Campo rotulo="Estoque máximo">
-              <input
-                type="number"
-                min={0}
-                className="campo"
-                value={produtoForm.estoqueMaximo ?? ""}
-                onChange={(e) =>
-                  setProdutoForm({
-                    ...produtoForm,
-                    estoqueMaximo: e.target.value === "" ? "" : Number(e.target.value),
-                  })
-                }
-              />
-            </Campo>
-            <Campo rotulo="Consumo médio mensal">
-              <input
-                type="number"
-                min={0}
-                className="campo"
-                value={produtoForm.consumoMedioMensal ?? ""}
-                onChange={(e) =>
-                  setProdutoForm({
-                    ...produtoForm,
-                    consumoMedioMensal: e.target.value === "" ? "" : Number(e.target.value),
-                  })
-                }
-              />
-            </Campo>
-            <p className="text-xs text-slate-500 sm:col-span-2">
-              O código do item no fornecedor ({nota.itens.find((i) => i.indice === produtoForm.indice)?.cProd || "não informado"}) será vinculado automaticamente. O fator indica quantas unidades de uso entram no estoque para cada unidade comprada.
-            </p>
-            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end sm:col-span-2">
-              <button type="button" className="btn-secundario w-full sm:w-auto" onClick={() => setProdutoForm(null)}>
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn-secundario w-full sm:w-auto"
-                onClick={salvarECompletarCadastro}
-              >
-                <PackagePlus size={18} /> Salvar e completar cadastro
-              </button>
-              <button type="submit" className="btn-primario w-full sm:w-auto">
-                <PackagePlus size={18} /> Salvar produto
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

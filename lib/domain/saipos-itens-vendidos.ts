@@ -949,6 +949,10 @@ export function montarTabelas(
   return abas;
 }
 
+/**
+ * Lê datas dd/mm/yyyy nas primeiras linhas do export.
+ * Retorna rótulo de exibição; use `parsePeriodoSaiposRotulo` (arquivo) para ISO.
+ */
 export function lerPeriodo(matriz: unknown[][]): string | null {
   for (let i = 0; i < Math.min(6, matriz.length); i++) {
     const linha = matriz[i] || [];

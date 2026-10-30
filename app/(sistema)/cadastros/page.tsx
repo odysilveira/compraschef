@@ -14,6 +14,7 @@ import { AbaCaixas } from "@/components/cadastros/AbaCaixas";
 import { AbaEquipamentos } from "@/components/cadastros/AbaEquipamentos";
 import { AbaContasDre } from "@/components/cadastros/AbaContasDre";
 import { recuperarBackupDB, temBackupDB, useDB } from "@/lib/data";
+import { exportarCopiaNavegador, importarCopiaNavegador, resumoCopia } from "@/lib/domain/copia-navegador";
 
 type Aba =
   | "fornecedores"
@@ -46,6 +47,7 @@ function CadastrosConteudo() {
   );
   const [temBackup, setTemBackup] = useState(false);
   const [msgBackup, setMsgBackup] = useState<string | null>(null);
+  const [copiando, setCopiando] = useState(false);
 
   useEffect(() => {
     if (abaParam && ABAS.some((item) => item.id === (abaParam as Aba))) {
@@ -72,6 +74,47 @@ function CadastrosConteudo() {
     setTemBackup(temBackupDB());
   }
 
+  async function baixarCopia() {
+    setCopiando(true);
+    setMsgBackup(null);
+    try {
+      const copia = await exportarCopiaNavegador();
+      const arquivo = new Blob([JSON.stringify(copia)], { type: "application/json" });
+      const url = URL.createObjectURL(arquivo);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `compraschef-copia-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setMsgBackup(`Cópia baixada: ${resumoCopia(copia)} Leve o arquivo ao outro computador e use Restaurar cópia.`);
+    } catch (e) {
+      setMsgBackup(e instanceof Error ? e.message : "Falha ao baixar a cópia.");
+    } finally {
+      setCopiando(false);
+    }
+  }
+
+  async function restaurarCopia(arquivo: File | undefined) {
+    if (!arquivo) return;
+    if (
+      !window.confirm(
+        "Substituir notas, produtos e arquivos deste navegador pela cópia escolhida?"
+      )
+    ) {
+      return;
+    }
+    setCopiando(true);
+    setMsgBackup(null);
+    try {
+      const resumo = await importarCopiaNavegador(await arquivo.text());
+      setMsgBackup(`Cópia restaurada: ${resumo} Recarregando…`);
+      window.location.reload();
+    } catch (e) {
+      setMsgBackup(e instanceof Error ? e.message : "Falha ao restaurar a cópia.");
+      setCopiando(false);
+    }
+  }
+
   return (
     <div>
       <TituloPagina
@@ -79,24 +122,45 @@ function CadastrosConteudo() {
         subtitulo="Fornecedores, produtos, unidades, locais, caixas, equipamentos e contas DRE"
       />
 
-      {pareceDemo || temBackup ? (
-        <div className="mb-4 rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          {pareceDemo ? (
-            <p className="mb-2">
-              Este navegador está com a base de <strong>demonstração</strong> (poucos fornecedores e
-              sem produtos em CAIXA ALTA da NF). Se você cadastrou notas noutro Chrome/Edge, abra
-              o mesmo navegador de antes em{" "}
-              <span className="font-mono">localhost:3000</span>.
-            </p>
-          ) : null}
+      <div className="mb-4 rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+        <p>
+          Notas, produtos e PDFs ficam neste navegador. O endereço da Vercel não recebe isso
+          sozinho. Baixe a cópia no computador onde você trabalhou (
+          <span className="font-mono">localhost:3002</span>) e restaure em{" "}
+          <span className="font-mono">compraschef.vercel.app</span>, em Cadastros.
+        </p>
+        {pareceDemo ? (
+          <p className="mt-2">
+            Este endereço ainda está na base de demonstração. Restaure a cópia do outro computador
+            para ver as notas e os produtos de verdade.
+          </p>
+        ) : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className="btn-secundario" disabled={copiando} onClick={() => void baixarCopia()}>
+            {copiando ? "Preparando…" : "Baixar cópia"}
+          </button>
+          <label className={`btn-primario ${copiando ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
+            Restaurar cópia
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              disabled={copiando}
+              onChange={(e) => {
+                const arquivo = e.target.files?.[0];
+                e.target.value = "";
+                void restaurarCopia(arquivo);
+              }}
+            />
+          </label>
           {temBackup ? (
             <button type="button" className="btn-secundario" onClick={restaurarBackup}>
               Restaurar backup automático
             </button>
           ) : null}
-          {msgBackup ? <p className="mt-2 text-xs">{msgBackup}</p> : null}
         </div>
-      ) : null}
+        {msgBackup ? <p className="mt-2 text-xs">{msgBackup}</p> : null}
+      </div>
 
       <div className="mb-5 flex gap-1 overflow-x-auto rounded-card bg-stone-100 p-1">
         {ABAS.map((a) => (

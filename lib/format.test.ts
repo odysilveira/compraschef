@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cnpjBR, dataHoraBR } from "./format";
+import { cnpjBR, dataHoraBR, diasAte, rotuloValidade } from "./format";
 
 describe("formatação de CNPJ", () => {
   it("formata CNPJ com 14 dígitos para o padrão visual brasileiro", () => {
@@ -24,5 +24,21 @@ describe("formatação de data e hora", () => {
   it("retorna traço para data ausente ou inválida", () => {
     expect(dataHoraBR(undefined)).toBe("—");
     expect(dataHoraBR("data-invalida")).toBe("—");
+  });
+});
+
+describe("diasAte / rotuloValidade", () => {
+  const ancora = new Date(2026, 9, 13, 15, 30, 0); // 13/10/2026 local
+
+  it("conta dias civis sem depender do horário", () => {
+    expect(diasAte("2026-10-13", ancora)).toBe(0);
+    expect(diasAte("2026-10-14", ancora)).toBe(1);
+    expect(diasAte("2026-10-12", ancora)).toBe(-1);
+  });
+
+  it("rótulos amigáveis", () => {
+    expect(rotuloValidade("2026-10-14", ancora)).toBe("vence amanhã");
+    expect(rotuloValidade("2026-10-12", ancora)).toBe("venceu ontem");
+    expect(rotuloValidade("2026-10-11", ancora)).toBe("venceu há 2 dias");
   });
 });

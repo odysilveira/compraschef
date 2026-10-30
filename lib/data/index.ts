@@ -744,6 +744,23 @@ export function atualizarComNovidades(db: DB): boolean {
     mudou = true;
   }
 
+  // Convenção F1-R01 / G1-01 / ES-01: migra caixas do seed ainda com CXCHEF-* e injeta novas do seed.
+  for (const semente of seedDB.caixas) {
+    const caixa = db.caixas.find((c) => c.id === semente.id);
+    if (!caixa) {
+      db.caixas.push(structuredClone(semente));
+      mudou = true;
+      continue;
+    }
+    if (/^CXCHEF-/i.test(caixa.qr_code || "")) {
+      caixa.qr_code = semente.qr_code;
+      caixa.numero = semente.numero;
+      caixa.tipo_box = semente.tipo_box;
+      if (semente.local_id) caixa.local_id = semente.local_id;
+      mudou = true;
+    }
+  }
+
   return mudou;
 }
 

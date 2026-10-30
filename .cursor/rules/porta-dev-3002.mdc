@@ -1,0 +1,10 @@
+---
+description: Dev e browser sempre em localhost:3002 (localStorage Saipos)
+alwaysApply: true
+---
+
+# Porta de desenvolvimento
+
+- `npm run dev` e `npm start` usam a porta **3002**.
+- Ao abrir o app no browser, use **http://localhost:3002** (não 3000).
+- O arquivo Saipos e outros dados em `localStorage` são por origem: `3000` ≠ `3002`.

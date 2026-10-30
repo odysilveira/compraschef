@@ -212,6 +212,18 @@ export function aplicarPrecoNotaNoProduto(
 }
 
 /**
+ * Cadastro sem preço de compra nem CMV: mostra o valor desta NF
+ * (unidade comercial, ex. o pacote) e deriva o custo de uso.
+ * Não substitui um preço que o produto já tenha.
+ */
+export function preencherPrecoCompraDaNota(produto: Produto, precoUnidadeCompra?: number): boolean {
+  if (numeroPositivo(produto.preco_embalagem_compra) !== undefined) return false;
+  if (numeroPositivo(produto.custo_unitario) !== undefined) return false;
+  if (precoUnidadeCompra === undefined) return false;
+  return aplicarPrecoNotaNoProduto(produto, precoUnidadeCompra, produto.fator_conversao);
+}
+
+/**
  * Completa preço de embalagem ausente.
  * Com fator > 1, assume custo legado = preço da embalagem (não custo × fator).
  */

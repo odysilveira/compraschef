@@ -168,3 +168,5 @@ export function Tabela({ cabecalho, children }: { cabecalho: string[]; children:
     </div>
   );
 }
+
+export { RotuloValidade } from "./ui/RotuloValidade";

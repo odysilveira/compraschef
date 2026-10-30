@@ -16,7 +16,7 @@ import {
   Timer,
   TriangleAlert,
 } from "lucide-react";
-import { Badge, Campo, Card, Modal, TituloPagina, Vazio } from "@/components/ui";
+import { Badge, Campo, Card, Modal, RotuloValidade, TituloPagina, Vazio } from "@/components/ui";
 import CodeScanner from "@/components/scanner/CodeScanner";
 import CampoQuantidade from "@/components/operacao/CampoQuantidade";
 import {
@@ -46,8 +46,12 @@ import {
   produtosNoLocal,
   resumoEstoquePorProdutos,
 } from "@/lib/domain/estoque-por-local";
+import {
+  aplicarProducaoComBaixaFicha,
+  montarPreviaProducaoFicha,
+} from "@/lib/domain/producao-ficha-baixa";
 import { usePapel } from "@/lib/roles";
-import { dataBR, diasAte, qtd, rotuloValidade } from "@/lib/format";
+import { dataBR, diasAte, qtd } from "@/lib/format";
 import type { Caixa, DB, StatusCaixa } from "@/lib/types";
 
 type Aba = "estoque" | "visao" | "balanco";
@@ -332,12 +336,22 @@ function FormRegistrarProducao({
   const [dataProducao, setDataProducao] = useState(hoje());
   const [validade, setValidade] = useState("");
   const [porcionadoPorId, setPorcionadoPorId] = useState(usuarioId);
+  const [soLoteSemFicha, setSoLoteSemFicha] = useState(false);
+  const [erroProd, setErroProd] = useState<string | null>(null);
   const produzidos = db.produtos
     .filter((p) => p.ativo && p.tipo === "produzido")
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
+  const previaFicha = useMemo(
+    () =>
+      produtoId && quantidade > 0 ? montarPreviaProducaoFicha(db, produtoId, quantidade) : null,
+    [db, produtoId, quantidade]
+  );
+
   function escolherProduto(id: string) {
     setProdutoId(id);
+    setSoLoteSemFicha(false);
+    setErroProd(null);
     const produto = db.produtos.find((p) => p.id === id);
     if (produto?.validade_padrao_dias !== undefined) {
       const base = new Date(`${dataProducao || hoje()}T12:00:00`);
@@ -348,39 +362,51 @@ function FormRegistrarProducao({
 
   function salvar() {
     if (!produtoId || quantidade <= 0 || !validade) return;
+    const debitarFicha = !soLoteSemFicha;
+    if (debitarFicha && previaFicha && !previaFicha.pode_aplicar_com_baixa) {
+      setErroProd(previaFicha.bloqueios[0] || "Não é possível debitar a ficha.");
+      return;
+    }
     const agora = new Date().toISOString();
     const produto = db.produtos.find((p) => p.id === produtoId);
-    const dbNovo = mutate((d) => {
-      criarLote(d, {
-        id: uid("lote"),
-        produto_id: produtoId,
-        origem: "producao",
-        porcionado_por_id: porcionadoPorId,
-        quantidade,
-        data_entrada: dataProducao || hoje(),
-        validade,
-        criado_em: agora,
-        atualizado_em: agora,
+    try {
+      const insumosIds = debitarFicha ? previaFicha?.insumos.map((i) => i.produto_id) ?? [] : [];
+      const dbNovo = mutate((d) => {
+        aplicarProducaoComBaixaFicha(d, {
+          produtoId,
+          quantidade,
+          dataProducao: dataProducao || hoje(),
+          validade,
+          porcionadoPorId,
+          usuarioId,
+          agora,
+          novoLoteId: () => uid("lote"),
+          novoMovimentoId: () => uid("mov"),
+          debitarFicha,
+        });
       });
-      d.movimentos_estoque.unshift({
-        id: uid("mov"),
-        produto_id: produtoId,
-        tipo: "producao",
-        quantidade,
-        usuario_id: usuarioId,
-        criado_em: agora,
-        sincronizado: false,
-      });
-    });
-    enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, produtoId));
-    aoConcluir();
+      enviarEstoqueTotal(produto?.codigo_externo, estoqueAtual(dbNovo, produtoId));
+      for (const pid of insumosIds) {
+        const p = dbNovo.produtos.find((x) => x.id === pid);
+        enviarEstoqueTotal(p?.codigo_externo, estoqueAtual(dbNovo, pid));
+      }
+      aoConcluir();
+    } catch (e) {
+      setErroProd(e instanceof Error ? e.message : "Falha ao registrar produção.");
+    }
   }
+
+  const podeComFicha = Boolean(previaFicha?.pode_aplicar_com_baixa);
+  const semFicha = Boolean(previaFicha && !previaFicha.ficha_id);
+  const podeSalvar =
+    Boolean(produtoId && quantidade > 0 && validade) &&
+    (soLoteSemFicha || podeComFicha || (semFicha && soLoteSemFicha));
 
   return (
     <div className="space-y-3">
       <p className="text-sm text-stone-600">
-        Registre o total de sacos/porções preparados neste lote. Depois distribua esse total entre as caixas
-        vazias usando o QR de cada caixa.
+        Registre o total preparado. Com ficha técnica, os insumos são debitados do estoque (FEFO). Depois
+        distribua o lote acabado nas caixas vazias pelo QR.
       </p>
       <Campo rotulo="Produto preparado">
         <select className="campo" value={produtoId} onChange={(e) => escolherProduto(e.target.value)}>
@@ -404,8 +430,63 @@ function FormRegistrarProducao({
           <input type="date" className="campo" value={validade} onChange={(e) => setValidade(e.target.value)} />
         </Campo>
       </div>
-      <button className="btn-gigante" disabled={!produtoId || quantidade <= 0 || !validade} onClick={salvar}>
-        Registrar lote de produção
+
+      {previaFicha && (
+        <div className="space-y-2 rounded-card border border-stone-200 bg-stone-50 px-3 py-2">
+          {previaFicha.ficha_nome ? (
+            <p className="text-sm text-stone-700">
+              Ficha: <strong>{previaFicha.ficha_nome}</strong>
+              {previaFicha.rendimento_ficha != null
+                ? ` (rendimento ${previaFicha.rendimento_ficha})`
+                : ""}
+            </p>
+          ) : (
+            <p className="text-sm text-amber-800">Nenhuma ficha técnica encontrada para este produto.</p>
+          )}
+          {previaFicha.insumos.length > 0 && (
+            <ul className="space-y-1 text-xs text-stone-600">
+              {previaFicha.insumos.map((i) => (
+                <li key={i.produto_id} className={i.ok ? "" : "text-red-700"}>
+                  {i.nome}: {qtd(i.quantidade, i.unidade_sigla)} (saldo caixas: {qtd(i.saldo_caixas, i.unidade_sigla)})
+                  {!i.ok && i.motivo ? ` — ${i.motivo}` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+          {previaFicha.bloqueios.length > 0 && !soLoteSemFicha && (
+            <ul className="list-disc pl-4 text-xs text-red-700">
+              {previaFicha.bloqueios.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
+            </ul>
+          )}
+          {(semFicha || (previaFicha.bloqueios.length > 0 && !podeComFicha)) && (
+            <label className="flex items-start gap-2 text-sm text-stone-700">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={soLoteSemFicha}
+                onChange={(e) => {
+                  setSoLoteSemFicha(e.target.checked);
+                  setErroProd(null);
+                }}
+              />
+              <span>Só registrar lote (sem debitar ficha) — comportamento antigo</span>
+            </label>
+          )}
+        </div>
+      )}
+
+      {erroProd && <p className="text-sm text-red-700">{erroProd}</p>}
+
+      <button
+        className="btn-gigante"
+        disabled={!podeSalvar}
+        onClick={salvar}
+      >
+        {soLoteSemFicha || semFicha
+          ? "Registrar lote de produção"
+          : "Registrar produção e debitar ficha"}
       </button>
     </div>
   );
@@ -633,14 +714,33 @@ export default function EstoquePage() {
   const caixasFiltradas = useMemo(() => {
     const texto = filtroTexto.trim().toLowerCase();
     return [...db.caixas]
-      .sort((a, b) => a.numero - b.numero)
+      .sort((a, b) => {
+        const la = nomeLocal(db, a.local_id);
+        const lb = nomeLocal(db, b.local_id);
+        return la.localeCompare(lb, "pt-BR") || a.qr_code.localeCompare(b.qr_code) || a.numero - b.numero;
+      })
       .filter((c) => {
         if (filtroLocal && c.local_id !== filtroLocal) return false;
         if (!texto) return true;
-        const alvo = `${c.numero} ${c.qr_code} ${nomeProduto(db, c.produto_id)}`.toLowerCase();
+        const alvo = `${c.numero} ${c.qr_code} ${nomeProduto(db, c.produto_id)} ${nomeLocal(db, c.local_id)}`.toLowerCase();
         return alvo.includes(texto);
       });
   }, [db, filtroTexto, filtroLocal]);
+
+  const caixasPorLocal = useMemo(() => {
+    const grupos = new Map<string, typeof caixasFiltradas>();
+    for (const c of caixasFiltradas) {
+      const chave = c.local_id || "__sem_local__";
+      const arr = grupos.get(chave) ?? [];
+      arr.push(c);
+      grupos.set(chave, arr);
+    }
+    return Array.from(grupos.entries()).map(([localId, caixas]) => ({
+      localId,
+      rotulo: localId === "__sem_local__" ? "Sem local" : nomeLocal(db, localId),
+      caixas,
+    }));
+  }, [db, caixasFiltradas]);
 
   const fifoDaAtiva =
     caixaAtiva && caixaAtiva.produto_id ? caixaFifo(db, caixaAtiva.produto_id) : undefined;
@@ -836,6 +936,9 @@ export default function EstoquePage() {
           <Link className="btn-secundario w-full sm:w-auto" href="/estoque/reposicao">
             Reposição do Box Operacional
           </Link>
+          <Link className="btn-secundario w-full sm:w-auto" href="/etiquetas">
+            Imprimir etiquetas
+          </Link>
         </div>
       )}
 
@@ -861,7 +964,7 @@ export default function EstoquePage() {
           {qrDesconhecido && (
             <p className="mt-2 rounded-card bg-destaque-clara px-3 py-2 text-sm text-destaque">
               Não conheço o código &quot;{qrDesconhecido}&quot;. Confira se é o QR de uma caixa do restaurante
-              (ex.: CXCHEF-003) ou cadastre a caixa primeiro.
+              (ex.: F1-R01, F1-O01, G1-01, ES-01) ou cadastre a caixa primeiro.
             </p>
           )}
         </Card>
@@ -878,7 +981,7 @@ export default function EstoquePage() {
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xl font-bold">
-                      Caixa nº {caixaAtiva.numero} — {nomeProduto(db, caixaAtiva.produto_id)}
+                      {caixaAtiva.qr_code} — {nomeProduto(db, caixaAtiva.produto_id)}
                     </p>
                     <Badge cor={caixaAtiva.status === "cheia" ? "verde" : "azul"}>
                       {ROTULO_STATUS_CAIXA[caixaAtiva.status]}
@@ -893,7 +996,9 @@ export default function EstoquePage() {
                     </div>
                     <div>
                       <p className="rotulo">Validade</p>
-                      <p className="font-semibold">{rotuloValidade(caixaAtiva.validade)}</p>
+                      <p className="font-semibold">
+                        <RotuloValidade iso={caixaAtiva.validade} />
+                      </p>
                       <p className="text-xs text-slate-500">{dataBR(caixaAtiva.validade)}</p>
                     </div>
                     <div>
@@ -1007,22 +1112,29 @@ export default function EstoquePage() {
                     }}
                   >
                     <span className="text-sm font-medium">
-                      Caixa nº {c.numero} — {nomeProduto(db, c.produto_id)} ·{" "}
+                      {c.qr_code} — {nomeProduto(db, c.produto_id)} ·{" "}
                       {qtd(c.quantidade, siglaUnidadeUso(db, c.produto_id))} · {nomeLocal(db, c.local_id)}
                     </span>
-                    <Badge cor={vencida ? "vermelho" : "laranja"}>{rotuloValidade(c.validade)}</Badge>
+                    <Badge cor={vencida ? "vermelho" : "laranja"}>
+                      <RotuloValidade iso={c.validade} />
+                    </Badge>
                   </button>
                 );
               })}
           </Card>
 
-          {/* Lista de todas as caixas */}
+          {/* Lista de todas as caixas — agrupada por local (Freezer 1, Geladeira 2…) */}
           <Card className="space-y-3">
-            <p className="font-bold">Todas as caixas</p>
+            <div>
+              <p className="font-bold">Caixas por local</p>
+              <p className="text-sm text-slate-600">
+                Códigos na etiqueta: F1-R01 (reserva), F1-O01 (operacional), G1-01, ES-01. Contagem física segue o equipamento.
+              </p>
+            </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 className="campo"
-                placeholder="Buscar por produto ou nº da caixa…"
+                placeholder="Buscar por código, produto ou local…"
                 value={filtroTexto}
                 onChange={(e) => setFiltroTexto(e.target.value)}
               />
@@ -1039,35 +1151,49 @@ export default function EstoquePage() {
                 ))}
               </select>
             </div>
-            {caixasFiltradas.length === 0 ? (
+            {caixasPorLocal.length === 0 ? (
               <Vazio mensagem="Nenhuma caixa encontrada com esse filtro." />
             ) : (
-              <div className="divide-y divide-slate-100">
-                {caixasFiltradas.map((c) => (
-                  <button
-                    key={c.id}
-                    className="flex w-full flex-wrap items-center justify-between gap-2 px-1 py-3 text-left hover:bg-slate-50"
-                    onClick={() => {
-                      setCaixaAtivaId(c.id);
-                      setModoBaixa(false);
-                      setQrDesconhecido(null);
-                    }}
-                  >
-                    <span className="min-w-0">
-                      <span className="block font-semibold">
-                        Nº {c.numero} · {c.status === "vazia" ? "— vazia —" : nomeProduto(db, c.produto_id)}
-                      </span>
-                      {c.status !== "vazia" && (
-                        <span className="block text-sm text-slate-600">
-                          {qtd(c.quantidade, siglaUnidadeUso(db, c.produto_id))} · {rotuloValidade(c.validade)} ·{" "}
-                          {nomeLocal(db, c.local_id)}
-                        </span>
-                      )}
-                    </span>
-                    <Badge cor={c.status === "vazia" ? "cinza" : c.status === "cheia" ? "verde" : "azul"}>
-                      {ROTULO_STATUS_CAIXA[c.status]}
-                    </Badge>
-                  </button>
+              <div className="space-y-4">
+                {caixasPorLocal.map((grupo) => (
+                  <div key={grupo.localId}>
+                    <p className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-stone-800">
+                      <MapPin size={14} className="text-stone-500" />
+                      {grupo.rotulo}
+                      <span className="font-normal text-stone-500">· {grupo.caixas.length}</span>
+                    </p>
+                    <div className="divide-y divide-slate-100 rounded-card border border-stone-100">
+                      {grupo.caixas.map((c) => (
+                        <button
+                          key={c.id}
+                          className="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-3 text-left hover:bg-slate-50"
+                          onClick={() => {
+                            setCaixaAtivaId(c.id);
+                            setModoBaixa(false);
+                            setQrDesconhecido(null);
+                          }}
+                        >
+                          <span className="min-w-0">
+                            <span className="block font-semibold tracking-wide">
+                              {c.qr_code}
+                              <span className="ml-2 font-normal text-slate-600">
+                                {c.status === "vazia" ? "— vazia —" : nomeProduto(db, c.produto_id)}
+                              </span>
+                            </span>
+                            {c.status !== "vazia" && (
+                              <span className="block text-sm text-slate-600">
+                                {qtd(c.quantidade, siglaUnidadeUso(db, c.produto_id))} ·{" "}
+                                <RotuloValidade iso={c.validade} />
+                              </span>
+                            )}
+                          </span>
+                          <Badge cor={c.status === "vazia" ? "cinza" : c.status === "cheia" ? "verde" : "azul"}>
+                            {ROTULO_STATUS_CAIXA[c.status]}
+                          </Badge>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

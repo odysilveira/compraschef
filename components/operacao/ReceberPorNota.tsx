@@ -943,16 +943,17 @@ export default function ReceberPorNota({
           onSalvo={aoSalvarProdutoNota}
           fecharAoSalvar
           ocultarExcluir
-          vinculoNota={
-            fornecedor
-              ? {
-                  fornecedorId: fornecedor.id,
-                  codigoFornecedor: nota.itens.find((i) => i.indice === produtoNota.indice)?.cProd,
-                  ean: nota.itens.find((i) => i.indice === produtoNota.indice)?.cEAN,
-                  ultimoPreco: nota.itens.find((i) => i.indice === produtoNota.indice)?.vUnCom,
-                }
-              : undefined
-          }
+          vinculoNota={(() => {
+            const itemNota = nota.itens.find((i) => i.indice === produtoNota.indice);
+            const ultimoPreco = itemNota?.vUnCom;
+            if (!fornecedor && !(ultimoPreco != null && ultimoPreco > 0)) return undefined;
+            return {
+              fornecedorId: fornecedor?.id,
+              codigoFornecedor: itemNota?.cProd,
+              ean: itemNota?.cEAN,
+              ultimoPreco,
+            };
+          })()}
         />
       )}
     </div>

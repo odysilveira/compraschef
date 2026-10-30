@@ -9,6 +9,8 @@ import {
   parsePeriodoSaiposRotulo,
   relatorioParaArquivoMes,
   resultadoConsolidadoVazio,
+  SAIPOS_CONSUMO_ARQUIVO_BACKUP_KEY,
+  SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY,
   type ArquivoConsumoSaipos,
 } from "./saipos-consumo-arquivo";
 import type { RelatorioItensVendidosSaipos, ResultadoConsolidadoSaipos } from "./saipos-itens-vendidos";
@@ -110,6 +112,25 @@ describe("repositório arquivo consumo", () => {
 
     repo.remover("2026-01");
     expect(repo.obter("2026-01")).toBeUndefined();
+  });
+
+  it("recupera do backup se a chave principal sumir", () => {
+    const storage = memoriaStorage();
+    const repo = criarSaiposConsumoArquivoRepository(storage);
+    repo.salvar(arq("2026-04", res({ bebidas: { Agua: 3 } })));
+    expect(storage.getItem(SAIPOS_CONSUMO_ARQUIVO_BACKUP_KEY)).toBeTruthy();
+    storage.removeItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY);
+    const deNovo = criarSaiposConsumoArquivoRepository(storage);
+    expect(deNovo.obter("2026-04")?.resultado.bebidas.Agua).toBe(3);
+    expect(storage.getItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY)).toBeTruthy();
+  });
+
+  it("não deixa persistir vazio por cima de meses existentes", () => {
+    const storage = memoriaStorage();
+    const repo = criarSaiposConsumoArquivoRepository(storage);
+    repo.salvar(arq("2026-05", res({ bebidas: { Coca: 1 } })));
+    expect(() => repo.persistir({ version: 1, arquivos: [] })).toThrow(/Bloqueado/);
+    expect(repo.obter("2026-05")?.resultado.bebidas.Coca).toBe(1);
   });
 
   it("filtra intervalo de meses", () => {

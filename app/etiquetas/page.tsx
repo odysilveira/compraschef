@@ -1,131 +1,182 @@
 "use client";
 
-// Etiquetas de QR para as caixas físicas.
+// Etiquetas de QR para as caixas físicas — códigos F1-R01 / G1-01 / ES-01.
 // Página fora da moldura do sistema para imprimir limpo (Ctrl+P / botão Imprimir).
-// Fluxo: marcar o que imprimir → "Gerar caixas e etiquetas" → as caixas são criadas
-// no sistema (status vazia) e a folha de etiquetas aparece pronta para imprimir.
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { ArrowLeft, Archive, ChefHat, Printer, Snowflake, Refrigerator } from "lucide-react";
 import { mutate, uid, useDB } from "@/lib/data";
-import { ITENS_ESTOQUE_SECO, MASSAS_GELADEIRA, SABORES_FREEZER } from "@/lib/data/catalogo";
+import {
+  LOCAL_ESTOQUE_SECO,
+  LOCAL_GELADEIRA_2,
+} from "@/lib/data/catalogo";
+import {
+  numeroInternoDoCodigo,
+  sugerirProximoCodigoCaixa,
+  validarCodigoCaixa,
+  type PapelCaixaCodigo,
+  type ZonaCaixaCodigo,
+} from "@/lib/domain/caixa-codigo";
 
-type LocalEtiqueta = "Freezer" | "Geladeira" | "Estoque seco";
-
-interface ItemCatalogo {
-  nome: string;
-  local: LocalEtiqueta;
-  tamanho: "G" | "P" | "";
-}
-
-interface Secao {
+type ModeloEtiqueta = {
+  id: string;
   titulo: string;
-  local: LocalEtiqueta;
-  itens: ItemCatalogo[];
-}
+  zona: ZonaCaixaCodigo;
+  equipamento: number | null;
+  papel?: PapelCaixaCodigo;
+  local_id: string;
+  local_nome: string;
+  quantidadePadrao: number;
+};
 
-const SECOES: Secao[] = [
+const MODELOS: ModeloEtiqueta[] = [
   {
-    titulo: "Freezer — porção G",
-    local: "Freezer",
-    itens: SABORES_FREEZER.map((nome): ItemCatalogo => ({ nome, local: "Freezer", tamanho: "G" })),
+    id: "f1-r",
+    titulo: "Freezer 1 — Reserva",
+    zona: "F",
+    equipamento: 1,
+    papel: "R",
+    local_id: "loc-freezer1",
+    local_nome: "Freezer 1",
+    quantidadePadrao: 4,
   },
   {
-    titulo: "Freezer — porção P",
-    local: "Freezer",
-    itens: SABORES_FREEZER.map((nome): ItemCatalogo => ({ nome, local: "Freezer", tamanho: "P" })),
+    id: "f1-o",
+    titulo: "Freezer 1 — Operacional",
+    zona: "F",
+    equipamento: 1,
+    papel: "O",
+    local_id: "loc-freezer1",
+    local_nome: "Freezer 1",
+    quantidadePadrao: 2,
   },
   {
-    titulo: "Geladeira — porção G",
-    local: "Geladeira",
-    itens: MASSAS_GELADEIRA.map((nome): ItemCatalogo => ({ nome, local: "Geladeira", tamanho: "G" })),
+    id: "f2-r",
+    titulo: "Freezer 2 — Reserva",
+    zona: "F",
+    equipamento: 2,
+    papel: "R",
+    local_id: "loc-freezer2",
+    local_nome: "Freezer 2",
+    quantidadePadrao: 4,
   },
   {
-    titulo: "Geladeira — porção P",
-    local: "Geladeira",
-    itens: MASSAS_GELADEIRA.map((nome): ItemCatalogo => ({ nome, local: "Geladeira", tamanho: "P" })),
+    id: "f2-o",
+    titulo: "Freezer 2 — Operacional",
+    zona: "F",
+    equipamento: 2,
+    papel: "O",
+    local_id: "loc-freezer2",
+    local_nome: "Freezer 2",
+    quantidadePadrao: 2,
   },
   {
+    id: "g1",
+    titulo: "Geladeira 1",
+    zona: "G",
+    equipamento: 1,
+    local_id: "loc-geladeira1",
+    local_nome: "Geladeira 1",
+    quantidadePadrao: 6,
+  },
+  {
+    id: "g2",
+    titulo: "Geladeira 2",
+    zona: "G",
+    equipamento: 2,
+    local_id: LOCAL_GELADEIRA_2.id,
+    local_nome: "Geladeira 2",
+    quantidadePadrao: 4,
+  },
+  {
+    id: "es",
     titulo: "Estoque seco",
-    local: "Estoque seco",
-    itens: ITENS_ESTOQUE_SECO.map((nome): ItemCatalogo => ({ nome, local: "Estoque seco", tamanho: "" })),
+    zona: "ES",
+    equipamento: null,
+    local_id: LOCAL_ESTOQUE_SECO.id,
+    local_nome: "Estoque seco",
+    quantidadePadrao: 6,
   },
 ];
 
-const TODOS_ITENS: ItemCatalogo[] = SECOES.flatMap((s) => s.itens);
-
-function IconeLocal({ local, size = 12 }: { local: LocalEtiqueta; size?: number }) {
-  if (local === "Freezer") return <Snowflake size={size} className="text-blue-500" />;
-  if (local === "Geladeira") return <Refrigerator size={size} className="text-emerald-600" />;
-  return <Archive size={size} className="text-amber-600" />;
+function IconeZona({ zona }: { zona: ZonaCaixaCodigo }) {
+  if (zona === "F") return <Snowflake size={16} className="text-blue-500" />;
+  if (zona === "G") return <Refrigerator size={16} className="text-emerald-600" />;
+  return <Archive size={16} className="text-amber-600" />;
 }
 
-interface EtiquetaGerada extends ItemCatalogo {
+type EtiquetaGerada = {
+  codigo: string;
   numero: number;
-  qr: string;
-}
+  local_nome: string;
+  zona: ZonaCaixaCodigo;
+};
 
 export default function EtiquetasPage() {
   const db = useDB();
-  const chave = (i: ItemCatalogo) => `${i.nome}|${i.tamanho}|${i.local}`;
-  const [marcados, setMarcados] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(TODOS_ITENS.map((i) => [`${i.nome}|${i.tamanho}|${i.local}`, true]))
+  const [qtds, setQtds] = useState<Record<string, number>>(() =>
+    Object.fromEntries(MODELOS.map((m) => [m.id, m.quantidadePadrao]))
   );
   const [geradas, setGeradas] = useState<EtiquetaGerada[] | null>(null);
 
-  const marcado = (i: ItemCatalogo) => marcados[chave(i)] ?? false;
-  const total = useMemo(() => TODOS_ITENS.filter((i) => marcados[chave(i)]).length, [marcados]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function alternarSecao(secao: Secao, valor: boolean) {
-    setMarcados((atual) => {
-      const novo = { ...atual };
-      for (const item of secao.itens) novo[chave(item)] = valor;
-      return novo;
-    });
-  }
+  const total = useMemo(
+    () => MODELOS.reduce((s, m) => s + Math.max(0, Math.floor(qtds[m.id] || 0)), 0),
+    [qtds]
+  );
 
   function gerar() {
-    const selecionados = TODOS_ITENS.filter((i) => marcado(i));
-    if (selecionados.length === 0) return;
-
-    const maiorNumero = db.caixas.reduce((m, c) => Math.max(m, c.numero), 0);
-    const novas: EtiquetaGerada[] = selecionados.map((item, indice) => {
-      const numero = maiorNumero + 1 + indice;
-      return { ...item, numero, qr: `CXCHEF-${String(numero).padStart(3, "0")}` };
-    });
+    if (total <= 0) return;
+    const usadas = db.caixas.map((c) => c.qr_code);
+    const novas: EtiquetaGerada[] = [];
 
     mutate((banco) => {
       const agora = new Date().toISOString();
-      for (const nova of novas) {
-        banco.caixas.push({
-          id: uid("cx"),
-          numero: nova.numero,
-          qr_code: nova.qr,
-          tipo_box: "NAO_CLASSIFICADO",
-          posicao_fisica: "NAO_INFORMADA",
-          status: "vazia",
-          atualizado_em: agora,
-        });
+      const qrs = [...usadas];
+      for (const modelo of MODELOS) {
+        const n = Math.max(0, Math.floor(qtds[modelo.id] || 0));
+        for (let i = 0; i < n; i++) {
+          const codigo = sugerirProximoCodigoCaixa(qrs, {
+            zona: modelo.zona,
+            equipamento: modelo.equipamento ?? 1,
+            papel: modelo.papel,
+          });
+          qrs.push(codigo);
+          const v = validarCodigoCaixa(codigo);
+          if (!v.ok) continue;
+          const numero = numeroInternoDoCodigo(v.parseado);
+          banco.caixas.push({
+            id: uid("cx"),
+            numero,
+            qr_code: v.parseado.codigo,
+            tipo_box: v.parseado.tipo_box,
+            posicao_fisica: "NAO_INFORMADA",
+            status: "vazia",
+            local_id: modelo.local_id,
+            atualizado_em: agora,
+          });
+          novas.push({
+            codigo: v.parseado.codigo,
+            numero,
+            local_nome: modelo.local_nome,
+            zona: modelo.zona,
+          });
+        }
       }
     });
 
     setGeradas(novas);
   }
 
-  // ---------- Folha de etiquetas ----------
   if (geradas) {
     return (
       <div className="min-h-screen bg-white text-texto">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 p-4 print:hidden">
           <div>
-            <h1 className="text-xl font-bold">
-              {geradas.length} etiquetas prontas — caixas nº {geradas[0].numero} a {geradas[geradas.length - 1].numero}
-            </h1>
+            <h1 className="text-xl font-bold">{geradas.length} etiquetas prontas</h1>
             <p className="text-sm text-stone-500">
-              As caixas já foram criadas no sistema. Imprima, recorte nas linhas tracejadas e cole nas caixas
-              (proteja com fita larga transparente por causa da umidade).
+              Caixas vazias criadas com local e tipo. Imprima, recorte e cole (proteja com fita transparente).
             </p>
           </div>
           <div className="flex gap-2">
@@ -141,22 +192,18 @@ export default function EtiquetasPage() {
         <div className="grid grid-cols-2 gap-0 p-4 sm:grid-cols-3 print:grid-cols-3 print:p-0">
           {geradas.map((e) => (
             <div
-              key={e.qr}
+              key={e.codigo}
               className="flex items-center gap-3 border border-dashed border-stone-400 p-3 print:break-inside-avoid"
             >
-              <QRCodeSVG value={e.qr} size={88} marginSize={0} />
+              <QRCodeSVG value={e.codigo} size={88} marginSize={0} />
               <div className="min-w-0">
-                <p className="text-2xl font-black leading-none">Nº {e.numero}</p>
-                <p className="mt-1 truncate text-sm font-semibold leading-tight">
-                  {e.nome}
-                  {e.tamanho && ` — ${e.tamanho}`}
-                </p>
-                <p className="mt-0.5 flex items-center gap-1 text-xs text-stone-600">
-                  <IconeLocal local={e.local} />
-                  {e.local}
+                <p className="text-2xl font-black leading-none tracking-tight">{e.codigo}</p>
+                <p className="mt-1 flex items-center gap-1 text-xs text-stone-600">
+                  <IconeZona zona={e.zona} />
+                  {e.local_nome}
                 </p>
                 <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                  ComprasChef · {e.qr}
+                  ComprasChef
                 </p>
               </div>
             </div>
@@ -166,7 +213,6 @@ export default function EtiquetasPage() {
     );
   }
 
-  // ---------- Tela de preparação ----------
   return (
     <div className="min-h-screen bg-fundo">
       <header className="flex items-center gap-3 border-b border-stone-200 bg-superficie px-4 py-3">
@@ -176,7 +222,7 @@ export default function EtiquetasPage() {
         <div>
           <h1 className="text-lg font-bold leading-tight">Etiquetas das caixas</h1>
           <p className="text-xs text-stone-500">
-            Marque o que precisa imprimir — cada item marcado vira 1 caixa nova com QR
+            Códigos por zona: F1-R01, F1-O01, G1-01, ES-01 — cada etiqueta vira caixa vazia com local
           </p>
         </div>
       </header>
@@ -184,62 +230,44 @@ export default function EtiquetasPage() {
       <div className="mx-auto max-w-3xl p-4">
         <div className="card mb-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-stone-600">
-            Selecionadas: <strong className="text-texto">{total} etiquetas</strong>
+            A gerar: <strong className="text-texto">{total} etiquetas</strong>
           </p>
-          <button className="btn-primario" onClick={gerar} disabled={total === 0}>
-            Gerar caixas e etiquetas
-          </button>
+          <div className="flex gap-2">
+            <Link href="/cadastros" className="btn-secundario">
+              Cadastros
+            </Link>
+            <button className="btn-primario" onClick={gerar} disabled={total === 0}>
+              Gerar caixas e etiquetas
+            </button>
+          </div>
         </div>
 
-        {SECOES.map((secao) => {
-          const todosMarcados = secao.itens.every((i) => marcado(i));
-          return (
-            <div key={secao.titulo} className="card mb-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="flex items-center gap-2 text-base">
-                  <IconeLocal local={secao.local} size={18} />
-                  {secao.titulo}
-                </h2>
-                <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-stone-500">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-primaria"
-                    checked={todosMarcados}
-                    onChange={(e) => alternarSecao(secao, e.target.checked)}
-                  />
-                  todos
-                </label>
+        <div className="space-y-3">
+          {MODELOS.map((m) => (
+            <div key={m.id} className="card flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <IconeZona zona={m.zona} />
+                <div>
+                  <p className="font-semibold text-stone-800">{m.titulo}</p>
+                  <p className="text-xs text-stone-500">{m.local_nome}</p>
+                </div>
               </div>
-              <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
-                {secao.itens.map((item) => (
-                  <label
-                    key={chave(item)}
-                    className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1.5 text-sm hover:bg-stone-50"
-                  >
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 accent-primaria"
-                      checked={marcado(item)}
-                      onChange={(e) => setMarcados((atual) => ({ ...atual, [chave(item)]: e.target.checked }))}
-                    />
-                    <span>
-                      {item.nome}
-                      {item.tamanho && (
-                        <span className="ml-1.5 rounded bg-stone-100 px-1.5 py-0.5 text-xs font-bold">
-                          {item.tamanho}
-                        </span>
-                      )}
-                    </span>
-                  </label>
-                ))}
-              </div>
+              <label className="flex items-center gap-2 text-sm">
+                Quantidade
+                <input
+                  type="number"
+                  min={0}
+                  max={40}
+                  className="campo w-20"
+                  value={qtds[m.id] ?? 0}
+                  onChange={(e) =>
+                    setQtds((prev) => ({ ...prev, [m.id]: Number(e.target.value) || 0 }))
+                  }
+                />
+              </label>
             </div>
-          );
-        })}
-
-        <Link href="/cadastros" className="text-sm text-stone-500 underline">
-          ← Voltar aos cadastros
-        </Link>
+          ))}
+        </div>
       </div>
     </div>
   );

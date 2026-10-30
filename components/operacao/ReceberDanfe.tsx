@@ -1162,21 +1162,18 @@ export default function ReceberDanfe({
           onSalvo={aoSalvarProdutoNota}
           fecharAoSalvar
           ocultarExcluir
-          vinculoNota={
-            fornecedor
-              ? {
-                  fornecedorId: fornecedor.id,
-                  codigoFornecedor: (() => {
-                    const item = itens.find((i) => i.indice === produtoNota.indice);
-                    return item && !item.codigo.startsWith("manual-") ? item.codigo : undefined;
-                  })(),
-                  ean: codigoDeBarrasValido(
-                    itens.find((i) => i.indice === produtoNota.indice)?.codigo ?? ""
-                  ) ?? undefined,
-                  ultimoPreco: itens.find((i) => i.indice === produtoNota.indice)?.valorUnitario,
-                }
-              : undefined
-          }
+          vinculoNota={(() => {
+            const itemNota = itens.find((i) => i.indice === produtoNota.indice);
+            const ultimoPreco = itemNota?.valorUnitario;
+            if (!fornecedor && !(ultimoPreco != null && ultimoPreco > 0)) return undefined;
+            return {
+              fornecedorId: fornecedor?.id,
+              codigoFornecedor:
+                itemNota && !itemNota.codigo.startsWith("manual-") ? itemNota.codigo : undefined,
+              ean: codigoDeBarrasValido(itemNota?.codigo ?? "") ?? undefined,
+              ultimoPreco,
+            };
+          })()}
         />
       )}
     </div>

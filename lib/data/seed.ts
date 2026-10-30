@@ -18,8 +18,17 @@ import { PRECOS_FRANQUIA_LONDINA_BOX_G } from "./precos-franquia-londrina";
 import { aplicarTabelaFranquiaNasFichas } from "../domain/tabela-precos-venda";
 
 // Datas relativas a "hoje" para a demonstração ficar sempre atual.
-// Horário fixado ao meio-dia para servidor e navegador gerarem o MESMO valor
-// (evita aviso de hidratação quando o minuto vira entre as duas renderizações).
+// Data civil local (YYYY-MM-DD) — não usa toISOString().slice(0,10), que em
+// fuso negativo (Brasil) pode mudar o dia e divergir SSR × browser.
+function dataCivilOffset(dias: number): string {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() + dias);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 function diasAtras(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -32,8 +41,18 @@ function diasAFrente(n: number): string {
   d.setHours(12, 0, 0, 0);
   return d.toISOString();
 }
+/** Data civil LOCAL a partir de ISO, ou atalho: soData(diasAFrente(n)) / soData(diasAtras(n)). */
 function soData(iso: string): string {
-  return iso.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  // Se veio de diasAtras/diasAFrente (ISO com meio-dia local), recupera o dia civil local.
+  const d = new Date(iso);
+  if (!Number.isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  return dataCivilOffset(0);
 }
 
 export const seedDB: DB = {
@@ -927,27 +946,30 @@ export const seedDB: DB = {
   ],
 
   caixas: [
-    // Filé mignon em 2 caixas — FIFO deve apontar a nº 3 (mais antiga)
-    { id: "cx-3", numero: 3, qr_code: "CXCHEF-003", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-file", quantidade: 8, data_envase: soData(diasAtras(6)), validade: soData(diasAFrente(84)), local_id: "loc-freezer2", atualizado_em: diasAtras(6) },
-    { id: "cx-7", numero: 7, qr_code: "CXCHEF-007", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-file", quantidade: 10, data_envase: soData(diasAtras(2)), validade: soData(diasAFrente(88)), local_id: "loc-freezer1", atualizado_em: diasAtras(2) },
-    // Frango
-    { id: "cx-4", numero: 4, qr_code: "CXCHEF-004", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-frango", quantidade: 12, data_envase: soData(diasAtras(4)), validade: soData(diasAFrente(86)), local_id: "loc-freezer1", atualizado_em: diasAtras(4) },
-    { id: "cx-9", numero: 9, qr_code: "CXCHEF-009", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "em_uso", produto_id: "prod-frango", quantidade: 4, data_envase: soData(diasAtras(8)), validade: soData(diasAFrente(82)), local_id: "loc-geladeira1", atualizado_em: diasAtras(1) },
-    // Hortifrúti
-    { id: "cx-1", numero: 1, qr_code: "CXCHEF-001", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-tomate", quantidade: 6, data_envase: soData(diasAtras(3)), validade: soData(diasAFrente(4)), local_id: "loc-geladeira1", atualizado_em: diasAtras(3) },
-    { id: "cx-2", numero: 2, qr_code: "CXCHEF-002", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-cebola", quantidade: 9, data_envase: soData(diasAtras(5)), validade: soData(diasAFrente(15)), local_id: "loc-despensa", atualizado_em: diasAtras(5) },
-    // Laticínios
-    { id: "cx-5", numero: 5, qr_code: "CXCHEF-005", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-mucarela", quantidade: 7, data_envase: soData(diasAtras(9)), validade: soData(diasAFrente(21)), local_id: "loc-geladeira1", atualizado_em: diasAtras(9) },
-    { id: "cx-6", numero: 6, qr_code: "CXCHEF-006", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-creme", quantidade: 6, data_envase: soData(diasAtras(12)), validade: soData(diasAFrente(48)), local_id: "loc-prateleira", atualizado_em: diasAtras(12) },
-    // Mercearia
-    { id: "cx-8", numero: 8, qr_code: "CXCHEF-008", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-farinha", quantidade: 18, data_envase: soData(diasAtras(20)), validade: soData(diasAFrente(160)), local_id: "loc-despensa", atualizado_em: diasAtras(20) },
-    { id: "cx-10", numero: 10, qr_code: "CXCHEF-010", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-arroz-arboreo", quantidade: 8, data_envase: soData(diasAtras(18)), validade: soData(diasAFrente(162)), local_id: "loc-despensa", atualizado_em: diasAtras(18) },
-    // Produção própria — validades curtas (uma vence amanhã!)
-    { id: "cx-11", numero: 11, qr_code: "CXCHEF-011", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-bolonhesa", quantidade: 5, data_envase: soData(diasAtras(4)), validade: soData(diasAFrente(1)), local_id: "loc-geladeira1", atualizado_em: diasAtras(4) },
-    { id: "cx-12", numero: 12, qr_code: "CXCHEF-012", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-massa", quantidade: 6, data_envase: soData(diasAtras(1)), validade: soData(diasAFrente(2)), local_id: "loc-geladeira1", atualizado_em: diasAtras(1) },
-    // Vazias, prontas para reuso
-    { id: "cx-13", numero: 13, qr_code: "CXCHEF-013", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "vazia", atualizado_em: diasAtras(2) },
-    { id: "cx-14", numero: 14, qr_code: "CXCHEF-014", tipo_box: "NAO_CLASSIFICADO", posicao_fisica: "NAO_INFORMADA", status: "vazia", atualizado_em: diasAtras(1) },
+    // Códigos por zona: F#-R## / F#-O## / G#-## / ES-##
+    // Filé — 2 reservas (FEFO: F2-R01 mais antiga)
+    { id: "cx-3", numero: 201, qr_code: "F2-R01", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-file", quantidade: 8, data_envase: soData(diasAtras(6)), validade: soData(diasAFrente(84)), local_id: "loc-freezer2", atualizado_em: diasAtras(6) },
+    { id: "cx-7", numero: 101, qr_code: "F1-R01", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-file", quantidade: 10, data_envase: soData(diasAtras(2)), validade: soData(diasAFrente(88)), local_id: "loc-freezer1", atualizado_em: diasAtras(2) },
+    // Frango — reserva + operacional do dia
+    { id: "cx-4", numero: 102, qr_code: "F1-R02", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-frango", quantidade: 12, data_envase: soData(diasAtras(4)), validade: soData(diasAFrente(86)), local_id: "loc-freezer1", atualizado_em: diasAtras(4) },
+    { id: "cx-9", numero: 141, qr_code: "F1-O01", tipo_box: "OPERACIONAL", posicao_fisica: "NAO_INFORMADA", status: "em_uso", produto_id: "prod-frango", quantidade: 4, data_envase: soData(diasAtras(8)), validade: soData(diasAFrente(82)), local_id: "loc-freezer1", atualizado_em: diasAtras(1) },
+    // Geladeira — massas, queijos, produção (sem operacional)
+    { id: "cx-1", numero: 501, qr_code: "G1-01", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-tomate", quantidade: 6, data_envase: soData(diasAtras(3)), validade: soData(diasAFrente(4)), local_id: "loc-geladeira1", atualizado_em: diasAtras(3) },
+    { id: "cx-5", numero: 502, qr_code: "G1-02", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-mucarela", quantidade: 7, data_envase: soData(diasAtras(9)), validade: soData(diasAFrente(21)), local_id: "loc-geladeira1", atualizado_em: diasAtras(9) },
+    { id: "cx-11", numero: 503, qr_code: "G1-03", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-bolonhesa", quantidade: 5, data_envase: soData(diasAtras(4)), validade: soData(diasAFrente(1)), local_id: "loc-geladeira1", atualizado_em: diasAtras(4) },
+    { id: "cx-12", numero: 504, qr_code: "G1-04", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-massa", quantidade: 6, data_envase: soData(diasAtras(1)), validade: soData(diasAFrente(2)), local_id: "loc-geladeira1", atualizado_em: diasAtras(1) },
+    // Geladeira 2 — risoto (sem operacional)
+    { id: "cx-16", numero: 601, qr_code: "G2-01", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-risoto-base", quantidade: 4, data_envase: soData(diasAtras(2)), validade: soData(diasAFrente(2)), local_id: LOCAL_GELADEIRA_2.id, atualizado_em: diasAtras(2) },
+    { id: "cx-17", numero: 602, qr_code: "G2-02", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "vazia", local_id: LOCAL_GELADEIRA_2.id, atualizado_em: diasAtras(1) },
+    // Estoque seco
+    { id: "cx-2", numero: 901, qr_code: "ES-01", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-cebola", quantidade: 9, data_envase: soData(diasAtras(5)), validade: soData(diasAFrente(15)), local_id: "loc-estoque-seco", atualizado_em: diasAtras(5) },
+    { id: "cx-6", numero: 902, qr_code: "ES-02", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-creme", quantidade: 6, data_envase: soData(diasAtras(12)), validade: soData(diasAFrente(48)), local_id: "loc-estoque-seco", atualizado_em: diasAtras(12) },
+    { id: "cx-8", numero: 903, qr_code: "ES-03", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-farinha", quantidade: 18, data_envase: soData(diasAtras(20)), validade: soData(diasAFrente(160)), local_id: "loc-estoque-seco", atualizado_em: diasAtras(20) },
+    { id: "cx-10", numero: 904, qr_code: "ES-04", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "cheia", produto_id: "prod-arroz-arboreo", quantidade: 8, data_envase: soData(diasAtras(18)), validade: soData(diasAFrente(162)), local_id: "loc-estoque-seco", atualizado_em: diasAtras(18) },
+    // Vazias + operacional file vazio para reposição
+    { id: "cx-13", numero: 103, qr_code: "F1-R03", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "vazia", local_id: "loc-freezer1", atualizado_em: diasAtras(2) },
+    { id: "cx-14", numero: 505, qr_code: "G1-05", tipo_box: "RESERVA", posicao_fisica: "NAO_INFORMADA", status: "vazia", local_id: "loc-geladeira1", atualizado_em: diasAtras(1) },
+    { id: "cx-15", numero: 241, qr_code: "F2-O01", tipo_box: "OPERACIONAL", posicao_fisica: "NAO_INFORMADA", status: "vazia", local_id: "loc-freezer2", atualizado_em: diasAtras(1) },
   ],
 
   // Um lote pode ser dividido entre várias caixas. As alocações abaixo guardam
@@ -965,12 +987,13 @@ export const seedDB: DB = {
     { id: "lote-cx-10", produto_id: "prod-arroz-arboreo", origem: "manual", quantidade_inicial: 8, quantidade_atual: 8, data_entrada: soData(diasAtras(18)), validade: soData(diasAFrente(162)), criado_em: diasAtras(18), atualizado_em: diasAtras(18) },
     { id: "lote-cx-11", produto_id: "prod-bolonhesa", origem: "producao", porcionado_por_id: "perfil-lider", quantidade_inicial: 5, quantidade_atual: 5, data_entrada: soData(diasAtras(4)), validade: soData(diasAFrente(1)), criado_em: diasAtras(4), atualizado_em: diasAtras(4) },
     { id: "lote-cx-12", produto_id: "prod-massa", origem: "producao", porcionado_por_id: "perfil-lider", quantidade_inicial: 6, quantidade_atual: 6, data_entrada: soData(diasAtras(1)), validade: soData(diasAFrente(2)), criado_em: diasAtras(1), atualizado_em: diasAtras(1) },
+    { id: "lote-cx-16", produto_id: "prod-risoto-base", origem: "producao", porcionado_por_id: "perfil-lider", quantidade_inicial: 4, quantidade_atual: 4, data_entrada: soData(diasAtras(2)), validade: soData(diasAFrente(2)), criado_em: diasAtras(2), atualizado_em: diasAtras(2) },
   ],
 
   alocacoes_caixa: [
-    ...[3, 7, 4, 9, 1, 2, 5, 6, 8, 10, 11, 12].map((numero) => {
+    ...[3, 7, 4, 9, 1, 2, 5, 6, 8, 10, 11, 12, 16].map((numero) => {
       const caixa = `cx-${numero}`;
-      const quantidades: Record<number, number> = { 3: 8, 7: 10, 4: 12, 9: 4, 1: 6, 2: 9, 5: 7, 6: 6, 8: 18, 10: 8, 11: 5, 12: 6 };
+      const quantidades: Record<number, number> = { 3: 8, 7: 10, 4: 12, 9: 4, 1: 6, 2: 9, 5: 7, 6: 6, 8: 18, 10: 8, 11: 5, 12: 6, 16: 4 };
       return { id: `aloc-${caixa}`, lote_id: `lote-${caixa}`, caixa_id: caixa, quantidade_inicial: quantidades[numero], quantidade_atual: quantidades[numero], criado_em: diasAtras(1), atualizado_em: diasAtras(1) };
     }),
   ],

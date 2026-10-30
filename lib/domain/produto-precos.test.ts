@@ -9,6 +9,7 @@ import {
   normalizarPrecosCadastroProduto,
   precoEmbalagemDeCustoUso,
   precoReferenciaCotacao,
+  preencherPrecoCompraDaNota,
   sincronizarFatorDoMiolo,
 } from "./produto-precos";
 import type { Produto } from "../types";
@@ -190,6 +191,29 @@ describe("produto-precos", () => {
         })
       )
     ).toBe(100);
+  });
+
+  it("nota sem preço no cadastro: preenche compra e CMV (pacote de 5 kg)", () => {
+    const p = produtoBase({
+      unidade_compra_id: "un-pct",
+      unidade_uso_id: "un-kg",
+      fator_conversao: 5,
+      conteudo_por_subunidade: 5,
+    });
+    expect(preencherPrecoCompraDaNota(p, 119.95)).toBe(true);
+    expect(p.preco_embalagem_compra).toBeCloseTo(119.95, 6);
+    expect(p.custo_unitario).toBeCloseTo(23.99, 6);
+  });
+
+  it("não troca um preço de compra que o produto já tem", () => {
+    const p = produtoBase({
+      fator_conversao: 5,
+      preco_embalagem_compra: 90,
+      custo_unitario: 18,
+    });
+    expect(preencherPrecoCompraDaNota(p, 119.95)).toBe(false);
+    expect(p.preco_embalagem_compra).toBe(90);
+    expect(p.custo_unitario).toBe(18);
   });
 
   it("bacon simples: sem qtd interna, 5 kg na embalagem", () => {

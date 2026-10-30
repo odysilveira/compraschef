@@ -4,6 +4,7 @@ import {
   consolidar,
   gramaturaMassaCruaG,
   lerExport,
+  paraValorMonetario,
   processarMatrizItensVendidos,
   totalDe,
 } from "./saipos-itens-vendidos";
@@ -32,6 +33,13 @@ function matrizHierarquica(): unknown[][] {
 }
 
 describe("saipos-itens-vendidos", () => {
+  it("parseia valores monetários de number e string", () => {
+    expect(paraValorMonetario(39.9)).toBe(39.9);
+    expect(paraValorMonetario("R$ 20,00")).toBe(20);
+    expect(paraValorMonetario("1.234,56")).toBe(1234.56);
+    expect(paraValorMonetario("")).toBe(0);
+  });
+
   it("classifica massa, molho e observação", () => {
     expect(classificarOpcao("Penne Box G (aprox. 800g)").cat).toBe("MASSA");
     expect(classificarOpcao("Bolonhesa Box G").cat).toBe("MOLHO");

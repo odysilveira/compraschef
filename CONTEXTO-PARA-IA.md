@@ -116,7 +116,7 @@ Requer **Node.js**. Neste projeto foi desenvolvido no Windows com Node em
 
 ```bash
 npm install
-npm run dev      # http://localhost:3000 (ou --port 3010)
+npm run dev      # http://localhost:3002 (arquivo Saipos / localStorage desta porta)
 ```
 
 Verificar tipos sem buildar: `npx tsc --noEmit`.

@@ -3,10 +3,20 @@
 // Aba Caixas físicas — requisito 5.
 // Aqui só o cadastro físico (número + QR fixo). Encher/esvaziar acontece na tela Estoque.
 
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Plus, QrCode } from "lucide-react";
 import { Badge, Campo, Modal, Tabela, Vazio } from "@/components/ui";
 import { mutate, nomeLocal, nomeProduto, siglaUnidadeUso, uid, useDB } from "@/lib/data";
+import {
+  DICA_CODIGO_CAIXA,
+  EXEMPLO_CODIGO_CAIXA,
+  inferirZonaDoLocal,
+  localCompativelComCodigo,
+  numeroInternoDoCodigo,
+  sugerirLocalIdParaCodigo,
+  sugerirProximoCodigoCaixa,
+  validarCodigoCaixa,
+} from "@/lib/domain/caixa-codigo";
 import {
   aplicarMetadadosBox,
   ativarDestinacaoOperacional,
@@ -19,9 +29,10 @@ import {
   type TipoBox,
 } from "@/lib/domain/estoque-boxes";
 import { alocacaoAtivaDaCaixa } from "@/lib/domain/estoque";
-import { dataHoraBR, qtd, rotuloValidade } from "@/lib/format";
+import { dataHoraBR, qtd } from "@/lib/format";
+import { RotuloValidade } from "@/components/ui";
 import type { Caixa, StatusCaixa } from "@/lib/types";
-import { BarraBusca, contem, numOpcional, RodapeFormulario } from "./comum";
+import { BarraBusca, contem, RodapeFormulario } from "./comum";
 
 const ROTULO_STATUS: Record<StatusCaixa, string> = {
   vazia: "Vazia",
@@ -76,32 +87,110 @@ export function AbaCaixas() {
   const [confirmacaoEncerramento, setConfirmacaoEncerramento] = useState(false);
   const [erroDestinacao, setErroDestinacao] = useState<string | null>(null);
 
-  const lista = db.caixas
-    .filter((c) => {
-      if (filtroTipo && c.tipo_box !== filtroTipo) return false;
-      return contem(
-        busca,
-        c.numero,
-        c.qr_code,
-        nomeProduto(db, c.produto_id),
-        ROTULO_STATUS[c.status],
-        ROTULO_TIPO_BOX[c.tipo_box],
-        ROTULO_POSICAO_BOX[c.posicao_fisica]
-      );
-    })
-    .sort((a, b) => a.numero - b.numero);
+  const lista = useMemo(() => {
+    return db.caixas
+      .filter((c) => {
+        if (filtroTipo && c.tipo_box !== filtroTipo) return false;
+        return contem(
+          busca,
+          c.numero,
+          c.qr_code,
+          nomeProduto(db, c.produto_id),
+          nomeLocal(db, c.local_id),
+          ROTULO_STATUS[c.status],
+          ROTULO_TIPO_BOX[c.tipo_box],
+          ROTULO_POSICAO_BOX[c.posicao_fisica]
+        );
+      })
+      .sort((a, b) => {
+        const la = nomeLocal(db, a.local_id);
+        const lb = nomeLocal(db, b.local_id);
+        return la.localeCompare(lb, "pt-BR") || a.qr_code.localeCompare(b.qr_code) || a.numero - b.numero;
+      });
+  }, [db, busca, filtroTipo]);
+
+  const listaPorLocal = useMemo(() => {
+    const grupos = new Map<string, Caixa[]>();
+    for (const c of lista) {
+      const chave = c.local_id || "__sem_local__";
+      const arr = grupos.get(chave) ?? [];
+      arr.push(c);
+      grupos.set(chave, arr);
+    }
+    return Array.from(grupos.entries()).map(([localId, caixas]) => ({
+      localId,
+      rotulo: localId === "__sem_local__" ? "Sem local" : nomeLocal(db, localId),
+      caixas,
+    }));
+  }, [db, lista]);
 
   function novaCaixa(): Caixa {
-    const proximoNumero = db.caixas.reduce((max, c) => Math.max(max, c.numero), 0) + 1;
+    const localPadrao =
+      db.locais.find((l) => l.id === "loc-freezer1") ?? db.locais.find((l) => l.tipo === "freezer");
+    const zona = inferirZonaDoLocal(localPadrao) ?? { zona: "F" as const, equipamento: 1 };
+    const qr = sugerirProximoCodigoCaixa(
+      db.caixas.map((c) => c.qr_code),
+      {
+        zona: zona.zona,
+        equipamento: zona.equipamento ?? 1,
+        papel: zona.zona === "F" ? "R" : undefined,
+      }
+    );
+    const parseado = validarCodigoCaixa(qr);
+    const numero = parseado.ok ? numeroInternoDoCodigo(parseado.parseado) : 1;
     return {
       id: "",
-      numero: proximoNumero,
-      qr_code: `CXCHEF-${String(proximoNumero).padStart(3, "0")}`,
-      tipo_box: "NAO_CLASSIFICADO",
+      numero,
+      qr_code: qr,
+      tipo_box: parseado.ok ? parseado.parseado.tipo_box : "RESERVA",
       posicao_fisica: "NAO_INFORMADA",
       status: "vazia",
+      local_id: localPadrao?.id,
       atualizado_em: new Date().toISOString(),
     };
+  }
+
+  function aplicarCodigoNoForm(qrRaw: string, manterLocal: boolean) {
+    if (!form) return;
+    const v = validarCodigoCaixa(qrRaw);
+    if (!v.ok) {
+      setForm({ ...form, qr_code: qrRaw });
+      return;
+    }
+    const localSugerido = sugerirLocalIdParaCodigo(v.parseado, db.locais);
+    setForm({
+      ...form,
+      qr_code: v.parseado.codigo,
+      tipo_box: v.parseado.tipo_box,
+      numero: numeroInternoDoCodigo(v.parseado),
+      local_id: manterLocal && form.local_id ? form.local_id : localSugerido ?? form.local_id,
+    });
+  }
+
+  function aoMudarLocal(localId: string) {
+    if (!form) return;
+    const local = db.locais.find((l) => l.id === localId);
+    const zona = inferirZonaDoLocal(local);
+    if (!zona) {
+      setForm({ ...form, local_id: localId || undefined });
+      return;
+    }
+    const qr = sugerirProximoCodigoCaixa(
+      db.caixas.filter((c) => c.id !== form.id).map((c) => c.qr_code),
+      {
+        zona: zona.zona,
+        equipamento: zona.equipamento ?? 1,
+        papel: zona.zona === "F" ? (form.tipo_box === "OPERACIONAL" ? "O" : "R") : undefined,
+      }
+    );
+    const v = validarCodigoCaixa(qr);
+    setForm({
+      ...form,
+      local_id: localId || undefined,
+      qr_code: v.ok ? v.parseado.codigo : qr,
+      tipo_box: v.ok ? v.parseado.tipo_box : form.tipo_box,
+      numero: v.ok ? numeroInternoDoCodigo(v.parseado) : form.numero,
+    });
   }
 
   function abrirFormulario(caixa: Caixa) {
@@ -206,20 +295,50 @@ export function AbaCaixas() {
       window.alert("Alteração de local físico bloqueada: box com conteúdo ou alocação ativa deve ser movimentado por fluxo próprio.");
       return;
     }
+    const codigo = validarCodigoCaixa(form.qr_code);
+    if (!codigo.ok) {
+      window.alert(codigo.erro);
+      return;
+    }
+    if (!form.local_id) {
+      window.alert("Informe o local físico da caixa (Freezer 1, Geladeira 2, Estoque seco…).");
+      return;
+    }
+    const local = db.locais.find((l) => l.id === form.local_id);
+    if (!localCompativelComCodigo(codigo.parseado, local)) {
+      window.alert(
+        `O código ${codigo.parseado.codigo} não combina com o local “${local?.nome ?? form.local_id}”. Ajuste o código ou o local.`
+      );
+      return;
+    }
+    if (
+      db.caixas.some(
+        (c) => c.id !== form.id && c.qr_code.toUpperCase() === codigo.parseado.codigo.toUpperCase()
+      )
+    ) {
+      window.alert(`Já existe uma caixa com o código ${codigo.parseado.codigo}.`);
+      return;
+    }
+    const payload = {
+      ...form,
+      qr_code: codigo.parseado.codigo,
+      tipo_box: codigo.parseado.tipo_box,
+      numero: numeroInternoDoCodigo(codigo.parseado),
+    };
     mutate((banco) => {
-      if (form.id) {
-        const i = banco.caixas.findIndex((c) => c.id === form.id);
+      if (payload.id) {
+        const i = banco.caixas.findIndex((c) => c.id === payload.id);
         if (i >= 0) {
           banco.caixas[i] = aplicarMetadadosBox(banco.caixas[i], {
-            numero: form.numero,
-            qr_code: form.qr_code,
-            tipo_box: form.tipo_box,
-            posicao_fisica: form.posicao_fisica,
-            local_id: form.local_id,
+            numero: payload.numero,
+            qr_code: payload.qr_code,
+            tipo_box: payload.tipo_box,
+            posicao_fisica: payload.posicao_fisica,
+            local_id: payload.local_id,
           });
         }
       } else {
-        banco.caixas.push({ ...form, id: uid("cx"), atualizado_em: new Date().toISOString() });
+        banco.caixas.push({ ...payload, id: uid("cx"), atualizado_em: new Date().toISOString() });
       }
     });
     setForm(null);
@@ -241,7 +360,7 @@ export function AbaCaixas() {
   return (
     <div>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-        <BarraBusca valor={busca} onMudar={setBusca} placeholder="Buscar por número, QR, produto…" />
+        <BarraBusca valor={busca} onMudar={setBusca} placeholder="Buscar por código, local, produto…" />
         <select className="campo mb-4 min-w-[220px]" value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value as TipoBox | "") }>
           <option value="">Todos os tipos de box</option>
           {(Object.keys(ROTULO_TIPO_BOX) as TipoBox[]).map((tipo) => (
@@ -263,99 +382,74 @@ export function AbaCaixas() {
       ) : (
         <>
           <div className="card mb-3 p-3 text-sm text-slate-600">
-            <p className="font-semibold text-slate-800">Classificação lógica dos boxes</p>
-            <p>Reserva: estoque armazenado.</p>
-            <p>Operacional: saldo contínuo para consumo.</p>
-            <p>Quarentena: boxes em Quarentena são excluídos da reposição e do FEFO. A classificação não altera o saldo por si só.</p>
-            <p>Não classificado: caixa ainda não adaptada ao novo modelo.</p>
+            <p className="font-semibold text-slate-800">Códigos por zona</p>
+            <p>{DICA_CODIGO_CAIXA}</p>
+            <p className="mt-1">Reserva (R): estoque. Operacional (O): só freezer, uso do dia. Geladeira e estoque seco não usam O.</p>
             <p className="mt-2 rounded-card border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
-              A classificação organiza o fluxo físico. A destinação operacional define o produto alvo de um Box Operacional sem alterar saldo por si só.
+              Cada caixa precisa de local. A destinação operacional define o produto alvo do Box Operacional sem alterar saldo.
             </p>
           </div>
 
-          <div className="card p-0 sm:p-2">
-            <Tabela cabecalho={["Nº", "QR code", "Tipo", "Posição", "Status", "Conteúdo", "Local"]}>
-            {lista.map((c) => (
-              <tr
-                key={c.id}
-                className="cursor-pointer transition-colors hover:bg-slate-50"
-                onClick={() => abrirFormulario(c)}
-              >
-                <td className="px-3 py-2.5 font-semibold">{c.numero}</td>
-                <td className="whitespace-nowrap px-3 py-2.5">
-                  <span className="inline-flex items-center gap-1.5 text-slate-600">
-                    <QrCode size={14} /> {c.qr_code}
+          <div className="space-y-4">
+            {listaPorLocal.map((grupo) => (
+              <div key={grupo.localId} className="card p-0 sm:p-2">
+                <p className="border-b border-stone-100 px-3 py-2 text-sm font-semibold text-stone-800">
+                  {grupo.rotulo}{" "}
+                  <span className="font-normal text-stone-500">
+                    · {grupo.caixas.map((c) => c.qr_code).join(", ")}
                   </span>
-                </td>
-                <td className="px-3 py-2.5">
-                  <BadgeTipoBox tipo={c.tipo_box} />
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-600">{ROTULO_POSICAO_BOX[c.posicao_fisica]}</td>
-                <td className="px-3 py-2.5">
-                  <BadgeStatus status={c.status} />
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5">
-                  {c.produto_id
-                    ? `${nomeProduto(db, c.produto_id)} · ${qtd(c.quantidade, siglaUnidadeUso(db, c.produto_id))}`
-                    : "—"}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5">{nomeLocal(db, c.local_id)}</td>
-              </tr>
+                </p>
+                <Tabela cabecalho={["Código", "Tipo", "Posição", "Status", "Conteúdo"]}>
+                  {grupo.caixas.map((c) => (
+                    <tr
+                      key={c.id}
+                      className="cursor-pointer transition-colors hover:bg-slate-50"
+                      onClick={() => abrirFormulario(c)}
+                    >
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        <span className="inline-flex items-center gap-1.5 font-semibold text-slate-800">
+                          <QrCode size={14} /> {c.qr_code}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <BadgeTipoBox tipo={c.tipo_box} />
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-600">
+                        {ROTULO_POSICAO_BOX[c.posicao_fisica]}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <BadgeStatus status={c.status} />
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        {c.produto_id
+                          ? `${nomeProduto(db, c.produto_id)} · ${qtd(c.quantidade, siglaUnidadeUso(db, c.produto_id))}`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </Tabela>
+              </div>
             ))}
-            </Tabela>
           </div>
         </>
       )}
 
       <Modal
         aberto={form !== null}
-        titulo={form?.id ? `Caixa nº ${form.numero}` : "Nova caixa"}
+        titulo={form?.id ? `Caixa ${form.qr_code}` : "Nova caixa"}
         onFechar={() => setForm(null)}
       >
         {form && (
           <form onSubmit={salvar} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Campo rotulo="Número *">
-              <input
-                type="number"
-                min={1}
-                required
-                className="campo"
-                value={form.numero}
-                onChange={(e) => setForm({ ...form, numero: numOpcional(e.target.value) ?? 0 })}
-              />
-            </Campo>
-            <Campo rotulo="QR code (fixo, colado na caixa) *">
-              <input
-                className="campo"
-                required
-                placeholder="ex.: CXCHEF-015"
-                value={form.qr_code}
-                onChange={(e) => setForm({ ...form, qr_code: e.target.value })}
-              />
-            </Campo>
-
-            <Campo rotulo="Tipo do box *">
-              <select className="campo" value={form.tipo_box} onChange={(e) => setForm({ ...form, tipo_box: e.target.value as TipoBox })}>
-                {(Object.keys(ROTULO_TIPO_BOX) as TipoBox[]).map((tipo) => (
-                  <option key={tipo} value={tipo}>{ROTULO_TIPO_BOX[tipo]}</option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Posição física *">
-              <select className="campo" value={form.posicao_fisica} onChange={(e) => setForm({ ...form, posicao_fisica: e.target.value as PosicaoFisicaBox })}>
-                {(Object.keys(ROTULO_POSICAO_BOX) as PosicaoFisicaBox[]).map((posicao) => (
-                  <option key={posicao} value={posicao}>{ROTULO_POSICAO_BOX[posicao]}</option>
-                ))}
-              </select>
-            </Campo>
-            <Campo rotulo="Local físico">
+            <Campo rotulo="Local físico *">
               <select
                 className="campo"
                 value={form.local_id ?? ""}
                 disabled={!podeAlterarLocalFisico}
-                onChange={(e) => setForm({ ...form, local_id: e.target.value || undefined })}
+                required
+                onChange={(e) => aoMudarLocal(e.target.value)}
               >
-                <option value="">Sem local</option>
+                <option value="">Escolha o local…</option>
                 {db.locais.map((local) => (
                   <option key={local.id} value={local.id}>{local.nome}</option>
                 ))}
@@ -363,6 +457,76 @@ export function AbaCaixas() {
               {!podeAlterarLocalFisico && (
                 <p className="mt-1 text-xs text-slate-500">Box com conteúdo ou alocação ativa deve mudar de local por fluxo próprio.</p>
               )}
+            </Campo>
+            <Campo rotulo="Código / QR (etiqueta) *">
+              <input
+                className="campo font-semibold uppercase tracking-wide"
+                required
+                placeholder={`ex.: ${EXEMPLO_CODIGO_CAIXA}`}
+                value={form.qr_code}
+                onChange={(e) => aplicarCodigoNoForm(e.target.value, true)}
+                onBlur={(e) => aplicarCodigoNoForm(e.target.value, true)}
+              />
+              {(() => {
+                const v = validarCodigoCaixa(form.qr_code);
+                if (!form.qr_code.trim()) {
+                  return <p className="mt-1 text-xs text-slate-500">{DICA_CODIGO_CAIXA}</p>;
+                }
+                if (!v.ok) {
+                  return <p className="mt-1 text-xs text-erro">{v.erro}</p>;
+                }
+                return (
+                  <p className="mt-1 text-xs text-sucesso">
+                    OK — {v.parseado.codigo} · {ROTULO_TIPO_BOX[v.parseado.tipo_box]}
+                  </p>
+                );
+              })()}
+            </Campo>
+
+            <Campo rotulo="Tipo do box">
+              <input className="campo" value={ROTULO_TIPO_BOX[form.tipo_box]} readOnly />
+              <p className="mt-1 text-xs text-slate-500">Definido pelo código (R = reserva, O = operacional).</p>
+              {inferirZonaDoLocal(db.locais.find((l) => l.id === form.local_id))?.zona === "F" && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    className={form.tipo_box === "RESERVA" ? "btn-primario" : "btn-secundario"}
+                    onClick={() => {
+                      const zona = inferirZonaDoLocal(db.locais.find((l) => l.id === form.local_id));
+                      if (!zona) return;
+                      const qr = sugerirProximoCodigoCaixa(
+                        db.caixas.filter((c) => c.id !== form.id).map((c) => c.qr_code),
+                        { zona: "F", equipamento: zona.equipamento ?? 1, papel: "R" }
+                      );
+                      aplicarCodigoNoForm(qr, true);
+                    }}
+                  >
+                    Reserva (R)
+                  </button>
+                  <button
+                    type="button"
+                    className={form.tipo_box === "OPERACIONAL" ? "btn-primario" : "btn-secundario"}
+                    onClick={() => {
+                      const zona = inferirZonaDoLocal(db.locais.find((l) => l.id === form.local_id));
+                      if (!zona) return;
+                      const qr = sugerirProximoCodigoCaixa(
+                        db.caixas.filter((c) => c.id !== form.id).map((c) => c.qr_code),
+                        { zona: "F", equipamento: zona.equipamento ?? 1, papel: "O" }
+                      );
+                      aplicarCodigoNoForm(qr, true);
+                    }}
+                  >
+                    Operacional (O)
+                  </button>
+                </div>
+              )}
+            </Campo>
+            <Campo rotulo="Posição física *">
+              <select className="campo" value={form.posicao_fisica} onChange={(e) => setForm({ ...form, posicao_fisica: e.target.value as PosicaoFisicaBox })}>
+                {(Object.keys(ROTULO_POSICAO_BOX) as PosicaoFisicaBox[]).map((posicao) => (
+                  <option key={posicao} value={posicao}>{ROTULO_POSICAO_BOX[posicao]}</option>
+                ))}
+              </select>
             </Campo>
 
             {form.tipo_box === "OPERACIONAL" && (
@@ -416,7 +580,7 @@ export function AbaCaixas() {
                   </Campo>
                 </div>
                 <p className="mt-2 text-sm text-slate-600">
-                  Número permanente: {form.numero}. QR permanente: {form.qr_code}.
+                  Código permanente da etiqueta: {form.qr_code}.
                 </p>
                 {form.produto_operacional_alvo_id && (
                   <p className="mt-2 text-sm text-slate-600">
@@ -489,7 +653,9 @@ export function AbaCaixas() {
                   <dt className="text-slate-500">Quantidade</dt>
                   <dd>{qtd(form.quantidade, siglaUnidadeUso(db, form.produto_id))}</dd>
                   <dt className="text-slate-500">Validade</dt>
-                  <dd>{rotuloValidade(form.validade)}</dd>
+                  <dd>
+                    <RotuloValidade iso={form.validade} />
+                  </dd>
                   <dt className="text-slate-500">Local</dt>
                   <dd>{nomeLocal(db, form.local_id)}</dd>
                 </dl>

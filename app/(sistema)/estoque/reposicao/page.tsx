@@ -40,6 +40,7 @@ import {
 } from "@/lib/domain/operacao-boxes";
 import { produtoOperacionalEfetivo, ROTULO_POSICAO_BOX, ROTULO_TIPO_BOX } from "@/lib/domain/estoque-boxes";
 import { localizarBoxParaPreviaManual, resolverPreviaManualBox } from "@/lib/domain/previa-qr-box";
+import { parseCodigoCaixa } from "@/lib/domain/caixa-codigo";
 
 type AbaOperacao = "abertura" | "reposicao" | "fechamento" | "divergencias" | "historico";
 type OrigemPreenchimento = "nao_lido" | "digitado" | "colado" | "leitura";
@@ -183,6 +184,26 @@ export default function OperacaoDiariaDosBoxesPage() {
   );
   const reposicoesFefo = useMemo(() => (reposicaoProdutoId ? reservasFefoDisponiveis(db, reposicaoProdutoId) : []), [db, reposicaoProdutoId]);
   const reservaSugerida = reposicoesFefo[0];
+
+  /** Manhã proteínas: contar F*-O* e repor FEFO de F*-R*. */
+  const painelManhaProteinas = useMemo(() => {
+    const operacionais = db.caixas
+      .filter((c) => {
+        if (c.tipo_box === "OPERACIONAL") return true;
+        const p = parseCodigoCaixa(c.qr_code);
+        return p?.zona === "F" && p.papel === "O";
+      })
+      .sort((a, b) => a.qr_code.localeCompare(b.qr_code));
+    const reservasFreezer = db.caixas
+      .filter((c) => {
+        if (c.tipo_box === "QUARENTENA") return false;
+        const p = parseCodigoCaixa(c.qr_code);
+        if (p?.zona === "F" && p.papel === "R") return (c.quantidade ?? 0) > 0;
+        return c.tipo_box === "RESERVA" && Boolean(c.local_id?.includes("freezer")) && (c.quantidade ?? 0) > 0;
+      })
+      .sort((a, b) => (a.validade ?? "").localeCompare(b.validade ?? "") || a.qr_code.localeCompare(b.qr_code));
+    return { operacionais, reservasFreezer };
+  }, [db]);
 
   const historicoFiltrado = useMemo(
     () =>
@@ -539,6 +560,89 @@ export default function OperacaoDiariaDosBoxesPage() {
     <div className="space-y-4">
       <TituloPagina titulo="Operação diária dos Boxes" subtitulo="Abertura, reposição, fechamento, divergências e histórico por QR" />
 
+      <Card className="space-y-3 border-2 border-primaria/20 bg-slate-50">
+        <p className="font-bold text-stone-800">Manhã — proteínas (freezer)</p>
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-stone-700">
+          <li>
+            Conte o operacional (<span className="font-semibold">F*-O*</span>) — sobra de ontem.
+          </li>
+          <li>
+            Transfira FEFO da reserva (<span className="font-semibold">F*-R*</span>) → operacional a quantidade do dia.
+          </li>
+          <li>
+            Geladeira (<span className="font-semibold">G*</span>) e seco (<span className="font-semibold">ES*</span>): uso/baixa direto na caixa, sem box operacional.
+          </li>
+        </ol>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-card bg-white p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Operacional para contar</p>
+            {painelManhaProteinas.operacionais.length === 0 ? (
+              <p className="text-sm text-stone-500">Nenhum F*-O* cadastrado.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {painelManhaProteinas.operacionais.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      className="w-full rounded-card px-2 py-1.5 text-left text-sm hover:bg-slate-50"
+                      onClick={() => {
+                        setAba("abertura");
+                        selecionarManualAbertura(c.qr_code, "digitado");
+                      }}
+                    >
+                      <span className="font-semibold tracking-wide">{c.qr_code}</span>
+                      <span className="ml-2 text-stone-600">
+                        {c.status === "vazia"
+                          ? "vazia"
+                          : `${nomeProduto(db, c.produto_id || c.produto_operacional_alvo_id)} · ${qtd(c.quantidade, siglaUnidadeUso(db, c.produto_id || c.produto_operacional_alvo_id))}`}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-stone-500">{nomeLocal(db, c.local_id)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="rounded-card bg-white p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Reserva FEFO (F*-R*)</p>
+            {painelManhaProteinas.reservasFreezer.length === 0 ? (
+              <p className="text-sm text-stone-500">Nenhuma reserva com saldo no freezer.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {painelManhaProteinas.reservasFreezer.slice(0, 8).map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      className="w-full rounded-card px-2 py-1.5 text-left text-sm hover:bg-slate-50"
+                      onClick={() => {
+                        setAba("reposicao");
+                        selecionarManualReposicao(c.qr_code, "origem", "digitado");
+                      }}
+                    >
+                      <span className="font-semibold tracking-wide">{c.qr_code}</span>
+                      <span className="ml-2 text-stone-600">
+                        {nomeProduto(db, c.produto_id)} · {qtd(c.quantidade, siglaUnidadeUso(db, c.produto_id))}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-stone-500">
+                        val. {dataBR(c.validade)} · {nomeLocal(db, c.local_id)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-primario" onClick={() => setAba("abertura")}>
+            1. Contar operacional
+          </button>
+          <button type="button" className="btn-secundario" onClick={() => setAba("reposicao")}>
+            2. Transferir reserva → operacional
+          </button>
+        </div>
+      </Card>
+
       <Card className="space-y-3">
         <div className="flex flex-wrap gap-2">
           <button className={aba === "abertura" ? "btn-primario" : "btn-secundario"} onClick={() => setAba("abertura")}>
@@ -589,7 +693,7 @@ export default function OperacaoDiariaDosBoxesPage() {
                   event.preventDefault();
                 }}
                 onChange={(event) => selecionarManualAbertura(event.target.value, "digitado")}
-                placeholder="QR da abertura"
+                placeholder="ex.: F1-O01"
               />
               <p className={`rounded-card px-2 py-1 text-xs font-semibold ${classesSelo(estadoSelo(aberturaQr, aberturaConfirmacao, Boolean(aberturaBox)))}`}>
                 {rotuloSelo(estadoSelo(aberturaQr, aberturaConfirmacao, Boolean(aberturaBox)), "Origem")}
@@ -602,7 +706,7 @@ export default function OperacaoDiariaDosBoxesPage() {
             <div className="space-y-2 rounded-card bg-slate-50 p-3">
               <p className="text-sm font-semibold">Fechamento anterior</p>
               <p className="text-lg font-bold">{qtd(aberturaEsperado, aberturaUnidade)}</p>
-              <p className="text-sm text-slate-600">Box: {aberturaBox ? `nº ${aberturaBox.numero}` : "—"}</p>
+              <p className="text-sm text-slate-600">Box: {aberturaBox ? aberturaBox.qr_code : "—"}</p>
               <p className="text-sm text-slate-600">Produto/porcionamento: {aberturaProdutoId ? nomeProduto(db, aberturaProdutoId) : "Sem destinação — configure antes da operação."}</p>
               <p className="text-sm text-slate-600">Diferença na abertura: {qtd(aberturaResultadoDiferenca, aberturaUnidade)}</p>
             </div>
@@ -679,7 +783,7 @@ export default function OperacaoDiariaDosBoxesPage() {
                   event.preventDefault();
                 }}
                 onChange={(event) => selecionarManualReposicao(event.target.value, "origem", "digitado")}
-                placeholder="QR da origem"
+                placeholder="ex.: F1-R01"
               />
               <p className={`rounded-card px-2 py-1 text-xs font-semibold ${classesSelo(estadoSelo(reposicaoOrigemQr, reposicaoConfirmacaoOrigem, Boolean(reposicaoOrigem)))}`}>
                 {rotuloSelo(estadoSelo(reposicaoOrigemQr, reposicaoConfirmacaoOrigem, Boolean(reposicaoOrigem)), "Origem")}
@@ -697,7 +801,7 @@ export default function OperacaoDiariaDosBoxesPage() {
                   event.preventDefault();
                 }}
                 onChange={(event) => selecionarManualReposicao(event.target.value, "destino", "digitado")}
-                placeholder="QR do destino"
+                placeholder="ex.: F1-O01"
               />
               <p className={`rounded-card px-2 py-1 text-xs font-semibold ${classesSelo(estadoSelo(reposicaoDestinoQr, reposicaoConfirmacaoDestino, Boolean(reposicaoDestino)))}`}>
                 {rotuloSelo(estadoSelo(reposicaoDestinoQr, reposicaoConfirmacaoDestino, Boolean(reposicaoDestino)), "Destino")}

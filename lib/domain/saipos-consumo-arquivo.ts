@@ -5,14 +5,28 @@ import type {
   ResultadoConsolidadoSaipos,
 } from "./saipos-itens-vendidos";
 import { montarTabelas } from "./saipos-itens-vendidos";
+import {
+  abasVendasSaipos,
+  agregarVendasSaipos,
+  parseVendasSaipos,
+  type VendasSaipos,
+} from "./saipos-vendas";
 
 export const SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY = "integracao-saipos:consumo-arquivo:v1";
+/** Cópia do último estado válido — recupera se a chave principal sumir ou for apagada. */
+export const SAIPOS_CONSUMO_ARQUIVO_BACKUP_KEY = "integracao-saipos:consumo-arquivo:v1:backup";
 
 export type PeriodoSaiposIso = {
   inicio: string;
   fim: string;
   /** Texto de exibição, ex.: "01/10/2026 a 31/10/2026". */
   rotulo: string;
+};
+
+export type BaixaEstoqueArquivoSaipos = {
+  aplicada_em: string;
+  movimento_ids: string[];
+  resumo: { produto_id: string; nome: string; quantidade_kg: number }[];
 };
 
 export type ArquivoConsumoSaipos = {
@@ -28,6 +42,10 @@ export type ArquivoConsumoSaipos = {
   total_itens: number;
   total_opcoes: number;
   resultado: ResultadoConsolidadoSaipos;
+  /** Ausente em arquivos antigos (só consumo teórico). */
+  vendas?: VendasSaipos;
+  /** Idempotência: baixa de acabados já aplicada neste mês. */
+  baixa_estoque?: BaixaEstoqueArquivoSaipos;
 };
 
 export type SaiposConsumoArquivoState = {
@@ -60,7 +78,10 @@ const MAPAS_NUMERICOS: (keyof ResultadoConsolidadoSaipos)[] = [
 
 function storageBrowser(): StorageLike | null {
   try {
-    return globalThis.localStorage;
+    if (typeof globalThis === "undefined") return null;
+    const ls = (globalThis as { localStorage?: StorageLike }).localStorage;
+    if (!ls || typeof ls.getItem !== "function" || typeof ls.setItem !== "function") return null;
+    return ls;
   } catch {
     return null;
   }
@@ -216,6 +237,22 @@ export function parseEstadoArquivoConsumo(raw: unknown): SaiposConsumoArquivoSta
     const a = item as Partial<ArquivoConsumoSaipos>;
     if (!a.mes_ref || !mesRefValido(String(a.mes_ref))) continue;
     if (!ehResultado(a.resultado)) continue;
+    const vendas = parseVendasSaipos(a.vendas);
+    const baixaRaw = a.baixa_estoque;
+    let baixa_estoque: BaixaEstoqueArquivoSaipos | undefined;
+    if (baixaRaw && typeof baixaRaw === "object" && Array.isArray(baixaRaw.movimento_ids)) {
+      baixa_estoque = {
+        aplicada_em: String(baixaRaw.aplicada_em || ""),
+        movimento_ids: baixaRaw.movimento_ids.map(String),
+        resumo: Array.isArray(baixaRaw.resumo)
+          ? baixaRaw.resumo.map((r) => ({
+              produto_id: String((r as { produto_id?: string }).produto_id || ""),
+              nome: String((r as { nome?: string }).nome || ""),
+              quantidade_kg: Number((r as { quantidade_kg?: number }).quantidade_kg) || 0,
+            }))
+          : [],
+      };
+    }
     arquivos.push({
       id: String(a.id || `saipos-${a.mes_ref}`),
       mes_ref: String(a.mes_ref),
@@ -228,6 +265,8 @@ export function parseEstadoArquivoConsumo(raw: unknown): SaiposConsumoArquivoSta
       total_itens: Number(a.total_itens) || 0,
       total_opcoes: Number(a.total_opcoes) || 0,
       resultado: a.resultado,
+      ...(vendas ? { vendas } : {}),
+      ...(baixa_estoque ? { baixa_estoque } : {}),
     });
   }
   // Um arquivo por mês (último ganha se houver duplicata).
@@ -259,6 +298,7 @@ export function relatorioParaArquivoMes(
     total_itens: relatorio.totalItens,
     total_opcoes: relatorio.totalOpcoes,
     resultado: relatorio.resultado,
+    ...(relatorio.vendas ? { vendas: relatorio.vendas } : {}),
   };
 }
 
@@ -267,13 +307,16 @@ export function arquivoParaRelatorio(
   db?: Parameters<typeof montarTabelas>[4]
 ): RelatorioItensVendidosSaipos {
   const periodo = arquivo.periodo_rotulo;
+  const vendas = arquivo.vendas;
+  const abasTeoricas = montarTabelas(arquivo.resultado, arquivo.nome_arquivo, arquivo.formato, periodo, db);
   return {
     resultado: arquivo.resultado,
+    vendas,
     formato: arquivo.formato,
     periodo,
     totalItens: arquivo.total_itens,
     totalOpcoes: arquivo.total_opcoes,
-    abas: montarTabelas(arquivo.resultado, arquivo.nome_arquivo, arquivo.formato, periodo, db),
+    abas: [...(vendas ? abasVendasSaipos(vendas) : []), ...abasTeoricas],
     nomeArquivo: arquivo.nome_arquivo,
   };
 }
@@ -312,6 +355,8 @@ export function agregarArquivosConsumoSaipos(
   if (arquivos.length === 0) return null;
   const ordenados = [...arquivos].sort((a, b) => a.mes_ref.localeCompare(b.mes_ref));
   const resultado = agregarResultadosConsumoSaipos(ordenados.map((a) => a.resultado));
+  const vendasLista = ordenados.map((a) => a.vendas).filter((v): v is VendasSaipos => Boolean(v));
+  const vendas = vendasLista.length ? agregarVendasSaipos(vendasLista) : undefined;
   const mesesIncluidos = ordenados.map((a) => a.mes_ref);
   const periodo =
     ordenados.length === 1
@@ -323,33 +368,96 @@ export function agregarArquivosConsumoSaipos(
       : `Agregado ${mesesIncluidos[0]} a ${mesesIncluidos[mesesIncluidos.length - 1]}`;
   const totalItens = ordenados.reduce((s, a) => s + a.total_itens, 0);
   const totalOpcoes = ordenados.reduce((s, a) => s + a.total_opcoes, 0);
+  const abasTeoricas = montarTabelas(resultado, nomeArquivo, ordenados[0].formato, periodo, db);
   return {
     resultado,
+    vendas,
     formato: ordenados[0].formato,
     periodo,
     totalItens,
     totalOpcoes,
-    abas: montarTabelas(resultado, nomeArquivo, ordenados[0].formato, periodo, db),
+    abas: [...(vendas ? abasVendasSaipos(vendas) : []), ...abasTeoricas],
     nomeArquivo,
     mesesIncluidos,
   };
 }
 
-export function criarSaiposConsumoArquivoRepository(storage: StorageLike | null = storageBrowser()) {
+export function criarSaiposConsumoArquivoRepository(storage?: StorageLike | null) {
+  /** Resolve na hora (nunca “prende” localStorage=null do SSR). */
+  function resolveStorage(): StorageLike | null {
+    if (storage !== undefined) return storage;
+    return storageBrowser();
+  }
+
+  function lerBruto(s: StorageLike): string | null {
+    const principal = s.getItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY);
+    if (principal) return principal;
+    return s.getItem(SAIPOS_CONSUMO_ARQUIVO_BACKUP_KEY);
+  }
+
   function carregar(): SaiposConsumoArquivoState {
-    if (!storage) return criarEstadoArquivoConsumoVazio();
+    const s = resolveStorage();
+    if (!s) return criarEstadoArquivoConsumoVazio();
     try {
-      const raw = storage.getItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY);
+      const raw = lerBruto(s);
       if (!raw) return criarEstadoArquivoConsumoVazio();
-      return parseEstadoArquivoConsumo(JSON.parse(raw) as unknown);
+      const parsed = parseEstadoArquivoConsumo(JSON.parse(raw) as unknown);
+      // Se só o backup tinha dados, reinsere na chave principal.
+      if (parsed.arquivos.length > 0 && !s.getItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY)) {
+        try {
+          s.setItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY, JSON.stringify(parsed));
+        } catch {
+          // quota — segue com o que leu do backup
+        }
+      }
+      return parsed;
     } catch {
       return criarEstadoArquivoConsumoVazio();
     }
   }
 
   function persistir(state: SaiposConsumoArquivoState) {
-    if (!storage) return;
-    storage.setItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY, JSON.stringify(state));
+    const s = resolveStorage();
+    if (!s) {
+      throw new Error(
+        "Armazenamento local indisponível neste navegador. Os meses não serão guardados após recarregar."
+      );
+    }
+    const nextRaw = JSON.stringify(state);
+    const prevRaw = s.getItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY);
+    if (prevRaw && state.arquivos.length === 0) {
+      try {
+        const prev = parseEstadoArquivoConsumo(JSON.parse(prevRaw) as unknown);
+        if (prev.arquivos.length > 0) {
+          throw new Error(
+            "Bloqueado: gravar arquivo vazio apagaria meses já salvos. Use Remover mês a mês se for intencional."
+          );
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith("Bloqueado:")) throw e;
+      }
+    }
+    // Guarda o estado anterior no backup antes de sobrescrever (se a nova gravação falhar).
+    if (prevRaw) {
+      try {
+        s.setItem(SAIPOS_CONSUMO_ARQUIVO_BACKUP_KEY, prevRaw);
+      } catch {
+        // quota — segue sem backup intermediário
+      }
+    }
+    try {
+      s.setItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY, nextRaw);
+    } catch {
+      throw new Error(
+        "Espaço do navegador cheio ao salvar o arquivo Saipos. Exporte um backup JSON e libere espaço, ou arquive menos meses."
+      );
+    }
+    // Cópia espelhada do estado atual — recupera se a chave principal for apagada.
+    try {
+      s.setItem(SAIPOS_CONSUMO_ARQUIVO_BACKUP_KEY, nextRaw);
+    } catch {
+      // quota — principal já gravou
+    }
   }
 
   function listar(): ArquivoConsumoSaipos[] {
@@ -377,9 +485,57 @@ export function criarSaiposConsumoArquivoRepository(storage: StorageLike | null 
       version: 1,
       arquivos: state.arquivos.filter((a) => a.mes_ref !== mesRef),
     };
+    // Remover o último mês é permitido (lista vazia intencional).
+    const s = resolveStorage();
+    if (!s) {
+      throw new Error("Armazenamento local indisponível neste navegador.");
+    }
+    const nextRaw = JSON.stringify(next);
+    const prevRaw = s.getItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY);
+    if (prevRaw) {
+      try {
+        s.setItem(SAIPOS_CONSUMO_ARQUIVO_BACKUP_KEY, prevRaw);
+      } catch {
+        /* quota */
+      }
+    }
+    try {
+      s.setItem(SAIPOS_CONSUMO_ARQUIVO_STORAGE_KEY, nextRaw);
+    } catch {
+      throw new Error("Não foi possível salvar após remover o mês (espaço do navegador?).");
+    }
+    try {
+      s.setItem(SAIPOS_CONSUMO_ARQUIVO_BACKUP_KEY, nextRaw);
+    } catch {
+      /* quota */
+    }
+    return next;
+  }
+
+  function exportarJson(): string {
+    return JSON.stringify(carregar(), null, 2);
+  }
+
+  function importarJson(raw: string, modo: "mesclar" | "substituir" = "mesclar"): SaiposConsumoArquivoState {
+    const entrante = parseEstadoArquivoConsumo(JSON.parse(raw) as unknown);
+    if (entrante.arquivos.length === 0) {
+      throw new Error("JSON sem meses arquivados válidos.");
+    }
+    if (modo === "substituir") {
+      persistir(entrante);
+      return entrante;
+    }
+    const atual = carregar();
+    const porMes = new Map<string, ArquivoConsumoSaipos>();
+    for (const a of atual.arquivos) porMes.set(a.mes_ref, a);
+    for (const a of entrante.arquivos) porMes.set(a.mes_ref, a);
+    const next: SaiposConsumoArquivoState = {
+      version: 1,
+      arquivos: [...porMes.values()].sort((a, b) => a.mes_ref.localeCompare(b.mes_ref)),
+    };
     persistir(next);
     return next;
   }
 
-  return { carregar, listar, obter, salvar, remover, persistir };
+  return { carregar, listar, obter, salvar, remover, persistir, exportarJson, importarJson };
 }

@@ -61,6 +61,7 @@ const MENU: SecaoMenu[] = [
       { href: "/recebimento", rotulo: "Recebimento", icone: PackageCheck },
       { href: "/estoque", rotulo: "Estoque", icone: Boxes },
       { href: "/estoque/reposicao", rotulo: "Reposição do Box Operacional", icone: Boxes },
+      { href: "/etiquetas", rotulo: "Etiquetas das caixas", icone: QrCode },
     ],
   },
   {

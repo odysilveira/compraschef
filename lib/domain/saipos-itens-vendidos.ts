@@ -5,6 +5,7 @@
 
 import * as XLSX from "xlsx";
 import type { DB } from "@/lib/types";
+import { abasVendasSaipos, montarVendasSaipos, type VendasSaipos } from "./saipos-vendas";
 
 export const MOLHOS = [
   "Cheddar com Carne e Bacon",
@@ -174,6 +175,8 @@ export interface AbaRelatorioSaipos {
 
 export interface RelatorioItensVendidosSaipos {
   resultado: ResultadoConsolidadoSaipos;
+  /** Vendas/faturamento (qtd + R$) — separado do consumo teórico. */
+  vendas?: VendasSaipos;
   formato: FormatoExportSaipos;
   periodo: string | null;
   totalItens: number;
@@ -262,6 +265,44 @@ function paraNumero(v: unknown): number | null {
   return Number.isNaN(n) ? null : Math.round(n);
 }
 
+/**
+ * Lê valor monetário da planilha (número, "39,9", "R$ 1.234,56", etc.).
+ * Antes só aceitava typeof number — strings do Excel/Saipos viravam R$ 0.
+ */
+export function paraValorMonetario(v: unknown): number {
+  if (v === null || v === undefined || v === "") return 0;
+  if (typeof v === "number" && Number.isFinite(v)) return Math.round(v * 100) / 100;
+  let s = String(v).trim();
+  if (!s) return 0;
+  s = s.replace(/r\$\s?/gi, "").replace(/\s/g, "");
+  // 1.234,56 → 1234.56 | 1234.56 permanece
+  if (s.includes(",") && s.includes(".")) {
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (s.includes(",")) {
+    s = s.replace(",", ".");
+  }
+  const n = Number(s.replace(/[^\d.-]/g, ""));
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
+function detectarColunaValor(celulas: string[]): number | null {
+  let col: number | null = null;
+  for (let j = 0; j < celulas.length; j++) {
+    const c = celulas[j];
+    if (!c) continue;
+    if (c.indexOf("valor total") === 0 || c === "valor" || c.indexOf("valor (") === 0) {
+      col = j;
+      break;
+    }
+    if (c.includes("faturamento") || c === "total (r$)" || c === "vl total") {
+      col = j;
+      break;
+    }
+  }
+  return col;
+}
+
 function soma(mapa: Record<string, number>, chaveTxt: string, valor: number): void {
   mapa[chaveTxt] = (mapa[chaveTxt] || 0) + valor;
 }
@@ -272,7 +313,8 @@ export function totalDe(mapa: Record<string, number>): number {
   return t;
 }
 
-function cruzar(pesos: Record<string, number>, quantidades: Record<string, number>): Record<string, number> {
+/** Rateia `quantidades` pelos pesos (usado em molho×massa e pratos montados). */
+export function cruzar(pesos: Record<string, number>, quantidades: Record<string, number>): Record<string, number> {
   const totalPesos = totalDe(pesos);
   const saida: Record<string, number> = {};
   if (!totalPesos) return saida;
@@ -301,8 +343,7 @@ function lerHierarquico(matriz: unknown[][], cfg: ColCfg): GrupoItemSaipos[] {
     if (!nome) continue;
     const q = paraNumero(linha[cfg.qtd]);
     if (q === null) continue;
-    let v = 0;
-    if (cfg.valor !== null && typeof linha[cfg.valor] === "number") v = linha[cfg.valor] as number;
+    const v = cfg.valor !== null ? paraValorMonetario(linha[cfg.valor]) : 0;
     if (eOpcao) {
       if (atual) atual.opcoes.push({ nome, qtd: q, valor: v });
     } else {
@@ -339,8 +380,7 @@ function lerPlano(
       if (!nome || LINHA_IGNORAR.includes(chave(nome))) continue;
       const q = paraNumero(linha[cfg.qtd]);
       if (q === null) continue;
-      let v = 0;
-      if (cfg.valor !== null && typeof linha[cfg.valor] === "number") v = linha[cfg.valor] as number;
+      const v = cfg.valor !== null ? paraValorMonetario(linha[cfg.valor]) : 0;
       regs.push({ nome, qtd: q, valor: v });
     }
     saida[rotulo] = regs;
@@ -367,10 +407,7 @@ export function lerExport(matriz: unknown[][]): {
     const celulas = linha.map((c) => (c === null || c === undefined ? "" : chave(c)));
     const colQtd = celulas.indexOf("quantidade");
     if (colQtd < 0) continue;
-    let colValor: number | null = null;
-    for (let j = 0; j < celulas.length; j++) {
-      if (celulas[j].indexOf("valor total") === 0) colValor = j;
-    }
+    const colValor = detectarColunaValor(celulas);
     for (let j = 0; j < celulas.length; j++) {
       const c = celulas[j];
       if (c === "itens e opcoes" || c === "item e opcao") {
@@ -980,14 +1017,19 @@ export function processarMatrizItensVendidos(
 ): RelatorioItensVendidosSaipos {
   const lido = lerExport(matriz);
   const resultado = consolidar(lido.grupos, lido.soltas);
+  const vendas = montarVendasSaipos(lido.grupos);
   const periodo = lerPeriodo(matriz);
   return {
     resultado,
+    vendas,
     formato: lido.formato,
     periodo,
     totalItens: lido.grupos.length,
     totalOpcoes: lido.grupos.reduce((s, g) => s + g.opcoes.length, 0),
-    abas: montarTabelas(resultado, nomeArquivo, lido.formato, periodo, db),
+    abas: [
+      ...abasVendasSaipos(vendas),
+      ...montarTabelas(resultado, nomeArquivo, lido.formato, periodo, db),
+    ],
     nomeArquivo,
   };
 }

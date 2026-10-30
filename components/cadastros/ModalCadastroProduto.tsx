@@ -29,6 +29,7 @@ import {
   modoMioloEmbalagemAtivo,
   normalizarPrecosCadastroProduto,
   precoEmbalagemDeCustoUso,
+  preencherPrecoCompraDaNota,
   sincronizarFatorDoMiolo,
 } from "@/lib/domain/produto-precos";
 import { sugerirContaDrePorNome } from "@/lib/domain/sugerir-conta-dre-nome";
@@ -62,9 +63,10 @@ function normalizarDecimalDigitado(bruto: string): string {
 }
 
 export type VinculoNotaProduto = {
-  fornecedorId: string;
+  fornecedorId?: string;
   codigoFornecedor?: string;
   ean?: string;
+  /** Preço da unidade comercial nesta NF (pacote / UN / kg da nota). */
   ultimoPreco?: number;
 };
 
@@ -117,6 +119,7 @@ export function ModalCadastroProduto({
       const categoriaPadrao =
         p.categoria_id || categorias.find((c) => c.codigo === "sem-categoria")?.id;
       const novo = { ...p, categoria_id: categoriaPadrao };
+      preencherPrecoCompraDaNota(novo, vinculoNota?.ultimoPreco);
       setForm(novo);
       setQtdInternaTexto(formatarDecimalBr(novo.quantidade_subunidade));
       setConteudoCadaTexto(formatarDecimalBr(novo.conteudo_por_subunidade));
@@ -157,6 +160,8 @@ export function ModalCadastroProduto({
       mediaHistorica,
       precoCompraFornecedor,
     });
+    // Produto já no estoque, sem preço gravado: usa o valor desta NF (pacote / UN).
+    preencherPrecoCompraDaNota(produtoNorm, vinculoNota?.ultimoPreco);
     if (precosEstavamVazios && precosPreenchidos && p.id) {
       mutate((banco) => {
         const alvo = banco.produtos.find((x) => x.id === p.id);

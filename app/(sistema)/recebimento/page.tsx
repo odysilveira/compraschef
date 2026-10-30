@@ -4,7 +4,7 @@
 // Passo 1 — escolher o pedido; Passo 2 — conferência item a item com scanner,
 // foto e divergência; Finalizar — entrada no estoque, nota e boletos.
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -109,7 +109,7 @@ function lerFotoPequena(arquivo: File): Promise<string> {
   });
 }
 
-export default function RecebimentoPage() {
+function RecebimentoConteudo() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const db = useDB();
@@ -1154,5 +1154,13 @@ export default function RecebimentoPage() {
         <PackageCheck size={28} /> Finalizar recebimento
       </button>
     </div>
+  );
+}
+
+export default function RecebimentoPage() {
+  return (
+    <Suspense fallback={null}>
+      <RecebimentoConteudo />
+    </Suspense>
   );
 }

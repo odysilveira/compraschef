@@ -86,7 +86,7 @@ function CadastrosConteudo() {
       link.download = `compraschef-copia-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
-      setMsgBackup(`Cópia baixada: ${resumoCopia(copia)} Leve o arquivo ao outro computador e use Restaurar cópia.`);
+      setMsgBackup(`Cópia baixada: ${resumoCopia(copia)} No outro computador, use Juntar cópia.`);
     } catch (e) {
       setMsgBackup(e instanceof Error ? e.message : "Falha ao baixar a cópia.");
     } finally {
@@ -98,7 +98,7 @@ function CadastrosConteudo() {
     if (!arquivo) return;
     if (
       !window.confirm(
-        "Substituir notas, produtos e arquivos deste navegador pela cópia escolhida?"
+        "Juntar esta cópia com o que já está neste navegador? Nada que só existe aqui será apagado."
       )
     ) {
       return;
@@ -124,14 +124,15 @@ function CadastrosConteudo() {
 
       <div className="mb-4 rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
         <p>
-          Notas, produtos e PDFs ficam neste navegador. O endereço da Vercel não recebe isso
-          sozinho. Baixe a cópia no computador onde você trabalhou (
-          <span className="font-mono">localhost:3002</span>) e restaure em{" "}
-          <span className="font-mono">compraschef.vercel.app</span>, em Cadastros.
+          Notas e produtos ficam no navegador de cada computador. Quando baixar coisa nova no
+          outro, baixe a cópia lá e use <strong>Juntar cópia</strong> aqui. O que só existe num
+          lado entra. A mesma nota não duplica. O que os dois mudaram fica com a versão mais
+          recente; se não houver data, fica o valor deste computador e os campos vazios são
+          preenchidos.
         </p>
         {pareceDemo ? (
           <p className="mt-2">
-            Este endereço ainda está na base de demonstração. Restaure a cópia do outro computador
+            Este endereço ainda está na base de demonstração. Junte a cópia do outro computador
             para ver as notas e os produtos de verdade.
           </p>
         ) : null}
@@ -140,7 +141,7 @@ function CadastrosConteudo() {
             {copiando ? "Preparando…" : "Baixar cópia"}
           </button>
           <label className={`btn-primario ${copiando ? "pointer-events-none opacity-60" : "cursor-pointer"}`}>
-            Restaurar cópia
+            Juntar cópia
             <input
               type="file"
               accept="application/json,.json"
